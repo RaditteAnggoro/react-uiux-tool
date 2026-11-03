@@ -17,7 +17,9 @@ copyright watermark. They contain ordinary React source for the user to maintain
 The implementation uses React and React DOM (MIT), TypeScript (Apache-2.0), Vite (MIT),
 tsx (MIT, development), and Playwright (Apache-2.0, development). Transitive dependency
 licenses remain those of their respective authors; installed package license files
-and the committed lockfile identify exact versions. This notice does not replace them.
+and the committed lockfile identify exact versions. The generated
+[third-party inventory](THIRD_PARTY_NOTICES.md) records every locked package version
+and license identifier. This notice and inventory do not replace upstream license texts.
 
 ## Inspiration & Credits
 
@@ -37,3 +39,6 @@ that their source is bundled. This tool uses TypeScript's compiler API and targe
 source-span replacements, rather than including ts-morph or Recast. Each upstream
 license governs source actually incorporated. In particular, no Plasmic platform
 source or other AGPL implementation was copied into this MIT project.
+
+Read [Inspiration, credits, and independence](INSPIRATION.md) for the complete,
+plain-language record of what each reference contributed to the product brief.

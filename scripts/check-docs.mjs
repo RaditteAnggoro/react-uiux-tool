@@ -10,6 +10,8 @@ const files = [
   "IMPLEMENTATION_STATUS.md",
   "SECURITY.md",
   "NOTICE.md",
+  "INSPIRATION.md",
+  "THIRD_PARTY_NOTICES.md",
   "docs/USER_GUIDE_EN.md",
   "docs/USER_GUIDE_ID.md",
 ];

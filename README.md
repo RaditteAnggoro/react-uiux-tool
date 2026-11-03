@@ -6,6 +6,8 @@ and write validated visual edits directly to source for normal Git review.
 [Bahasa Indonesia](README.id.md) · [English user guide](docs/USER_GUIDE_EN.md) ·
 [Panduan Bahasa Indonesia](docs/USER_GUIDE_ID.md) · [Compatibility](COMPATIBILITY_MATRIX.md) ·
 [Known limitations](KNOWN_LIMITATIONS.md) · [Benchmarks](BENCHMARKS.md) ·
+[License](LICENSE) · [Third-party licenses](THIRD_PARTY_NOTICES.md) ·
+[Inspiration & credits](INSPIRATION.md) ·
 [GitHub](https://github.com/RaditteAnggoro/react-uiux-tool)
 
 Version **0.1.0**, prepared for local testing. The package has not been published to
@@ -171,5 +173,8 @@ Independent work inspired by [Y[wai] / waiVSCode](https://marketplace.visualstud
 [SculptUI](https://github.com/sculptui/vscode), and [Plasmic](https://github.com/plasmicapp/plasmic).
 The design brief also references [ts-morph](https://github.com/dsherret/ts-morph),
 [Recast](https://github.com/benjamn/recast), and [dnd-kit](https://github.com/clauderic/dnd-kit).
-These projects are not sponsors or affiliates. See [NOTICE.md](NOTICE.md) for
-provenance and dependency notices. Original implementation: **MIT © 2026 RA**.
+These projects are not sponsors or affiliates. The detailed
+[inspiration record](INSPIRATION.md) explains what was learned and what is not
+included. See [NOTICE.md](NOTICE.md) for provenance and the generated
+[third-party inventory](THIRD_PARTY_NOTICES.md) for every locked package version and
+license. Original implementation: **MIT © 2026 RA**.

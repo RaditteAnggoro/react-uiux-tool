@@ -7,7 +7,7 @@
   "license": "MIT",
   "bin": { "react-uiux-tool": "dist/cli.js" },
   "exports": { ".": "./dist/engine/index.js" },
-  "files": ["dist", "fixtures/demo", "docs", "LICENSE", "NOTICE.md", "CITATION.cff", "SECURITY.md", "BENCHMARKS.md", "COMPATIBILITY_MATRIX.md", "KNOWN_LIMITATIONS.md", "IMPLEMENTATION_STATUS.md", "README.md", "README.id.md"],
+  "files": ["dist", "fixtures/demo", "docs", "LICENSE", "NOTICE.md", "INSPIRATION.md", "THIRD_PARTY_NOTICES.md", "CITATION.cff", "SECURITY.md", "BENCHMARKS.md", "COMPATIBILITY_MATRIX.md", "KNOWN_LIMITATIONS.md", "IMPLEMENTATION_STATUS.md", "README.md", "README.id.md"],
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "dev": "tsx src/cli.ts",
@@ -19,7 +19,9 @@
     "test:e2e": "playwright test",
     "benchmark": "node --expose-gc --import tsx scripts/benchmark.ts",
     "docs:screenshots": "npm run build && node scripts/capture-docs.mjs",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs",
+    "notices:generate": "node scripts/generate-third-party-notices.mjs",
+    "notices:check": "node scripts/generate-third-party-notices.mjs --check"
   },
   "dependencies": {
     "react": "19.3.1",

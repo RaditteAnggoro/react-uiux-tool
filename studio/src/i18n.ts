@@ -315,6 +315,10 @@ export const en = {
   createdBy: "Created by RA",
   version: "Version",
   license: "License",
+  licenseEthics:
+    "Original work uses MIT. Third-party packages keep their own licenses, and inspiration is credited without claiming affiliation.",
+  thirdPartyNotices: "Third-party licenses",
+  inspirationCredits: "Inspiration & credits",
   guide: "User guide",
   shortcuts: "Keyboard shortcuts",
   shortcutReview: "Review pending changes",
@@ -810,6 +814,10 @@ export const id: Record<Key, string> = {
   createdBy: "Dibuat oleh RA",
   version: "Versi",
   license: "Lisensi",
+  licenseEthics:
+    "Karya asli menggunakan MIT. Package pihak ketiga tetap memakai lisensinya masing-masing, dan inspirasi diberi kredit tanpa mengklaim afiliasi.",
+  thirdPartyNotices: "Lisensi pihak ketiga",
+  inspirationCredits: "Inspirasi & kredit",
   guide: "Panduan pengguna",
   shortcuts: "Shortcut keyboard",
   shortcutReview: "Review perubahan tertunda",

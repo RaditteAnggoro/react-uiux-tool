@@ -209,6 +209,10 @@ test("controller contains malformed request targets and serves guide dependencie
     assert.match(await security.text(), /Security/i);
     assert.equal((await fetch(`${base}/README.md`)).status, 200);
     assert.equal((await fetch(`${base}/README.id.md`)).status, 200);
+    assert.equal((await fetch(`${base}/LICENSE`)).status, 200);
+    assert.equal((await fetch(`${base}/NOTICE.md`)).status, 200);
+    assert.equal((await fetch(`${base}/INSPIRATION.md`)).status, 200);
+    assert.equal((await fetch(`${base}/THIRD_PARTY_NOTICES.md`)).status, 200);
   });
 });
 

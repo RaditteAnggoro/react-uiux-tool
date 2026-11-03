@@ -339,6 +339,12 @@ dan setiap operasi divalidasi. **Menggantikan VS Code?** Tidak. Source asli teta
 menjadi sumber kebenaran. **Wajib Storybook?** Tidak. **Bisa mengedit backend atau
 push GitHub?** Tidak; publikasi GitHub tetap langkah terpisah oleh pemilik.
 
+**Siapa pembuatnya dan dari mana inspirasinya?** React UI/UX Tool adalah karya
+independen RA dengan lisensi MIT. Jendela Tentang menyediakan tautan ke
+[lisensi project](../LICENSE), [daftar lengkap lisensi package](../THIRD_PARTY_NOTICES.md),
+dan [catatan inspirasi](../INSPIRATION.md). Inspirasi diberi kredit tanpa mengklaim
+sponsor, afiliasi, dukungan resmi, atau penyalinan source.
+
 - **Board:** scenario component lokal yang terisolasi.
 - **Canvas:** area preview berjalan.
 - **Inspector:** kontrol dan informasi untuk source terpilih.
@@ -350,4 +356,5 @@ push GitHub?** Tidak; publikasi GitHub tetap langkah terpisah oleh pemilik.
 - **Pemeriksaan source:** membaca source tanpa menjalankan project.
 
 Baca [batasan](../KNOWN_LIMITATIONS.md), [status implementasi](../IMPLEMENTATION_STATUS.md),
-dan [English guide](USER_GUIDE_EN.md) untuk konteks tambahan.
+[pemberitahuan project](../NOTICE.md), dan [English guide](USER_GUIDE_EN.md) untuk
+konteks tambahan.

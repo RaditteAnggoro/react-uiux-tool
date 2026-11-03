@@ -77,7 +77,20 @@ test("source explorer is lazy and the user guide is interactive", async ({
   await expect(
     guide.getByText(/data, functions, conditions, loops/),
   ).toBeVisible();
-  await guide.getByRole("button", { name: "Close" }).click();
+  await guide.getByRole("button", { name: "About this tool" }).click();
+  const about = page.getByRole("dialog", { name: "About React UI/UX Tool" });
+  await expect(about.getByText("MIT © 2026 RA")).toBeVisible();
+  await expect(
+    about.getByRole("link", { name: "Third-party licenses" }),
+  ).toHaveAttribute("href", "/THIRD_PARTY_NOTICES.md");
+  await expect(
+    about.getByRole("link", { name: "Inspiration & credits" }),
+  ).toHaveAttribute("href", "/INSPIRATION.md");
+  await about.getByRole("button", { name: "Interactive user guide" }).click();
+  await page
+    .getByRole("dialog", { name: "Interactive user guide" })
+    .getByRole("button", { name: "Close" })
+    .click();
 
   await openFixtureProject(page);
   await expect(page.locator(".left-panel .panel-heading")).toContainText("Pages");

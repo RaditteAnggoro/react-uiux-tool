@@ -337,6 +337,12 @@ operation is validated. **Does this replace VS Code?** No; normal source remains
 source of truth. **Must I install Storybook?** No. **Can Studio edit backend code or
 push to GitHub?** No. GitHub publication remains a separate owner-controlled step.
 
+**Who made this and what inspired it?** React UI/UX Tool is independent work by RA,
+licensed under MIT. The About window links to the project's
+[license](../LICENSE), [complete locked-package license inventory](../THIRD_PARTY_NOTICES.md),
+and [inspiration record](../INSPIRATION.md). Inspiration is credited without claiming
+sponsorship, affiliation, endorsement, or copied source.
+
 - **Board:** isolated local component scenario.
 - **Canvas:** running preview surface.
 - **Inspector:** selected-source controls and evidence.
@@ -348,4 +354,5 @@ push to GitHub?** No. GitHub publication remains a separate owner-controlled ste
 - **Static analysis:** inspecting source without running the project.
 
 Read [known limitations](../KNOWN_LIMITATIONS.md), [implementation status](../IMPLEMENTATION_STATUS.md),
-and the [Indonesian guide](USER_GUIDE_ID.md) for additional context.
+the [project notice](../NOTICE.md), and the [Indonesian guide](USER_GUIDE_ID.md) for
+additional context.

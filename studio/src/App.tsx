@@ -4884,6 +4884,28 @@ export default function App() {
               </dd>
             </div>
           </dl>
+          <p className="small muted">{t("licenseEthics")}</p>
+          <div className="guide-links">
+            <a className="button" href="/LICENSE" target="_blank" rel="noreferrer">
+              {t("license")}
+            </a>
+            <a
+              className="button"
+              href="/THIRD_PARTY_NOTICES.md"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("thirdPartyNotices")}
+            </a>
+            <a
+              className="button"
+              href="/INSPIRATION.md"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("inspirationCredits")}
+            </a>
+          </div>
           <h3>{t("shortcuts")}</h3>
           <dl className="detail-list">
             <div>

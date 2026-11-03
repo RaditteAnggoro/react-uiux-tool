@@ -595,6 +595,8 @@ export async function startStudio(options: StudioOptions = {}) {
           "IMPLEMENTATION_STATUS.md",
           "LICENSE",
           "NOTICE.md",
+          "INSPIRATION.md",
+          "THIRD_PARTY_NOTICES.md",
         ]).has(rootDocument)
       ) {
         const file = path.join(packageRoot, rootDocument);

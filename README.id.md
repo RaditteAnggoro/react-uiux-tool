@@ -6,6 +6,8 @@ didukung, dan edit visual tervalidasi langsung ke source untuk direview melalui 
 [English](README.md) · [Panduan Bahasa Indonesia](docs/USER_GUIDE_ID.md) ·
 [English user guide](docs/USER_GUIDE_EN.md) · [Compatibility](COMPATIBILITY_MATRIX.md) ·
 [Batasan](KNOWN_LIMITATIONS.md) · [Benchmark](BENCHMARKS.md) ·
+[Lisensi](LICENSE) · [Lisensi pihak ketiga](THIRD_PARTY_NOTICES.md) ·
+[Inspirasi & kredit](INSPIRATION.md) ·
 [GitHub](https://github.com/RaditteAnggoro/react-uiux-tool)
 
 Versi **0.1.0**, disiapkan untuk pengujian lokal. Paket belum dipublikasikan ke npm.
@@ -162,5 +164,8 @@ Project independen yang terinspirasi oleh [Y[wai] / waiVSCode](https://marketpla
 [SculptUI](https://github.com/sculptui/vscode), serta [Plasmic](https://github.com/plasmicapp/plasmic).
 Referensi desain juga mencakup [ts-morph](https://github.com/dsherret/ts-morph),
 [Recast](https://github.com/benjamn/recast), dan [dnd-kit](https://github.com/clauderic/dnd-kit).
-Project tersebut bukan sponsor atau afiliasi. Lihat [NOTICE.md](NOTICE.md).
-Implementasi asli berlisensi **MIT © 2026 RA**.
+Project tersebut bukan sponsor atau afiliasi. Halaman
+[inspirasi dan kredit](INSPIRATION.md) menjelaskan hal yang dipelajari serta bagian
+yang tidak digunakan. Lihat [NOTICE.md](NOTICE.md) untuk asal-usul project dan
+[daftar lisensi pihak ketiga](THIRD_PARTY_NOTICES.md) untuk seluruh versi package
+yang dikunci. Implementasi asli berlisensi **MIT © 2026 RA**.
