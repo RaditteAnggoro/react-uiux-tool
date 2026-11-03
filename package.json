@@ -1,0 +1,37 @@
+{
+  "name": "react-uiux-tool",
+  "version": "0.1.0",
+  "description": "Local visual React studio with clear project checks and safe direct source edits",
+  "type": "module",
+  "author": "RA",
+  "license": "MIT",
+  "bin": { "react-uiux-tool": "dist/cli.js" },
+  "exports": { ".": "./dist/engine/index.js" },
+  "files": ["dist", "fixtures/demo", "docs", "LICENSE", "NOTICE.md", "CITATION.cff", "SECURITY.md", "BENCHMARKS.md", "COMPATIBILITY_MATRIX.md", "KNOWN_LIMITATIONS.md", "IMPLEMENTATION_STATUS.md", "README.md", "README.id.md"],
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "prepack": "npm run build",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.studio.json",
+    "start": "node dist/cli.js",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "benchmark": "node --expose-gc --import tsx scripts/benchmark.ts",
+    "docs:screenshots": "npm run build && node scripts/capture-docs.mjs",
+    "docs:check": "node scripts/check-docs.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "4.23.15"
+  }
+}

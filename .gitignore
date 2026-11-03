@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+.DS_Store
+.env
+.env.*
+*.tgz
+*.log
+react-uiux-tool-files.zip
+react-uiux-spec.md
+react-uiux-guide-en.md
+react-uiux-guide-id.md
+docs/screenshots/review-diff.png
