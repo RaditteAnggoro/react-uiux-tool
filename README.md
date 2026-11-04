@@ -1,7 +1,16 @@
 # React UI/UX Tool
 
-A local visual React studio: inspect real JSX/TSX, preview supported applications,
-and write validated visual edits directly to source for normal Git review.
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](package.json)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12-339933?logo=node.js&logoColor=white)](package.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Local first](https://img.shields.io/badge/local--first-no%20cloud%20account-6C5CE7)](#what-it-does)
+
+A local-first visual editor and UI builder for React. Inspect real JSX/TSX, preview
+supported applications, and turn drag-and-drop changes into validated source edits
+that stay easy to review with Git.
+
+**Best for:** React teams that want a visual workflow without replacing their
+existing codebase with a proprietary page format.
 
 [Bahasa Indonesia](README.id.md) · [English user guide](docs/USER_GUIDE_EN.md) ·
 [Panduan Bahasa Indonesia](docs/USER_GUIDE_ID.md) · [Compatibility](COMPATIBILITY_MATRIX.md) ·
