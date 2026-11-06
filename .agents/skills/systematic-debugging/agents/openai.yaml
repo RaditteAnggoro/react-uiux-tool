@@ -1,0 +1,4 @@
+interface:
+  display_name: "Systematic Debugging"
+  short_description: "Reproduce failures and test the root cause"
+  default_prompt: "Investigate this failure, fix its cause, and check the regression."

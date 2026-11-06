@@ -86,6 +86,56 @@ provider Boards, Storybook import, global-token rewrite, complete computed CSS,
 visual regression, and VS Code extension remain unavailable. Windows/Linux and
 ChromeOS have not been manually tested on this macOS host.
 
+## Report Studio (P0 + P1 core)
+
+A second workspace, Report Studio, was added beside the React project editor. P0
+decision records are in `docs/REPORT_STUDIO_CAPABILITY_MATRIX.md`,
+`docs/REPORT_STUDIO_FILE_FORMATS.md`, `docs/REPORT_STUDIO_LIBRARY_DECISION.md`,
+`docs/YRF_SCHEMA_FINDINGS.md`, and `docs/YRF_RUNTIME_LICENSE_CHECKLIST.md`.
+
+Implemented in P1: versioned native `.report.json` model (RDM v1) with validation,
+deterministic serialization and limits; format capability registry with honest
+labels; four templates across three style families; deterministic print-oriented
+HTML renderer; a bounded report API namespace (`/api/reports/*`) with session
+capability, path containment, atomic writes and SHA-256 conflict checks; a
+lazy-loaded bilingual Report Studio workspace (home, canvas, structure tree,
+property inspector, page setup, preview, save/reopen).
+
+Verified: 45 new unit tests, 2 new Playwright scenarios, existing unit and browser
+suites re-run. Added decimal money arithmetic, a whitelisted expression evaluator
+(no eval), and dependency-free exports for PDF, HTML, and CSV through
+`POST /api/reports/export`, plus an export control in the Report Studio toolbar.
+
+Distribution (P7) and embedded SDK (P8) are partially delivered: 80 mm thermal and
+50 × 30 mm label templates, plus the `react-uiux-tool/reports` embeddable API
+(`createReport`, `renderReport`, `exportDocument`, validation and serialization) with
+browser-safe HTML/CSV and server-only PDF/XLSX/DOCX clearly separated. See
+`docs/REPORT_STUDIO_DISTRIBUTION_AND_SDK.md` for what is deferred and why.
+
+Not implemented and not claimed: XLSX/DOCX export, banded multi-page pagination,
+chart/barcode components, crosstab/subreports, grouped totals driven by datasets,
+and any `.yrf` write or vendor runtime integration.
+
+## Audit fixes (2026-11-06)
+
+Ten findings from an external audit were reproduced and fixed with regression tests:
+
+| Finding | Fix |
+| --- | --- |
+| PDF dropped group-expression totals | PDF now evaluates `props.expression` with band scope and formats decimals (e.g. `2.000.000`) |
+| PDF replaced non-Latin-1 with `?` silently | Latin-1 accents are preserved and exports warn about characters that must be replaced |
+| Grouped bands reordered | Pagination expands groups in their original flow position; summary no longer precedes details |
+| Invalid sample JSON still exported | Preview and export stop with an explicit error until data is fixed |
+| Import replaced other datasets | CSV/JSON import merges into existing sample data |
+| `.yrf` save-copy kept the old path | State adopts the saved copy's path and hash; later edits target the copy |
+| Report list bypassed the dirty guard | List clicks now use the same Save / Discard / Cancel guard |
+| Nested native reports failed to open | Open accepts bounded relative subpaths under the selected root |
+| Package SDK subpath exported `undefined` | `react-uiux-tool/reports` points at `dist/reports/embed.js`; Node-only exporters load lazily |
+| Code tab dropped unapplied drafts | Code text persists across tabs, counts as dirty, and blocks Save until applied |
+| XLSX changed `001234` to a number | All cells are written as text, preserving identifiers |
+
+Verified: typecheck, 134 unit tests, 32 Playwright tests, build and docs checks.
+
 ## Local acceptance path
 
 Run `npm install`, `npm run build`, `npm start`. In the browser: choose language →

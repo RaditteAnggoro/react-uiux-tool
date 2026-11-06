@@ -27,6 +27,12 @@ there is no hidden page schema replacing an existing application.
 
 ## What it does
 
+Two workspaces ship today: the React project editor and **Report Studio**, a
+local-first native report designer (`.report.json`) with professional templates,
+canvas editing, and print preview. PDF, HTML, CSV, XLSX, and DOCX exports support
+limited subsets. The experimental `.yrf` inspector can save edited copies or create
+new files; these have not been validated with the vendor renderer.
+
 - Opens a React project without running it, then explains what was found.
 - Shows real screens and reusable components in a local preview after approval.
 - Adds, copies, moves, aligns, edits, and deletes supported visual objects.
@@ -187,3 +193,7 @@ These projects are not sponsors or affiliates. The detailed
 included. See [NOTICE.md](NOTICE.md) for provenance and the generated
 [third-party inventory](THIRD_PARTY_NOTICES.md) for every locked package version and
 license. Original implementation: **MIT © 2026 RA**.
+
+### Workspace guides
+
+Use the [English guide](docs/USER_GUIDE_EN.md) or [panduan Indonesia](docs/USER_GUIDE_ID.md) for illustrated React editing, report design, palette, data, saving and troubleshooting. Report Studio supports native reports and experimental `.yrf` copy editing; see [format limitations](KNOWN_LIMITATIONS.md) before relying on vendor output.

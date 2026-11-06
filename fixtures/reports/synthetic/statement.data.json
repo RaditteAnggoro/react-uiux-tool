@@ -1,0 +1,28 @@
+{
+  "accounts": [
+    {
+      "contractNumber": "KTR-0001",
+      "customerName": "PT Contoh Sintetis",
+      "currency": "IDR",
+      "closingBalance": 4250000
+    }
+  ],
+  "entries": [
+    {
+      "date": "2026-10-01",
+      "reference": "INV-0001",
+      "description": "Tagihan bulanan",
+      "debit": 5000000,
+      "credit": 0,
+      "balance": 5000000
+    },
+    {
+      "date": "2026-10-15",
+      "reference": "PAY-0001",
+      "description": "Pembayaran",
+      "debit": 0,
+      "credit": 750000,
+      "balance": 4250000
+    }
+  ]
+}

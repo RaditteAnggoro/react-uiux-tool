@@ -42,6 +42,111 @@ async function stopPreview(page: import("@playwright/test").Page) {
   if (await stop.isVisible().catch(() => false)) await stop.click();
 }
 
+test("leaving the project requires an explicit choice", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-leave-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Inspect only" }).click();
+  const leave = page.locator(".icon-rail").getByRole("button", { name: "Leave project workspace" });
+  await leave.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Leave this project workspace?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Changes already saved to source will remain");
+  await dialog.getByRole("button", { name: "Stay in project" }).click();
+  await expect(leave).toBeVisible();
+  await page.locator(".studio-header .brand").click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await leave.click();
+  await dialog.getByRole("button", { name: "Leave project workspace" }).click();
+  await expect(page.getByRole("button", { name: /Open Existing Project/ })).toBeVisible();
+});
+
+test("folder picker cancellation is quiet and failures offer manual path entry", async ({ page }) => {
+  let unavailable = false;
+  await page.route("**/api/pick-directory", async (route) => {
+    await route.fulfill({ json: { path: "", unavailable } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  const directory = page.getByLabel("Project directory");
+  await directory.fill("/tmp/my project");
+  await page.getByRole("button", { name: "Browse" }).click();
+  await expect(directory).toHaveValue("/tmp/my project");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  unavailable = true;
+  await page.getByRole("button", { name: "Browse" }).click();
+  await expect(page.getByRole("alert")).toContainText("Paste an absolute folder path");
+  await expect(directory).toHaveValue("/tmp/my project");
+});
+
+test("component palette scrolls with the footer open and inspector tabs fit", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 700 });
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-palette-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await mkdir(path.join(root, "src/components"), { recursive: true });
+  await writeFile(path.join(root, "src/components/Palette.tsx"), Array.from({ length: 30 }, (_, i) => `export function Item${String(i).padStart(2, "0")}(){return <button>Item ${i}</button>}`).join("\n"));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Inspect only" }).click();
+  const rail = page.locator(".icon-rail");
+  await expect(rail.getByRole("button", { name: "Assets" })).toHaveCount(0);
+  await rail.getByRole("button", { name: "Components" }).click();
+  const palette = page.locator(".component-palette");
+  const first = palette.getByRole("button", { name: /Item00/ });
+  const last = palette.getByRole("button", { name: /Item29/ });
+  await expect(first).toBeVisible();
+  expect(await first.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const parent = element.closest(".component-palette")!.getBoundingClientRect();
+    return bounds.top >= parent.top && bounds.bottom <= parent.bottom;
+  })).toBe(true);
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeVisible();
+  const primitive = palette.getByRole("button", { name: "Paragraph" });
+  await primitive.scrollIntoViewIfNeeded();
+  await expect(primitive).toBeVisible();
+  const tabs = page.locator(".inspector-tabs");
+  expect(await tabs.evaluate((element) => element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight)).toBe(true);
+  await expect(tabs.getByRole("tab", { name: "Source" })).toBeVisible();
+});
+
+test("narrow workspace exposes panels and source tree supports arrow keys", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-mobile-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await expect(page.getByText("Explore the analysis without running project code.")).toBeVisible();
+  await page.getByRole("button", { name: "Inspect only" }).click();
+  await page.getByRole("button", { name: "Pages", exact: true }).click();
+  const tree = page.getByRole("tree", { name: "Project source" });
+  const project = tree.getByRole("treeitem").first();
+  await project.focus();
+  await project.press("ArrowRight");
+  const src = tree.getByRole("treeitem", { name: "src" });
+  await expect(src).toBeFocused();
+  await src.press("ArrowRight");
+  await expect(src).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Property Inspector", exact: true }).click();
+  await expect(page.locator(".inspector-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Canvas", exact: true }).click();
+  await expect(page.locator(".canvas-panel")).toBeVisible();
+  await expect(page.locator(".left-panel")).toBeHidden();
+});
+
 test("source explorer is lazy and the user guide is interactive", async ({
   page,
 }) => {
@@ -388,6 +493,16 @@ test("project component drag and component copy write directly to source", async
     await page.getByLabel("Existing function").fill("handleDateChange");
     await page.getByRole("button", { name: "Bind event to source" }).click();
     await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
+    await expect.poll(async () => readFile(path.join(root, "src/App.jsx"), "utf8")).toContain('onChange={handleDateChange}');
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Remove event binding" }).click();
+    await expect.poll(async () => readFile(path.join(root, "src/App.jsx"), "utf8")).not.toContain('onChange={handleDateChange}');
+    await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove event binding" })).toBeDisabled();
+    await page.getByLabel("Event property").selectOption("onChange");
+    await page.getByLabel("Existing function").fill("handleDateChange");
+    await page.getByRole("button", { name: "Bind event to source" }).click();
+    await expect.poll(async () => readFile(path.join(root, "src/App.jsx"), "utf8")).toContain('onChange={handleDateChange}');
 
     await expect(frame.getByLabel("Project date field")).toHaveCount(2);
     await frame.getByLabel("Project date field").nth(0).click();
@@ -592,4 +707,39 @@ test("Next.js remains static-inspection only and does not offer runtime approval
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("React formatting palette writes a selected text style to source", async ({ page }) => {
+  await page.goto("/");
+  const root = await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("tab", { name: "Style" }).click();
+  const palette = page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Formatting palette" }) });
+  await palette.getByLabel("Formatting property").selectOption("textDecorationLine");
+  await palette.getByLabel("CSS value").fill("underline");
+  await palette.getByRole("button", { name: "Save to source" }).click();
+  await expect.poll(async () => readFile(path.join(root, "src/App.tsx"), "utf8")).toContain('textDecorationLine: "underline"');
+  await stopPreview(page);
+});
+
+
+test("style presets apply to the selected React element and update source", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Create project" }).click();
+  await expect(page.locator(".selected-heading")).toBeVisible();
+  await page.getByRole("button", { name: "Components", exact: true }).click();
+  await page.locator(".style-presets > summary").click();
+
+  const heading = page
+    .locator(".style-preset-chips")
+    .getByRole("button", { name: "Heading", exact: true });
+  await expect(heading).toBeEnabled();
+  await heading.click();
+  await expect(page.getByText("Style applied to source")).toBeVisible();
+  await expect(
+    frame.getByRole("button", { name: "Create project" }),
+  ).toHaveCSS("font-size", "28px");
 });

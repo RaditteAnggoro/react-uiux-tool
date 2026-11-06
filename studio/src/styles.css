@@ -1539,9 +1539,9 @@ details summary {
 .inspector-tabs {
   display: flex;
   align-items: center;
-  overflow: auto;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
-  height: 37px;
+  height: auto;
   flex: none;
   padding: 0 6px;
   gap: 0;
@@ -2260,9 +2260,13 @@ details summary {
 .project-component-list {
   display: grid;
   gap: 5px;
-  max-height: 245px;
-  overflow: auto;
   padding: 0 12px 10px;
+}
+.component-palette {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .catalog-hint {
   margin: -2px 12px 9px;
@@ -2402,19 +2406,6 @@ details summary {
   line-height: 1.8;
 }
 .boards-list .button {
-  font-size: 10px;
-}
-.asset-panel {
-  padding: 25px 16px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.8;
-}
-.asset-panel > svg {
-  margin-bottom: 15px;
-}
-.asset-panel code {
-  display: block;
   font-size: 10px;
 }
 .scenario-toolbar {
@@ -3509,4 +3500,102 @@ kbd {
   .guide-workflow-step i {
     display: none;
   }
+}
+
+/* Keep editor controls legible while preserving space for the canvas. */
+.explorer-row, .inspector-tabs button, .left-tabs button,
+.bottom-toolbar > [role="tablist"] > button, .mode-control button {
+  font-size: 12px;
+}
+.analysis-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 240px;
+  gap: 6px;
+}
+.analysis-choice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mobile-panel-controls { display: none; }
+@media (max-width: 800px) {
+  .mobile-panel-controls {
+    display: flex;
+    flex: none;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .mobile-panel-controls button {
+    padding: 7px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .mobile-panel-controls button.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .workbench { overflow: hidden; }
+  .workbench > .resize-handle { display: none; }
+  .workbench .left-panel, .workbench .canvas-panel, .workbench .inspector-panel { display: none; }
+  .workbench.mobile-navigation .left-panel,
+  .workbench.mobile-canvas .canvas-panel,
+  .workbench.mobile-inspector .inspector-panel {
+    display: flex;
+    flex: 1;
+    width: auto !important;
+    min-width: 0;
+    max-width: none;
+  }
+  .workbench .mode-control button,
+  .bottom-toolbar > [role="tablist"] > button { font-size: 12px; }
+}
+@media (max-width: 520px) {
+  .analysis-choice { flex: 1 1 100%; max-width: none; }
+}
+
+.rail-exit {
+  color: var(--error);
+}
+.rail-exit:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.style-presets {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.style-presets > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.style-presets > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 4px;
+}
+.style-presets[open] > summary::before {
+  content: "▾";
+}
+.style-preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.style-preset-chips button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 10.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.style-preset-chips button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }

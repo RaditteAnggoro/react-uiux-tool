@@ -169,3 +169,7 @@ Project tersebut bukan sponsor atau afiliasi. Halaman
 yang tidak digunakan. Lihat [NOTICE.md](NOTICE.md) untuk asal-usul project dan
 [daftar lisensi pihak ketiga](THIRD_PARTY_NOTICES.md) untuk seluruh versi package
 yang dikunci. Implementasi asli berlisensi **MIT © 2026 RA**.
+
+### Panduan workspace
+
+Baca [panduan Indonesia](docs/USER_GUIDE_ID.md) atau [English guide](docs/USER_GUIDE_EN.md) untuk alur bergambar edit React, desain laporan, palette, data, penyimpanan, dan troubleshooting. Report Studio mendukung laporan native serta edit salinan `.yrf` eksperimental; baca [batasan format](KNOWN_LIMITATIONS.md) sebelum menggunakan hasil vendor.

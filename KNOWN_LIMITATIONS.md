@@ -39,6 +39,9 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
   destructuring defaults, and static JSX usage. Hooks, new handler logic, imperative
   methods, backend actions, permissions, controlled bindings, spreads,
   conditional/repeated JSX, and uncertain ownership are not rewritten speculatively.
+- Event bindings can be added or changed to a validated existing in-scope function,
+  and a simple named binding can be removed. Inline event expressions remain source-owned;
+  changing a binding does not validate the application's business behavior.
 - Static insert/move/align/remove is constrained by source/container validation.
   The Components list prefers reusable visual exports and excludes business views,
   pages, screens, routes, providers, contexts, hooks, services, stores, and utilities.
@@ -83,3 +86,71 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification and
 [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) for fixture-level evidence.
+
+## Report Studio (P1)
+
+- Native `.report.json` is editable; `.yrf` supports the experimental copy-only
+  subset described below. PDF, HTML, XLSX, CSV, DOCX, and PNG/SVG are not editable sources.
+- Exports support PDF, HTML, CSV, XLSX, and DOCX. XLSX contains the first table
+  only; DOCX has limited layout fidelity. Bar, line, and pie charts render as SVG
+  in HTML, while PDF omits charts and crosstabs. Barcodes and subreports are not
+  implemented. Crosstabs support sum/count aggregation; conditional styling has no visual editor yet.
+- Pagination drives the HTML renderer and the PDF writer with the same layout:
+  repeated headers/footers, grouped sections, table row splitting, page X of Y.
+  PDF still draws text, lines, tables, and fields only; charts and crosstab cells
+  are not rendered into PDF yet.
+- The expression evaluator is available as a library and covered by unit tests, but
+  the canvas inspector does not expose expression editing yet.
+- The design canvas renders bands in a single column; preview and exports use
+  bounded pagination with fixture-tested page numbering and grouped totals.
+- Canvas fields display binding paths rather than evaluated data; the preview can
+  evaluate supported bindings using supplied sample data.
+- `.yrf` style edits change the vendor `style` declaration string only; the approximate
+  canvas applies a small CSS subset (weight/style/decoration/size/colour/align) and the
+  result is still not a vendor-rendered preview. Multi-select alignment stages raw-unit
+  geometry patches and always saves a copy.
+- `.yrf` patches refuse duplicated JSON keys, preserve BOM/CRLF/Unicode and unknown
+  vendor properties, and reject parent-directory symlinks. Adding/removing objects or
+  bands, editing scripts, and overwriting originals remain blocked.
+- `.yrf` support: inspection plus an **experimental** write path. Existing textbox `text` and `dataField`, captions
+  and numeric geometry can be patched into a sibling `*.edited.yrf` copy, and new
+  files can be produced from a native template after an explicit acknowledgement.
+  Adding objects/bands, editing scripts, and overwriting originals stay blocked. The
+  producer uses an approximate 11 units/mm mapping derived from three samples and has
+  **not** been validated by the vendor renderer. Vendor licence status is unresolved;
+  nothing vendor-owned is bundled.
+- Report files are capped at 5 MiB and stored in an operator-chosen folder; the
+  server rejects symlink, traversal, and secret-path access. Browsing is bounded to
+  two directory levels and 200 entries, and excludes hidden, dependency, build and
+  `secrets` folders.
+- Report Studio has one web entry; the native folder picker is the primary way to
+  choose a report folder, with a manual absolute path as fallback. Opening a project
+  never selects its root as the report folder by itself. The chosen report folder
+  persists for the server session until the user changes it or clears it.
+- Basic formatting palette supports style presets, bold/italic/underline/strike, lists,
+  justify, line height, letter spacing, borders, wrap and rotation, plus multi-select,
+  six alignment modes, group/ungroup and group move. PDF simplifies these rich styles and
+  emits a warning. Font effects, table column editor, real group resize and picture
+  effects are not implemented.
+- Canvas supports pointer move, eight resize handles, 1 mm snapping (toggle + Alt bypass),
+  palette click and drag-to-band, Alt+Arrow keyboard resize, numeric X/Y/W/H and undo/redo.
+  Locked/hidden elements, a visual grid overlay and touch/pen input are not implemented.
+  Images can be imported from local PNG/JPEG/WebP files (≤ 2 MiB, no SVG, no network), and
+  CSV sample data can be loaded with a schema preview; clipboard paste, cropping, column
+  mapping, per-row CSV errors and large-dataset virtualisation are not implemented.
+- The native Code tab edits the JSON draft and rejects invalid JSON. The `.yrf` Code tab
+  is read-only and displays the vendor source inertly.
+- Canvas text uses pt→px with zoom only; content that exceeds its box is visible instead
+  of clipped, and the status bar reports an overflow count. There is no automatic
+  fit-to-box or silent resize.
+
+- React's formatting palette applies individual supported CSS properties to editable
+  JSX styles. Report-specific presets, automatic list creation, and identical toolbar
+  behavior across React, native reports and `.yrf` are not implemented. Report Align
+  and Group require elements in the same band; existing cross-band groups can be
+  selected and ungrouped. `.yrf` palette adds experimental text, field, box, and line objects; advanced vendor objects still have limited visual controls.
+
+- WaiReport lines stored as endpoints can be moved or resized; other objects without
+  known geometry remain without drag controls. Existing string, number, and boolean object properties are
+  editable in Design, and structured values are editable through Code. Vendor rendering,
+  data-binding semantics, newly added objects, and print results remain unverified.

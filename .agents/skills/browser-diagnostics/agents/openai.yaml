@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Diagnostics"
+  short_description: "Investigate UI, network, and browser failures"
+  default_prompt: "Reproduce this UI issue and identify the cause from browser evidence."

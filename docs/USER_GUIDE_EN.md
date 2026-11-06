@@ -20,6 +20,9 @@ for the same workflow as an interactive tour.
 - [Add, copy, move, align, and delete](#9-fixed-structure-and-keyboard-alternatives)
 - [Undo and review with Git](#10-direct-writes-git-review-and-undo)
 - [Troubleshoot safely](#12-troubleshooting-and-privacy)
+- [Create and edit reports](#14-report-studio-create-and-edit-reports)
+- [Practice report drag and drop](#add-move-and-resize-objects)
+- [Data, parameters, repeating rows, and totals](#data-parameters-repeating-rows-and-totals)
 
 ## 1. Install, start, and stop
 
@@ -58,7 +61,7 @@ dark, or system theme; this affects only Studio.
 | --- | --- |
 | Home | Front User Guide, New Project, Open Existing Project, recent projects |
 | Project Check | What was found, scan coverage, readiness, editing status, warnings |
-| Left rail/panel | Pages, Components, Tree, Files, Boards, assets |
+| Left rail/panel | Pages, Components, Tree, Files, Boards |
 | Canvas | Approved real preview, Design/Interact, viewport width, zoom |
 | Inspector | Props, Style, Layout, Events, Data, A11y, Source |
 | Bottom panel | Analysis, Problems, Changes, Console, Scenarios |
@@ -221,6 +224,9 @@ be added or replaced with an existing function discovered in the owning componen
 The function must already be callable in that source scope. Backend actions, new
 handler logic, imperative component methods, hook logic, runtime data, and permission
 rules are not automatically rewritten.
+To remove a named binding, select the event, choose **Remove event binding**, and
+confirm. The binding is removed but the function remains. Inline expressions stay
+source-owned and cannot be changed using this control.
 
 The tool determines and checks how widely a change will apply before saving:
 
@@ -356,3 +362,302 @@ sponsorship, affiliation, endorsement, or copied source.
 Read [known limitations](../KNOWN_LIMITATIONS.md), [implementation status](../IMPLEMENTATION_STATUS.md),
 the [project notice](../NOTICE.md), and the [Indonesian guide](USER_GUIDE_ID.md) for
 additional context.
+
+## 14. Report Studio: create and edit reports
+
+Think of Report Studio as a worktable: the **folder** stores your work, a **template** is a starting example, and the **canvas** is the page where you arrange objects.
+
+![Simple report workflow](screenshots/report-workflow-en.svg)
+
+### Start from Home or a project
+
+1. Choose **Report Studio** on Home, or open a React project and choose **Reports** in the left rail.
+2. Choose **Choose report folder** and select a destination. If the picker cannot open, paste the full path as a fallback. Check the displayed folder before creating a file.
+3. Choose a template and **Create report**, or select an existing report from the list. Use the back button to return to the project when you entered from it.
+
+Opening a project does not make every report format editable. `.report.json` is the native report source; an exported PDF is not automatically an editable design file.
+
+### Meet the worktable
+
+| Area | What it does |
+| --- | --- |
+| Left: templates, files, structure, sample data | Choose reports, bands, objects, and sample data. |
+| Center: canvas | Select an object; drag it to move, or drag an edge/corner handle to resize. |
+| Right: properties | Change content, position, size, colors, font, and other supported properties. |
+| Top: Design, Code, Preview | Arrange the design, view/edit native JSON, or view output with sample data. |
+
+To add a native object, click its palette button or drag it onto an eligible band. Click an object to select it. Drag its edge or corner handles to resize, or enter precise dimensions in the inspector. Use Undo after a mistake. Snap helps alignment and can be turned off. Not every object or format supports every operation.
+
+### Sample data and repeating rows
+
+1. Enter a JSON object in **Sample data**, or use **Import data (CSV/JSON)**. Select a table bound to the target dataset first; other existing datasets are retained.
+2. Check dataset names, columns, and sample rows. For example, a `lines` dataset can contain item rows with `description` and `amount` fields.
+3. Bind the table or field to the relevant dataset/column and choose **Preview**. Supported detail/table bands repeat rows; check the row count and totals.
+4. Fix invalid JSON before preview or export. Use synthetic examples when trying the feature rather than real customer data.
+
+### Save, use Code, and export
+
+- **Save** stores the `.report.json` source. Apply or discard unapplied Code changes first. Read the Save / Discard / Cancel choice when switching reports.
+- **Preview** shows native renderer output with sample data. **Export** generates PDF, HTML, CSV, XLSX, or DOCX; read the warnings before using the result.
+- Formats differ: CSV contains table data; XLSX uses the first table; PDF does not draw charts/crosstabs yet. PDF uses limited fonts and can replace unsupported characters with `?`; a warning identifies replacement in rendered text. Check the PDF and totals yourself.
+- Export does not prove print parity across formats. Review the source and test the output with the intended data and application before using it for business decisions.
+
+### Open an existing `.yrf`
+
+1. Choose **YRF (.yrf)** and select a folder, then choose a file from the list; manual path entry is a fallback.
+2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** displays source read-only. Inspection does not execute vendor scripts.
+3. Edit available caption/geometry values, choose **Preview change**, then **Save copy**. The original is not overwritten. Creating a new `.yrf` requires acknowledging that output is experimental.
+4. Units, print appearance, and created/edited files have not been validated by the vendor renderer. Open the copy in WaiReport with test data and compare totals, barcodes, pagination, and print output before use.
+
+If the folder is missing, choose it again; if a file changed outside the app, reopen it before saving. A preview does not prove that business functions or totals are correct.
+
+### Complete exercise: create a practice invoice
+
+Use fictional data while learning. Button names follow the selected application language.
+
+1. On Home choose **Report Studio**, then **Choose report folder** and select a
+   practice folder. If the OS picker fails, enter the folder path at the bottom and
+   press **Use folder**. Check the displayed path.
+2. Choose the **Invoice / factur** template, a **Style family** such as Corporate
+   Navy, and a **File name**, then press **Create report**. The native source is a
+   `.report.json` file in the report folder.
+3. In **Structure**, a *band* is a section of the page, such as a header, detail,
+   or footer; its object names appear underneath. Click a name to select it on the
+   canvas. Click an empty part of the paper to show page settings on the right.
+4. Change the report title in the top bar. Notice **Unsaved changes** and press
+   **Save** when finished.
+
+### Set up the page and position objects
+
+When nothing is selected, the right-hand **Page** panel offers:
+
+| Control | Example and effect |
+| --- | --- |
+| Page size | Choose A4, A5, Letter, or Legal; A4 is 210 × 297 mm. |
+| Orientation | Portrait is upright; Landscape is wide. |
+| Margins: top, right, bottom, left | Space between content and paper edge, in mm. Try `10` on each side. |
+| Zoom | The slider enlarges the screen view, not the printed page. |
+| Snap 1 mm | Rounds drag and resize positions to a 1 mm grid; hold Alt during a gesture to bypass it temporarily. |
+
+Native objects use **X** (distance from the left), **Y** (distance from the top of
+its band), **W** (width), and **H** (height), in mm. Select a title and try `X = 10`,
+`Y = 2`, `W = 80`, `H = 10`. Make the box tall enough for the font and watch for
+overflow warnings. Click empty paper to return to page settings.
+
+### Add, move, and resize objects
+
+1. Find **Structure** on the left and select the destination band.
+2. For drag and drop, press and hold **Add text**, drag it onto that band on the
+   paper, and release. The new object is selected. Alternatively click the button
+   to add it to the selected band.
+3. Select an object on the canvas or in Structure. Drag its center to move it, or
+   drag a small edge/corner handle to resize it. Check X/Y/W/H on the right for
+   precise values.
+4. Try **Add box**, **Add line**, and **Add image** too. Duplicate a selected object
+   with the duplicate control if available or `Cmd+D` on Mac / `Ctrl+D` on Windows.
+   Use **Remove element** to delete it and Undo to recover a mistake.
+5. Change a text object's **Content** on the right; you can also double-click text
+   to edit it directly. Enlarge its box if the text is clipped.
+
+For example, drag **Add text** onto the header, enter `PRACTICE INVOICE`, set W to
+`80`, H to `10`, font size to `16`, and choose blue. Save and use Preview to check
+that the text is legible and positioned correctly. Native canvas interactions do
+not imply that the `.yrf` inspector supports the same operations.
+
+| Shortcut while the canvas has focus | Action |
+| --- | --- |
+| Arrow keys | Move the selected object 1 mm; add Shift for 5 mm. |
+| Alt + arrow | Change width/height; add Shift for 5 mm steps. |
+| Delete / Backspace | Remove the selected object. |
+| Cmd/Ctrl + Z; Cmd/Ctrl + Shift + Z or Y | Undo; Redo. |
+| Cmd/Ctrl + D; Cmd/Ctrl + S | Duplicate; save. |
+| Cmd/Ctrl + E | Start editing an object that supports text editing. |
+
+### Set object values and appearance
+
+Select an object first. Some controls only appear for the relevant object type.
+
+| Property | Try this |
+| --- | --- |
+| Content / Label | Enter fixed text such as `Customer name`. These controls appear when the object has the relevant property. |
+| X, Y, W, H | Enter exact position and size; recheck the layout after changing margins. |
+| Font size, Font family, Font weight, Italic | Try size `12`, family `Arial`, weight `700` for bold, and check Italic if desired. Fonts can differ in exports. |
+| Color, Background, Align | Choose text/background colors and Left, Center, or Right. Renderers do not necessarily reproduce every style equally. |
+| Binding path | On a `field`, enter a data location such as `invoice.customerName`; this reads data rather than fixed text. |
+| Expression | On a `field`, the editor suggests `SUM(group.principal)` for a matching group context. Compare the result with a manual calculation. |
+| Dataset | On a `table` with available datasets, choose the dataset used for table rows. Columns still depend on the table/template definition. |
+| Choose image, Alt text, Image fit | On an image, choose PNG/JPEG/WebP up to 2 MiB; add a description. `contain` shows the whole image; `cover` fills the box and may crop. |
+
+For a logo, click **Add image**, select the image object, click **Choose image**,
+and select a local file. Set W/H and inspect Preview. The image is stored in the
+report source, so do not put sensitive images into documents you plan to share.
+
+### Data, parameters, repeating rows, and totals
+
+**Sample data** supplies values for testing; it is not an automatic production
+connection. Here `invoice` is one object and `lines` is a list of two rows. Replace
+the left-hand **Sample data** with:
+
+```json
+{
+  "invoice": {"number": "INV-001", "customerName": "Example Store", "total": 30000},
+  "lines": [
+    {"description": "Book", "quantity": 2, "unitPrice": 10000, "amount": 20000},
+    {"description": "Pencil", "quantity": 1, "unitPrice": 10000, "amount": 10000}
+  ]
+}
+```
+
+1. In the invoice template select the customer field in Structure/canvas and check
+   its **Binding path** is `invoice.customerName`. Preview should read `Example Store`.
+2. Select the table and ensure **Dataset** is `lines`. Open **Preview** and check
+   that both Book and Pencil rows appear under the matching columns. If they do
+   not, inspect the dataset, column definitions, and warnings; templates do not
+   automatically have identical columns.
+3. To try totals, select a field that supports Expression and use an expression
+   appropriate to the template's group and columns. For example,
+   `SUM(group.principal)` needs a group with a `principal` column; do not assume it
+   applies to `amount`. Compare against a manual calculation: this invoice totals 30,000.
+4. Alternatively select the target table and choose **Import data (CSV/JSON)**. CSV
+   needs column headers; JSON may contain an array of rows or a dataset object. The
+   import retains other existing datasets but replaces the dataset with the same
+   target name. Imported files are limited to 2 MiB. Fix invalid JSON before Preview/Export.
+
+If by **report parameters** you mean a date, contract number, or customer name,
+provide an example value in Sample data and bind the relevant field to its path.
+There is currently no separate runtime parameter form, automatic database connection,
+or query builder in this screen. Page size, orientation, and margins are in Page.
+
+### Code, Preview, export, and save
+
+- **Design** edits objects visually. **Code** edits a native JSON draft; click
+  **Apply JSON**. Invalid JSON cannot replace the last valid design. The draft is
+  retained across tabs; apply it before saving. To discard it, return to Home/project and choose Discard changes; this also discards other unsaved report changes.
+- **Preview** renders with sample data and does not automatically save the source.
+  Click **Refresh preview** after changing data.
+- **Save** writes the native source. In **Save and continue / Discard changes /
+  Cancel**, choose to save and continue, discard and continue, or remain in the
+  editor. If the file changed outside the application, reopen it before saving.
+- Select a format and click **Export**. PDF is useful for page review, HTML for a
+  browser, CSV for table data, XLSX for spreadsheets, and DOCX for documents. An
+  exported file is output, not the `.report.json` design source.
+- Read warnings: PDF does not yet draw charts or crosstab cells; unsupported font
+  characters may become `?`. CSV drops layout; XLSX and DOCX export only the
+  first table, and DOCX drops charts/crosstabs. Check amounts, rows, appearance,
+  and printing yourself before business use. **Formats** shows capabilities by
+  extension; not every format can be edited.
+
+### Practice opening and changing a `.yrf`
+
+The first editable text object is selected when a file opens. Click another object on
+the page or in Structure, change **Caption** on the right, then choose **Save copy**.
+Double-clicking an editable text object focuses that field. For a textbox with an
+existing `dataField` property, **Data field** changes that existing binding name.
+Lines stored as endpoints can be selected and moved. Textbox and binding edits are
+experimental and must be checked in the vendor runtime.
+
+In the left **Palette**, click **Text**, **Field**, **Box**, or **Line** to add to
+the selected object's band, or drag a button onto a band on the page. Select an
+object to edit its text, position, size, binding, and existing string/number/boolean properties
+on the right. Use **Code** for structured values. Select **Save copy** when finished;
+new objects and their appearance still need verification in WaiReport.
+To delete an object, select it and click **Remove object**; the change is written
+when you save the report to a copy.
+
+1. Click **YRF (.yrf)**, choose a folder, and select a file from the list; or enter
+   its path and click **Open .yrf**. **Design (approximate)** shows estimated
+   proportions, not a proven vendor print rendering.
+2. Select an object in Structure or on the canvas. Supported objects can be dragged
+   and resized with eight handles; **Caption** and `left`, `top`, `width`, `height`
+   remain available for exact values. Geometry uses unverified raw vendor units, not
+   mm. Unsupported objects stay read-only.
+3. Click **Preview change**, check before/after, then **Save copy**. The original
+   is not overwritten and later edits continue from the saved copy. **Code** shows the
+   source inertly; **Edit source** enables a validated draft and **Apply & save copy**
+   writes a new sibling copy. Unapplied drafts trigger Save / Discard / Cancel when
+   leaving or opening another file.
+4. **+ New .yrf** creates an experimental file from a template after explicit
+   acknowledgement. Creation and geometry changes have not been validated with the
+   WaiReport renderer; open a copy in the vendor application and compare data and
+   printout before use. Native visual drag/resize and all native properties are not
+   automatically available for `.yrf`.
+
+### When the result is unexpected
+
+| Symptom | Try this |
+| --- | --- |
+| Folder/file is missing | Select the correct folder or enter its path manually; check the extension and list. |
+| Page panel is missing | Click empty paper to deselect the object. |
+| Text is clipped | Increase W/H, reduce font size, and check the overflow warning. |
+| Empty table / value `—` | Check JSON, dataset name, binding path and column names; refresh Preview. |
+| Preview/Export is blocked | Fix sample JSON and read the error message. |
+| Saving a Code draft is blocked | Apply valid JSON, or return to Home/project and choose Discard changes (this also discards other unsaved changes). |
+| PDF differs | Read format warnings and manually check characters, table content, totals and pages. |
+| `.yrf` looks wrong | The canvas is approximate; check the copy in the vendor runtime and do not assume a verified scale. |
+
+## Report Studio
+
+Open **Report Studio** from Home or the **Reports** button in a project workspace.
+
+1. Choose **Open existing report** to pick a report folder and scan it locally, or
+   **Create new report** to pick a folder and template. The project root is never used
+   implicitly; the chosen folder is shown in the workspace footer.
+2. The sidebar lists native `.report.json` and `.yrf` files with a small type badge and
+   relative path. Search and Refresh are local; scanning never writes files.
+3. The workspace has **Design**, **Code** and **Preview**. Design supports move, eight
+   resize handles, 1 mm snapping (toggle or hold Alt), palette drag/click for text, field,
+   table, form, image, box and line, plus properties, parameters and repeat bands.
+4. **Code** edits the native JSON draft; invalid JSON never replaces the last valid draft.
+   Save is explicit and refuses while a Code draft is not applied.
+5. The inspector starts with a formatting bar: style presets (Body/Heading/List/Caption),
+   bold, italic, underline, strikethrough, bullets/numbers, justify, line height, letter
+   spacing, border width/colour, wrap text and rotation. Select several objects with
+   Shift/Cmd-click to align them, group them, move them together, or delete them.
+   The palette is grouped (Text & data, Layout, Tables) with icons and collapsible
+   sections; Structure collapses each band so long reports stay readable. A **Styles**
+   row applies presets (Heading, Body, Muted, Accent, Card, Danger, and report-only
+   List/Caption/Highlight/Table header). The React workspace Components palette has the
+   same Styles row, and applying one writes the matching style patch to source. Existing
+   `.yrf` files also expose a Styles palette and style controls (bold/italic/underline,
+   size, colour, alignment) that edit the vendor `style` string and update the approximate
+   canvas; select several objects with Shift/Cmd-click to align them, then **Save copy**.
+   The report header has an explicit **Exit** button. Remove/Delete actions are filled red.
+6. `.yrf` opens in the same studio. Design is explicitly approximate, Code is editable and
+   validated, and saving always writes a sibling `*.edited.yrf` copy — the original is
+   never rewritten. Creation stays experimental and labelled.
+7. **Formats** lists which actions each format supports; unsupported formats such as
+   JRXML, RDL and `.rpt` are never converted silently.
+
+In the React editor, the **Style** tab offers a **Formatting palette** for a style
+property such as font, color, border, underline, wrapping or rotation. Enter a CSS
+value and choose **Save to source**. For example, select `Underline / strikethrough`,
+enter `underline`, and save. This works on elements with a supported style operation;
+it does not yet provide report presets or automatic list creation. In Report Studio,
+Align and Group apply to a selection within one band so objects in different page
+sections are not aligned using incompatible coordinates.
+
+## Quick map of the React and report workspaces
+
+```mermaid
+flowchart LR
+  H[Home] --> R[React UI/UX Tool]
+  H --> S[Report Studio]
+  R --> P[Choose and analyze project]
+  P --> C[Select a component]
+  C --> I[Edit properties or events]
+  I --> V[Review and test]
+  S --> F[Choose report folder]
+  F --> L[Choose a report]
+  L --> D[Design: select, drag, resize]
+  D --> A[Palette: add objects]
+  A --> O[Properties: change values]
+  O --> W[Save or Save copy]
+  W --> T[Check output and data]
+```
+
+In React, **Components** contains components and elements that can be added to a
+supported container. In Report Studio, palette and object lists are grouped; expand
+or collapse them to reduce scrolling. Select an object on the page or in the left
+structure to view its properties. **Remove object** removes it from the draft;
+**Exit** prompts when changes are unsaved. For `.yrf`, Design is approximate and
+Save copy creates a separate file; verify it in WaiReport before business use.

@@ -1,0 +1,21 @@
+{
+  "invoice": {
+    "number": "INV-2026-0001",
+    "issuedAt": "2026-11-06",
+    "dueAt": "2026-12-06",
+    "customerName": "PT Contoh Sintetis",
+    "customerAddress": "Jakarta",
+    "currency": "IDR",
+    "subtotal": 1250000,
+    "tax": 137500,
+    "total": 1387500
+  },
+  "lines": [
+    {
+      "description": "Jasa implementasi",
+      "quantity": 1,
+      "unitPrice": 1250000,
+      "amount": 1250000
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feature Discovery"
+  short_description: "Turn feature uncertainty into acceptance criteria"
+  default_prompt: "Clarify this feature and define its smallest useful implementation."

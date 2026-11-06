@@ -6,6 +6,12 @@ export const en = {
   dark: "Dark",
   system: "System",
   home: "Project home",
+  leaveWorkspace: "Leave project workspace",
+  leaveWorkspaceTitle: "Leave this project workspace?",
+  leaveWorkspaceMessage: "You’ll return to the project start page.",
+  leaveWorkspaceHint: "Changes already saved to source will remain. You can open this project again from Recent projects.",
+  leavePreviewHint: "The local preview will keep running until you stop it.",
+  stayInWorkspace: "Stay in project",
   help: "Help & about",
   newProject: "New Project",
   openProject: "Open Existing Project",
@@ -47,6 +53,7 @@ export const en = {
     "Paste an absolute local path. Static analysis does not run project scripts.",
   open: "Analyze project",
   browse: "Browse",
+  pickerUnavailable: "The folder picker could not open. Paste an absolute folder path into the field instead.",
   filesOnly: "Create files only",
   filesHint:
     "No dependency installation or project commands run during creation.",
@@ -82,7 +89,11 @@ export const en = {
   analysisIntro:
     "A safe first look at your source. Nothing is installed, run, or changed.",
   inspectOnly: "Inspect only",
+  inspectOnlyHint: "Explore the analysis without running project code.",
   startPreview: "Start local preview",
+  startPreviewHint: "Review and approve running the project before viewing it live.",
+  workspacePanels: "Workspace panels",
+  canvas: "Canvas",
   configurePreview: "Configure preview",
   detected: "Detected",
   routes: "Routes",
@@ -137,7 +148,6 @@ export const en = {
   tree: "Tree",
   pages: "Pages",
   boards: "Boards",
-  assets: "Assets",
   inspector: "Property Inspector",
   selectHint: "Select an element on canvas or from the source tree.",
   source: "Source",
@@ -156,6 +166,9 @@ export const en = {
   eventName: "Event property",
   eventHandler: "Existing function",
   saveEvent: "Bind event to source",
+  refreshAfterWriteFailed: "The source changed, but the preview or analysis could not refresh. Re-analyze the project before editing again.",
+  removeEvent: "Remove event binding",
+  removeEventConfirm: "Remove this event binding from source? The function itself will remain.",
   eventContractHint:
     "Only events declared by the component (or supported native events) can be bound.",
   noCallables:
@@ -179,6 +192,9 @@ export const en = {
     "Token edits require a confirmed token declaration. Use Source to see where it comes from.",
   styleOrigin: "Style origin",
   inlineStyle: "Inline style",
+  formattingPalette: "Formatting palette",
+  formattingPaletteHint: "Choose a style and value, then apply it to the selected element.",
+  formattingChoice: "Formatting property",
   cssProperty: "CSS property",
   cssValue: "CSS value",
   locked: "Why this element is read-only",
@@ -262,8 +278,6 @@ export const en = {
   noData:
     "State and data expressions are inspected in source; business logic is not rewritten.",
   noStyle: "No editable fixed style was found on this element.",
-  noAssets:
-    "Assets remain in your project. Browse the source files to inspect references.",
   reviewChanges: "Review Changes",
   noChanges: "No pending changes",
   noChangesHint:
@@ -273,8 +287,11 @@ export const en = {
   applied: "Changes applied to source.",
   discarded: "Draft discarded.",
   undo: "Undo last source edit",
+  undoHint: "Undo the last source edit in this session, if the file has not changed.",
   undone: "Previous source restored safely.",
   conflict: "Source has changed. Re-analyze before another direct edit.",
+  projectSwitched: "Another tab changed the active project. Reopen this project before editing.",
+  watchingIncomplete: "Some source folders cannot be watched. Re-analyze when files change; each edit still checks its source file.",
   requestedScope: "Requested change range",
   actualFiles: "Actual files",
   usageFiles: "Known usage files",
@@ -493,6 +510,19 @@ export const en = {
   firstLanguage: "Choose English or Bahasa Indonesia to begin.",
   boardOnly: "Board-only settings",
   loadingHint: "A fixture scenario; no backend calls are made by the board.",
+  stylePresets: "Styles",
+  preset_heading: "Heading",
+  preset_body: "Body text",
+  preset_muted: "Muted",
+  preset_accent: "Accent",
+  preset_card: "Card",
+  preset_danger: "Danger",
+  stylePresetHint: "Apply a style preset to the selected element; source follows the choice.",
+  styleApplied: "Style applied to source",
+
+  reportStudio: "Report Studio",
+  reportDescription:
+    "Design printable business reports with professional templates and print preview.",
 } as const;
 export type Key = keyof typeof en;
 export const id: Record<Key, string> = {
@@ -503,6 +533,12 @@ export const id: Record<Key, string> = {
   dark: "Gelap",
   system: "Sistem",
   home: "Beranda project",
+  leaveWorkspace: "Keluar dari workspace project",
+  leaveWorkspaceTitle: "Keluar dari workspace project ini?",
+  leaveWorkspaceMessage: "Anda akan kembali ke halaman awal project.",
+  leaveWorkspaceHint: "Perubahan yang sudah tersimpan di source tetap ada. Anda dapat membuka project ini lagi dari Project terakhir.",
+  leavePreviewHint: "Preview lokal akan tetap berjalan sampai Anda menghentikannya.",
+  stayInWorkspace: "Tetap di project",
   help: "Bantuan & tentang",
   newProject: "Buat Project Baru",
   openProject: "Buka Project yang Sudah Ada",
@@ -544,6 +580,7 @@ export const id: Record<Key, string> = {
     "Tempel lokasi folder lokal lengkap. Pemeriksaan awal tidak menjalankan script project.",
   open: "Periksa project",
   browse: "Jelajahi",
+  pickerUnavailable: "Folder picker tidak dapat dibuka. Tempel path folder absolut pada kolom sebagai gantinya.",
   filesOnly: "Buat file saja",
   filesHint:
     "Pembuatan file tidak meng-install paket atau menjalankan perintah project.",
@@ -579,7 +616,11 @@ export const id: Record<Key, string> = {
   analysisIntro:
     "Source hanya dibaca. Tidak ada paket yang di-install, script yang dijalankan, atau file yang diubah.",
   inspectOnly: "Periksa saja",
+  inspectOnlyHint: "Jelajahi hasil pemeriksaan tanpa menjalankan kode project.",
   startPreview: "Mulai preview lokal",
+  startPreviewHint: "Tinjau dan setujui menjalankan project sebelum melihat preview langsung.",
+  workspacePanels: "Panel workspace",
+  canvas: "Canvas",
   configurePreview: "Atur preview",
   detected: "Terdeteksi",
   routes: "Route",
@@ -634,7 +675,6 @@ export const id: Record<Key, string> = {
   tree: "Tree",
   pages: "Halaman",
   boards: "Board",
-  assets: "Aset",
   inspector: "Pengaturan Objek",
   selectHint: "Pilih elemen di canvas atau dari source tree.",
   source: "Source",
@@ -653,6 +693,9 @@ export const id: Record<Key, string> = {
   eventName: "Property event",
   eventHandler: "Fungsi yang sudah ada",
   saveEvent: "Hubungkan event ke source",
+  refreshAfterWriteFailed: "Source telah berubah, tetapi preview atau pemeriksaan gagal diperbarui. Periksa ulang project sebelum mengedit lagi.",
+  removeEvent: "Hapus event binding",
+  removeEventConfirm: "Hapus event binding ini dari source? Fungsinya tetap ada.",
   eventContractHint:
     "Hanya event yang dideklarasikan component (atau event native yang didukung) yang dapat dihubungkan.",
   noCallables:
@@ -676,6 +719,9 @@ export const id: Record<Key, string> = {
     "Perubahan token memerlukan deklarasi token yang pasti. Periksa asalnya pada Source.",
   styleOrigin: "Asal style",
   inlineStyle: "Inline style",
+  formattingPalette: "Palet format",
+  formattingPaletteHint: "Pilih style dan nilai, lalu terapkan ke elemen yang dipilih.",
+  formattingChoice: "Properti format",
   cssProperty: "Property CSS",
   cssValue: "Nilai CSS",
   locked: "Mengapa elemen ini read-only",
@@ -760,8 +806,6 @@ export const id: Record<Key, string> = {
     "Expression state dan data diperiksa di source; logika bisnis tidak diubah.",
   noStyle:
     "Tidak ditemukan deklarasi style statis yang bisa diedit pada elemen ini.",
-  noAssets:
-    "Aset tetap berada di project Anda. Jelajahi file source untuk memeriksa referensi.",
   reviewChanges: "Tinjau Perubahan",
   noChanges: "Tidak ada perubahan tertunda",
   noChangesHint:
@@ -771,9 +815,12 @@ export const id: Record<Key, string> = {
   applied: "Perubahan diterapkan ke source.",
   discarded: "Draft dibuang.",
   undo: "Batalkan edit source terakhir",
+  undoHint: "Batalkan edit source terakhir pada sesi ini jika file belum berubah.",
   undone: "Source sebelumnya dipulihkan dengan aman.",
   conflict:
     "Source telah berubah. Analisis ulang sebelum menerapkan patch lain.",
+  projectSwitched: "Tab lain mengganti project aktif. Buka kembali project ini sebelum mengedit.",
+  watchingIncomplete: "Sebagian folder source tidak dapat dipantau. Periksa ulang setelah file berubah; setiap edit tetap memeriksa file source.",
   requestedScope: "Cakupan yang diminta",
   actualFiles: "File sebenarnya",
   usageFiles: "File penggunaan yang diketahui",
@@ -991,6 +1038,19 @@ export const id: Record<Key, string> = {
   firstLanguage: "Pilih English atau Bahasa Indonesia untuk memulai.",
   boardOnly: "Pengaturan board saja",
   loadingHint: "Skenario fixture; board tidak membuat request backend.",
+  stylePresets: "Gaya",
+  preset_heading: "Judul",
+  preset_body: "Teks isi",
+  preset_muted: "Redup",
+  preset_accent: "Aksen",
+  preset_card: "Kartu",
+  preset_danger: "Bahaya",
+  stylePresetHint: "Terapkan preset gaya ke elemen terpilih; source mengikuti pilihan.",
+  styleApplied: "Gaya diterapkan ke source",
+
+  reportStudio: "Studio Laporan",
+  reportDescription:
+    "Rancang laporan bisnis siap cetak dengan template profesional dan pratinjau cetak.",
 };
 
 const evidenceId: Record<string, string> = {

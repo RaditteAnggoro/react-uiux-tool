@@ -5,17 +5,40 @@
   "type": "module",
   "author": "RA",
   "license": "MIT",
-  "bin": { "react-uiux-tool": "dist/cli.js" },
-  "exports": { ".": "./dist/engine/index.js" },
-  "files": ["dist", "fixtures/demo", "docs", "LICENSE", "NOTICE.md", "INSPIRATION.md", "THIRD_PARTY_NOTICES.md", "CITATION.cff", "SECURITY.md", "BENCHMARKS.md", "COMPATIBILITY_MATRIX.md", "KNOWN_LIMITATIONS.md", "IMPLEMENTATION_STATUS.md", "README.md", "README.id.md"],
-  "engines": { "node": ">=22.12.0" },
+  "bin": {
+    "react-uiux-tool": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/engine/index.js",
+    "./reports": "./dist/reports/embed.js"
+  },
+  "files": [
+    "dist",
+    "fixtures/demo",
+    "docs",
+    "LICENSE",
+    "NOTICE.md",
+    "INSPIRATION.md",
+    "THIRD_PARTY_NOTICES.md",
+    "CITATION.cff",
+    "SECURITY.md",
+    "BENCHMARKS.md",
+    "COMPATIBILITY_MATRIX.md",
+    "KNOWN_LIMITATIONS.md",
+    "IMPLEMENTATION_STATUS.md",
+    "README.md",
+    "README.id.md"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "tsx src/cli.ts",
     "prepack": "npm run build",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.studio.json",
     "start": "node dist/cli.js",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts tests/reports/*.test.ts",
     "test:e2e": "playwright test",
     "benchmark": "node --expose-gc --import tsx scripts/benchmark.ts",
     "docs:screenshots": "npm run build && node scripts/capture-docs.mjs",

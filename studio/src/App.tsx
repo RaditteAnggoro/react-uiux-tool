@@ -2,6 +2,8 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  lazy,
+  Suspense,
   useEffect,
   useId,
   useMemo,
@@ -15,10 +17,11 @@ import type {
   SourcePatch,
   PatchRequest,
 } from "../../src/engine/types";
-import { api, setToken } from "./api";
+import { api, setProject, setToken } from "./api";
 import { en, id, evidenceText, type Key } from "./i18n";
-type Screen = "home" | "wizard" | "open" | "analysis" | "studio";
-type ModalName = "language" | "preview" | "about" | "guide" | "review" | null;
+const ReportStudio = lazy(() => import("./features/report-studio/ReportStudio"));
+type Screen = "home" | "wizard" | "open" | "analysis" | "studio" | "report";
+type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | null;
 type ProjectTreeEntry = {
   name: string;
   path: string;
@@ -76,6 +79,12 @@ const icons: Record<string, ReactNode> = {
   home: (
     <>
       <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+    </>
+  ),
+  exit: (
+    <>
+      <path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" />
+      <path d="M14 8l4 4-4 4M8 12h10" />
     </>
   ),
   plus: (
@@ -498,6 +507,7 @@ export default function App() {
   );
   const t = (key: Key) => (language === "id" ? id : en)[key];
   const evidence = (value: string) => evidenceText(value, language);
+  const [reportReturn, setReportReturn] = useState<"home" | "studio">("home");
   const [session, setSession] = useState<any>(null),
     [screen, setScreen] = useState<Screen>("home"),
     [modal, setModal] = useState<ModalName>(null);
@@ -532,6 +542,7 @@ export default function App() {
     [leftTab, setLeftTab] = useState<"components" | "tree" | "files">("tree"),
     [nav, setNav] = useState("pages"),
     [search, setSearch] = useState("");
+  const [mobilePanel, setMobilePanel] = useState<"canvas" | "navigation" | "inspector">("canvas");
   const [treeChildren, setTreeChildren] = useState<
       Record<string, ProjectTreeEntry[]>
     >({}),
@@ -570,6 +581,8 @@ export default function App() {
     [duplicateValue, setDuplicateValue] = useState("");
   const [logs, setLogs] = useState<string[]>([]),
     [sourceChanged, setSourceChanged] = useState(false),
+    [watchingIncomplete, setWatchingIncomplete] = useState(false),
+    [projectSwitched, setProjectSwitched] = useState(false),
     [checkpoint, setCheckpoint] = useState(false);
   const [boards, setBoards] = useState<Board[]>([
       { id: "button", name: "Button / States", scenario: "default" },
@@ -690,6 +703,7 @@ export default function App() {
     setModal("guide");
   };
   const applyReport = (value: AnalysisReport) => {
+    setProject(value.projectRoot);
     const previousElements = new Map(
       (report?.elements || []).map((element) => [element.id, element]),
     );
@@ -814,11 +828,18 @@ export default function App() {
         .then((value) => {
           setLogs(value.logs || []);
           setSourceChanged(!!value.sourceChanged);
+          setWatchingIncomplete(!!value.watchingIncomplete);
+          setProjectSwitched(value.projectRoot !== report.projectRoot);
         })
         .catch(() => {});
     }, 2500);
     return () => clearInterval(timer);
   }, [report?.projectRoot]);
+  useEffect(() => {
+    const warn = () => { setSourceChanged(true); setError(t("refreshAfterWriteFailed")); };
+    window.addEventListener("uiux:refresh-failed", warn);
+    return () => window.removeEventListener("uiux:refresh-failed", warn);
+  }, [language]);
   useEffect(() => {
     if (!report) return;
     let active = true;
@@ -1254,6 +1275,7 @@ export default function App() {
   async function browse(target: "open" | "create") {
     await act(async () => {
       const value = await api("pick-directory", {});
+      if (value.unavailable) setError(t("pickerUnavailable"));
       if (value.path) {
         if (target === "open") setPath(value.path);
         else setForm((f) => ({ ...f, parentDirectory: value.path }));
@@ -1382,6 +1404,8 @@ export default function App() {
       const result = await api("create", { ...form, approved: true });
       applyReport(result.analysis);
       setIsDemo(false);
+      setCheckpoint(false);
+      setPatch(null);
       setPreview(null);
       setDesignTarget(null);
       setPreviewState("stopped");
@@ -1701,6 +1725,36 @@ export default function App() {
       flash(t("groupMoved"));
     });
   }
+  function applyStylePreset(preset: string) {
+    if (!selected || busy || !selected.operations.includes("style")) return;
+    const presets: Record<string, Array<[string, string | number]>> = {
+      heading: [["fontSize", 28], ["fontWeight", 700], ["lineHeight", 1.2]],
+      body: [["fontSize", 16], ["fontWeight", 400], ["lineHeight", 1.5]],
+      muted: [["color", "#667085"], ["fontSize", 14]],
+      accent: [["color", "#635bff"], ["fontWeight", 600]],
+      card: [["background", "#ffffff"], ["borderRadius", 12], ["padding", 16]],
+      danger: [["color", "#c62828"]],
+    };
+    const styles = presets[preset];
+    if (!styles || !selected.hash) return;
+    const target = selected;
+    void act(async () => {
+      const items = styles.map(([name, value]) => ({
+        file: target.source.file,
+        elementId: target.id,
+        expectedHash: target.hash,
+        name,
+        value,
+        scope: "instance" as const,
+        confirmScope: false,
+      }));
+      const result = await api<{ analysis: AnalysisReport }>("edit-group", { items });
+      applyReport(result.analysis);
+      setCheckpoint(true);
+      flash(t("styleApplied"));
+    });
+  }
+
   function nudgeElement(
     element: JsxElement,
     direction: string,
@@ -1911,6 +1965,8 @@ export default function App() {
       <div key={key}>
         <button
           role="treeitem"
+          data-tree-key={key}
+          aria-level={depth + 1}
           aria-expanded={children.length ? expanded : undefined}
           aria-selected={selectedIds.includes(element.id)}
           className={`explorer-row ${selectedIds.includes(element.id) ? "selected" : ""}`}
@@ -1982,6 +2038,8 @@ export default function App() {
       <div key={key}>
         <button
           role="treeitem"
+          data-tree-key={key}
+          aria-level={depth + 1}
           aria-expanded={roots.length ? expanded : undefined}
           className="explorer-row component-row"
           style={{ paddingLeft: 8 + depth * 14 }}
@@ -2013,6 +2071,8 @@ export default function App() {
       <div key={key}>
         <button
           role="treeitem"
+          data-tree-key={key}
+          aria-level={depth + 1}
           aria-expanded={components.length ? expanded : undefined}
           className="explorer-row file-row"
           style={{ paddingLeft: 8 + depth * 14 }}
@@ -2050,6 +2110,8 @@ export default function App() {
       <div key={key}>
         <button
           role="treeitem"
+          data-tree-key={key}
+          aria-level={depth + 1}
           aria-expanded={expanded}
           className="explorer-row directory-row"
           style={{ paddingLeft: 8 + depth * 14 }}
@@ -2086,7 +2148,30 @@ export default function App() {
     );
   };
   const sourceExplorer = (
-    <div className="source-explorer" role="tree" aria-label={t("sourceTree")}>
+    <div className="source-explorer" role="tree" aria-label={t("sourceTree")} aria-multiselectable="true" onKeyDown={(event) => {
+      const item = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="treeitem"]');
+      if (!item) return;
+      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="treeitem"]:not(:disabled)'));
+      const index = items.indexOf(item);
+      const key = item.dataset.treeKey;
+      const expanded = item.getAttribute("aria-expanded");
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : Math.max(0, Math.min(items.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+        items[next]?.focus();
+      } else if (event.key === "ArrowRight" && expanded === "true") {
+        event.preventDefault();
+        const child = key === "dir:" ? items[index + 1] : item.parentElement?.querySelector<HTMLButtonElement>(':scope > div [role="treeitem"]');
+        child?.focus();
+      } else if ((event.key === "ArrowRight" && expanded === "false") || (event.key === "ArrowLeft" && expanded === "true")) {
+        event.preventDefault();
+        if (key?.startsWith("dir:") && key !== "dir:") toggleDirectory(key.slice(4));
+        else if (key) toggleExpanded(key);
+      } else if (event.key === "ArrowLeft") {
+        const parent = item.parentElement?.parentElement?.closest("div")?.querySelector<HTMLButtonElement>(':scope > [role="treeitem"]');
+        if (parent) { event.preventDefault(); parent.focus(); }
+      }
+    }}>
       {normalizedSearch ? (
         searchedFiles.length ? (
           searchedFiles.map((file) =>
@@ -2107,7 +2192,9 @@ export default function App() {
         <>
           <button
             role="treeitem"
-            aria-expanded="true"
+            aria-level={1}
+            aria-expanded={expandedNodes.has("dir:")}
+            data-tree-key="dir:"
             className="explorer-row project-root-row"
             onClick={() => toggleExpanded("dir:")}
           >
@@ -2830,6 +2917,27 @@ export default function App() {
                   </section>
                 )}
                 <section className="inspector-section">
+                  <h4>{t("formattingPalette")}</h4>
+                  <p className="small muted">{t("formattingPaletteHint")}</p>
+                  <Field label={t("formattingChoice")}>
+                    <select value={styleName} disabled={!editableSelected || !selected.operations.includes("style")} onChange={(event) => setStyleName(event.target.value)}>
+                      {[
+                        ["padding", "Padding"], ["fontFamily", "Font family"], ["fontSize", "Font size"],
+                        ["fontWeight", "Font weight"], ["fontStyle", "Italic"],
+                        ["textDecorationLine", "Underline / strikethrough"], ["color", "Text color"],
+                        ["backgroundColor", "Background"], ["letterSpacing", "Letter spacing"],
+                        ["lineHeight", "Line height"], ["textAlign", "Alignment"],
+                        ["borderWidth", "Border width"], ["borderColor", "Border color"],
+                        ["whiteSpace", "Wrap text"], ["transform", "Rotation"],
+                      ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label={t("cssValue")}>
+                    <input value={styleValue} onChange={(event) => setStyleValue(event.target.value)} disabled={!editableSelected || !selected.operations.includes("style")} placeholder="e.g. 16px, italic, underline" />
+                  </Field>
+                  <button className="button full" disabled={busy || !editableSelected || !selected.operations.includes("style") || !styleValue.trim()} onClick={() => void stage("style", { name: styleName, value: styleValue })}>{t("stage")}</button>
+                </section>
+                <section className="inspector-section">
                   <h4>{t("styleOrigin")}</h4>
                   {selected.styleOrigins.length ? (
                     selected.styleOrigins.map((origin, index) => (
@@ -2954,6 +3062,16 @@ export default function App() {
                   }
                 >
                   {t("saveEvent")}
+                </button>
+                <button
+                  className="button full"
+                  disabled={busy || !editableSelected || !selected.events.some((event) => event.name === eventName && /^[A-Za-z_$][\w$]*$/.test(event.expression))}
+                  onClick={() => {
+                    if (window.confirm(t("removeEventConfirm")))
+                      void stage("remove-event", { name: eventName });
+                  }}
+                >
+                  {t("removeEvent")}
                 </button>
                 <p className="small muted">{t("methodHint")}</p>
               </section>
@@ -3240,8 +3358,20 @@ export default function App() {
     );
   }
   return (
-    <div className={`app ${screen === "studio" ? "workspace-app" : ""}`}>
-      {screen !== "studio" && commonHeader}
+    <div
+      className={`app ${screen === "studio" ? "workspace-app" : ""} ${screen === "report" ? "report-app" : ""}`}
+    >
+      {screen !== "studio" && screen !== "report" && commonHeader}
+      {screen === "report" && (
+        <Suspense fallback={<div className="rs-loading">{t("loadingHint")}</div>}>
+          <ReportStudio
+            token={session?.token ?? ""}
+            language={language}
+            context={reportReturn === "studio" ? "project" : "home"}
+            onExit={() => setScreen(reportReturn)}
+          />
+        </Suspense>
+      )}
       {screen === "home" && (
         <main className="home-page">
           <div className="home-intro">
@@ -3298,6 +3428,22 @@ export default function App() {
               <p>{t("openDescription")}</p>
               <span className="card-bottom">
                 {t("staticInspection")} <Icon name="arrow" />
+              </span>
+            </button>
+            <button
+              className="action-card"
+              onClick={() => {
+                setReportReturn("home");
+                setScreen("report");
+              }}
+            >
+              <span className="action-icon">
+                <Icon name="board" size={24} />
+              </span>
+              <h2>{t("reportStudio")}</h2>
+              <p>{t("reportDescription")}</p>
+              <span className="card-bottom">
+                Native .report.json <Icon name="arrow" />
               </span>
             </button>
           </div>
@@ -3669,11 +3815,11 @@ export default function App() {
           <div className="analysis-card">
             {renderAnalysis()}
             <div className="analysis-actionbar">
-              <button className="button" onClick={() => setScreen("studio")}>
+              <div className="analysis-choice"><button className="button" onClick={() => setScreen("studio")}>
                 {t("inspectOnly")}
                 <Icon name="arrow" size={16} />
-              </button>
-              <button
+              </button><p>{t("inspectOnlyHint")}</p></div>
+              <div className="analysis-choice"><button
                 className="button accent"
                 disabled={report.readiness.state === "UNSUPPORTED"}
                 title={report.readiness.reason}
@@ -3686,7 +3832,7 @@ export default function App() {
                   ? t("unsupported")
                   : t("startPreview")}
                 <Icon name="play" size={15} />
-              </button>
+              </button><p>{t("startPreviewHint")}</p></div>
             </div>
           </div>
         </main>
@@ -3696,8 +3842,8 @@ export default function App() {
           <header className="studio-header">
             <button
               className="brand"
-              onClick={() => setScreen("home")}
-              title={t("home")}
+              onClick={() => setModal("leave-project")}
+              title={t("leaveWorkspace")}
             >
               <span className="brand-icon">
                 <Icon name="code" size={20} />
@@ -3744,8 +3890,11 @@ export default function App() {
               </button>
             </div>
           </header>
+          <div className="mobile-panel-controls" aria-label={t("workspacePanels")}>
+            {(["canvas", "inspector"] as const).map((panel) => <button key={panel} className={mobilePanel === panel ? "active" : ""} aria-pressed={mobilePanel === panel} onClick={() => setMobilePanel(panel)}>{t(panel)}</button>)}
+          </div>
           <div
-            className="workbench"
+            className={`workbench mobile-${mobilePanel}`}
             style={
               {
                 "--left-width": `${panelWidths.left}px`,
@@ -3755,19 +3904,18 @@ export default function App() {
           >
             <nav className="icon-rail" aria-label={t("project")}>
               <button
-                className="rail-button"
-                title={t("home")}
-                aria-label={t("home")}
-                onClick={() => setScreen("home")}
+                className="rail-button rail-exit"
+                title={t("leaveWorkspace")}
+                aria-label={t("leaveWorkspace")}
+                onClick={() => setModal("leave-project")}
               >
-                <Icon name="home" />
+                <Icon name="exit" />
               </button>
               <span className="rail-divider" />
               {[
                 ["pages", "file"],
                 ["components", "layers"],
                 ["boards", "board"],
-                ["assets", "assets"],
               ].map(([name, icon]) => (
                 <button
                   key={name}
@@ -3776,6 +3924,7 @@ export default function App() {
                   aria-label={t(name as Key)}
                   onClick={() => {
                     setNav(name);
+                    setMobilePanel("navigation");
                     if (name === "components") {
                       setLeftTab("components");
                       setMode("design");
@@ -3786,6 +3935,17 @@ export default function App() {
                   <Icon name={icon} />
                 </button>
               ))}
+              <button
+                className="rail-button"
+                title={t("reportStudio")}
+                aria-label={t("reportStudio")}
+                onClick={() => {
+                  setReportReturn("studio");
+                  setScreen("report");
+                }}
+              >
+                <Icon name="file" />
+              </button>
               <button
                 className="rail-button rail-bottom"
                 title={t("help")}
@@ -3912,16 +4072,6 @@ export default function App() {
                     </>
                   )}
                 </div>
-              ) : nav === "assets" ? (
-                <div className="asset-panel">
-                  <Icon name="assets" size={30} />
-                  <p>{t("noAssets")}</p>
-                  {report.files
-                    .filter((file) => /\.(css|scss)$/.test(file.file))
-                    .map((file) => (
-                      <code key={file.file}>{file.file}</code>
-                    ))}
-                </div>
               ) : (
                 <>
                   {nav === "pages" && (
@@ -3975,7 +4125,35 @@ export default function App() {
                   ) : (
                     <>
                       {nav === "components" && (
-                        <>
+                        <div className="component-palette">
+                          <details className="style-presets">
+                            <summary className="list-section-label">{t("stylePresets")}</summary>
+                            <div className="style-preset-chips">
+                              {(
+                                [
+                                  "heading",
+                                  "body",
+                                  "muted",
+                                  "accent",
+                                  "card",
+                                  "danger",
+                                ] as const
+                              ).map((preset) => (
+                                <button
+                                  key={preset}
+                                  disabled={
+                                    busy ||
+                                    !selected ||
+                                    !selected.operations.includes("style")
+                                  }
+                                  title={t("stylePresetHint")}
+                                  onClick={() => applyStylePreset(preset)}
+                                >
+                                  {t(`preset_${preset}` as Key)}
+                                </button>
+                              ))}
+                            </div>
+                          </details>
                           <div
                             className={`component-drop-target ${selected?.operations.includes("insert") ? "ready" : ""}`}
                             onDragOver={(event) => {
@@ -4120,7 +4298,7 @@ export default function App() {
                           <p className="primitive-hint">
                             {t("dragWritesDirectly")}
                           </p>
-                        </>
+                        </div>
                       )}
                       {nav === "pages" && leftTab === "tree" && (
                         <>
@@ -4197,7 +4375,7 @@ export default function App() {
                   )}
                   <button
                     className="icon-button"
-                    title={t("undo")}
+                    title={t("undoHint")}
                     aria-label={t("undo")}
                     disabled={busy || !checkpoint}
                     onClick={() => void undo()}
@@ -4285,6 +4463,8 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {projectSwitched && <div className="conflict-banner" role="alert">{t("projectSwitched")}</div>}
+              {watchingIncomplete && <div className="conflict-banner" role="status">{t("watchingIncomplete")}</div>}
               {nav === "boards" && isDemo && (
                 <div className="scenario-toolbar">
                   <span>{t("scenario")}</span>
@@ -4556,6 +4736,28 @@ export default function App() {
             <span className="statusbar-end">{t("noPush")}</span>
           </footer>
         </>
+      )}
+      {modal === "leave-project" && (
+        <Modal
+          closeLabel={t("close")}
+          title={t("leaveWorkspaceTitle")}
+          onClose={() => setModal(null)}
+        >
+          <p>{t("leaveWorkspaceMessage")}</p>
+          <p className="small muted">{t("leaveWorkspaceHint")}</p>
+          {preview && <p className="small muted">{t("leavePreviewHint")}</p>}
+          <div className="modal-footer">
+            <button className="button" onClick={() => setModal(null)}>
+              {t("stayInWorkspace")}
+            </button>
+            <button className="button accent" disabled={busy} onClick={() => {
+              setModal(null);
+              setScreen("home");
+            }}>
+              {t("leaveWorkspace")}
+            </button>
+          </div>
+        </Modal>
       )}
       {modal === "language" && (
         <Modal

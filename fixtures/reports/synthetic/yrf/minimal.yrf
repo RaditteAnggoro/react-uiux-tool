@@ -1,0 +1,113 @@
+{
+  "waiReportForm": {
+    "version": "1.0.0",
+    "license": ""
+  },
+  "pageSetting": {
+    "paper": {
+      "type": "A4",
+      "width": 2320,
+      "height": 3308
+    },
+    "margin": {
+      "left": 80,
+      "right": 80,
+      "top": 100,
+      "bottom": 100
+    },
+    "orientation": 0
+  },
+  "styles": {},
+  "script": {},
+  "vbScript": "",
+  "layout": {
+    "reportHeader": {
+      "name": "ReportHeader",
+      "type": "reportHeader",
+      "height": 150,
+      "objects": [
+        {
+          "type": "label",
+          "name": "hd",
+          "left": 100,
+          "top": 40,
+          "width": 900,
+          "height": 120,
+          "caption": "Judul Sintetis",
+          "style": "font-weight: bold; text-align: left; font-size: 8pt; color: #111827"
+        }
+      ]
+    },
+    "pages": [
+      {
+        "bands": [
+          {
+            "type": "pageHeader",
+            "name": "PageHeader",
+            "height": 200,
+            "objects": [
+              {
+                "type": "label",
+                "name": "ph",
+                "left": 80,
+                "top": 40,
+                "width": 1200,
+                "height": 100,
+                "caption": "Kop Halaman",
+                "style": "font-weight: bold; text-align: left; font-size: 8pt; color: #111827"
+              }
+            ]
+          },
+          {
+            "type": "detail",
+            "name": "Detail",
+            "height": 300,
+            "objects": [
+              {
+                "type": "textbox",
+                "name": "tb",
+                "left": 80,
+                "top": 40,
+                "width": 1000,
+                "height": 100,
+                "caption": "Isi contoh",
+                "style": "font-weight: normal; text-align: left; font-size: 9pt; color: #374151"
+              },
+              {
+                "type": "line",
+                "name": "ln",
+                "left": 80,
+                "top": 160,
+                "width": 1800,
+                "height": 10
+              }
+            ]
+          },
+          {
+            "type": "pageFooter",
+            "name": "PageFooter",
+            "height": 200,
+            "objects": [
+              {
+                "type": "label",
+                "name": "pf",
+                "left": 80,
+                "top": 60,
+                "width": 600,
+                "height": 100,
+                "caption": "Halaman",
+                "style": "font-weight: normal; text-align: right; font-size: 7pt; color: #6b7280"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reportFooter": {
+      "name": "ReportFooter",
+      "type": "reportFooter",
+      "height": 150,
+      "objects": []
+    }
+  }
+}

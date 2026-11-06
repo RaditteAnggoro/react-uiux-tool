@@ -92,10 +92,15 @@ const STYLE_KEYS = new Set([
   "rowGap",
   "columnGap",
   "fontSize",
+  "fontFamily",
+  "fontStyle",
   "fontWeight",
   "lineHeight",
   "letterSpacing",
   "textAlign",
+  "textDecorationLine",
+  "whiteSpace",
+  "transform",
   "border",
   "borderColor",
   "borderWidth",
@@ -130,6 +135,9 @@ const STYLE_ENUMS: Record<string, string[]> = {
   position: ["static", "relative", "absolute", "fixed", "sticky"],
   flexDirection: ["row", "row-reverse", "column", "column-reverse"],
   textAlign: ["left", "right", "center", "justify", "start", "end"],
+  fontStyle: ["normal", "italic", "oblique"],
+  textDecorationLine: ["none", "underline", "line-through", "underline line-through"],
+  whiteSpace: ["normal", "nowrap", "pre", "pre-wrap", "pre-line"],
   overflow: ["visible", "hidden", "clip", "scroll", "auto"],
 };
 const BLOCK = new Set([
@@ -457,6 +465,7 @@ export async function createPatch(
       "text",
       "prop",
       "event",
+      "remove-event",
       "style",
       "insert",
       "duplicate",
@@ -585,12 +594,12 @@ export async function createPatch(
         opening.tagName.end,
         ` ${name}=${attrValue(request.value)}`,
       );
-  } else if (request.operation === "event") {
+  } else if (request.operation === "event" || request.operation === "remove-event") {
     const name = request.name ?? "";
     const handler = request.value;
     if (!/^on[A-Z][A-Za-z0-9_$]*$/.test(name))
       fail("Choose a valid React event property.");
-    if (typeof handler !== "string" || !callableInScope(sf, node, handler))
+    if (request.operation === "event" && (typeof handler !== "string" || !callableInScope(sf, node, handler)))
       fail(
         `Event handler ${String(handler || "")} is not an existing callable in this component scope.`,
       );
@@ -609,7 +618,12 @@ export async function createPatch(
     );
     if (attrs.length > 1) fail("Duplicate JSX events require source editing.");
     const attr = attrs[0];
-    if (attr?.initializer)
+    if (attr && (!attr.initializer || !ts.isJsxExpression(attr.initializer) || !attr.initializer.expression || !ts.isIdentifier(attr.initializer.expression)))
+      fail("Event expressions are source-owned; edit them in source.");
+    if (request.operation === "remove-event") {
+      if (!attr) fail("This event binding no longer exists.");
+      after = applySpan(before, attr.getStart(sf), attr.end, "");
+    } else if (attr?.initializer)
       after = applySpan(
         before,
         attr.initializer.getStart(sf),

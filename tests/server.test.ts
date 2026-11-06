@@ -43,6 +43,8 @@ test("controller enforces same-origin capability and completes reviewed demo app
       403,
     );
 
+    let expectedProject = "";
+    let expectedCheckpoint = "";
     const call = async (endpoint: string, data: object) => {
       const response = await fetch(`${base}/api/${endpoint}`, {
         method: "POST",
@@ -51,7 +53,7 @@ test("controller enforces same-origin capability and completes reviewed demo app
           origin: base,
           "x-uiux-token": session.token,
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, expectedProject, expectedCheckpoint }),
       });
       const result = (await response.json()) as any;
       assert.equal(
@@ -59,6 +61,8 @@ test("controller enforces same-origin capability and completes reviewed demo app
         200,
         `${endpoint}: ${JSON.stringify(result)}`,
       );
+      if (endpoint === "demo" || endpoint === "open") expectedProject = result.projectRoot;
+      if (result.checkpoint?.id) expectedCheckpoint = result.checkpoint.id;
       return result;
     };
 
@@ -127,6 +131,21 @@ test("controller enforces same-origin capability and completes reviewed demo app
     assert.equal(applied.checkpoint.file, button.source.file);
     assert.match(await readFile(sourcePath, "utf8"), /Create workspace/);
     assert.match(await readFile(sourcePath, "utf8"), /onClick=/);
+
+    const staleUndo = await fetch(`${base}/api/undo`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base, "x-uiux-token": session.token },
+      body: JSON.stringify({ approved: true, expectedProject, expectedCheckpoint: "stale-checkpoint" }),
+    });
+    assert.equal(staleUndo.status, 409);
+    assert.match(await readFile(sourcePath, "utf8"), /Create workspace/);
+    const staleProject = await fetch(`${base}/api/undo`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base, "x-uiux-token": session.token },
+      body: JSON.stringify({ approved: true, expectedProject: "/different/project", expectedCheckpoint }),
+    });
+    assert.equal(staleProject.status, 409);
+    assert.match(await readFile(sourcePath, "utf8"), /Create workspace/);
 
     await call("undo", { approved: true });
     assert.equal(await readFile(sourcePath, "utf8"), original);

@@ -16,6 +16,7 @@ all projects using the same framework or library. Development host: macOS, Node
 | Static primitive structure                          | Tested subset              | Reorder/insert/remove and invalid-nesting engine tests passed; eligible containers only                                                                 |
 | Inserted literal props / existing event function    | Tested subset              | Exact string/number/boolean values and safe events write directly; missing/unsafe handlers and props are rejected                                       |
 | Project component prop/event contracts              | Tested subset              | TS property/union declarations and JS destructuring defaults drive literal controls; declared callbacks bind only to existing owner functions           |
+| Named event bindings                                | Tested subset              | Fixture coverage adds, changes, removes, and undoes named bindings; inline expressions remain source-owned and business behavior is not inferred          |
 | `.map()`, conditional JSX, spread/dynamic ownership | Inspect/read-only          | Demo and engine fixtures expose reasons; no single-row rewrite promise                                                                                  |
 | Reusable local project components                   | Tested subset              | Components filters out business views/pages/screens/routes and nonvisual modules; drag writes JSX and relative import directly; default/named and memo/forwardRef-wrapped exports supported |
 | Selection, move, align, delete, and Undo             | Tested subset              | Clear single/multi-selection outlines, direct drag, arrow movement, visual alignment controls, Delete/Backspace, and one-step Command/Ctrl+Z are covered |
@@ -43,3 +44,21 @@ Recorded generator commands are reproducible from exported `templateFiles` and
 directories and cleaned up, without changing a user's existing project.
 
 Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support claim.
+
+## Report Studio (P1)
+
+| Target / format | Status | Exercised evidence / boundary |
+| --- | --- | --- |
+| Native `.report.json` create/open/edit/save | Tested subset | Schema validation, deterministic serialize/parse round trip, atomic save with SHA-256 conflict check; unit + API + Playwright coverage |
+| Professional templates (blank, invoice, grouped statement, receipt) | Tested | All four validate and render; three style families |
+| Print-oriented HTML rendering | Tested subset | Escapes text, blocks unsafe image URLs, deterministic output; HTML export is available |
+| PDF, HTML, CSV, XLSX, DOCX export | Tested subset | `/api/reports/export` returns bytes; PDF follows the paginated band layout; XLSX/DOCX are OOXML zip containers; per-format fidelity warnings are returned. Charts/crosstab are not drawn into PDF. |
+| PDF unsupported characters | Tested subset | Warnings count replacement characters in text actually rendered, including bound fields and table rows; PDF still uses limited fonts. |
+| Report browsing and project entry | Tested subset | Home and project rail open the same studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths skipped; Back returns to the project |
+| Native Code tab | Tested subset | JSON draft is validated through `/api/reports/validate`; invalid text is rejected without touching the draft |
+| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry (including line endpoints) can be edited; palette adds text, field, box and line, and existing objects can be removed. Changes save to a copy with hash checks; creation and edits are **not vendor-validated** |
+
+React Style includes a basic formatting property selector for supported inline JSX
+styles; report presets and automatic list creation are not shared with React or `.yrf`.
+Report multi-selection Align/Group requires the same band. PDF rich formatting emits
+an export warning when the currently detected unsupported properties are used.

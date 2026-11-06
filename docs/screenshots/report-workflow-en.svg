@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="140" viewBox="0 0 1100 140" role="img" aria-label="Report Studio workflow">
+<rect width="1100" height="140" rx="18" fill="#f4f5fb"/>
+<rect x="20" y="37" width="190" height="66" rx="12" fill="#ffffff" stroke="#7770ff" stroke-width="2"/>
+<text x="115" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#1b2335">1  Choose folder</text>
+<path d="M215 70 h15 m-5 -5 5 5 -5 5" fill="none" stroke="#6258ff" stroke-width="2"/>
+<rect x="238" y="37" width="190" height="66" rx="12" fill="#ffffff" stroke="#7770ff" stroke-width="2"/>
+<text x="333" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#1b2335">2  Open or create</text>
+<path d="M433 70 h15 m-5 -5 5 5 -5 5" fill="none" stroke="#6258ff" stroke-width="2"/>
+<rect x="456" y="37" width="190" height="66" rx="12" fill="#ffffff" stroke="#7770ff" stroke-width="2"/>
+<text x="551" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#1b2335">3  Design</text>
+<path d="M651 70 h15 m-5 -5 5 5 -5 5" fill="none" stroke="#6258ff" stroke-width="2"/>
+<rect x="674" y="37" width="190" height="66" rx="12" fill="#ffffff" stroke="#7770ff" stroke-width="2"/>
+<text x="769" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#1b2335">4  Preview</text>
+<path d="M869 70 h15 m-5 -5 5 5 -5 5" fill="none" stroke="#6258ff" stroke-width="2"/>
+<rect x="892" y="37" width="190" height="66" rx="12" fill="#ffffff" stroke="#7770ff" stroke-width="2"/>
+<text x="987" y="76" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#1b2335">5  Save / export</text>
+</svg>

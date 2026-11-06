@@ -8,6 +8,7 @@ import {
   rm,
   symlink,
   chmod,
+  stat,
 } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -37,7 +38,7 @@ async function fixture(source: string, extra: Record<string, string> = {}) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), text);
   }
-  return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
+  return { root, cleanup: () => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
 }
 function req(
   el: JsxElement,
@@ -353,6 +354,31 @@ test("static reorder, insertion, removal, text escaping and nesting constraints"
     await f.cleanup();
   }
 });
+test("event bindings can be added, changed and removed without rewriting handler logic", async () => {
+  const source = "export default function App(){const first=()=>{};const second=()=>{};return <main><button>Save</button><button onClick={() => first()}>Custom</button></main>}";
+  const f = await fixture(source);
+  try {
+    const button = async () => (await analyzeProject(f.root)).elements.find((element) => element.tag === "button" && element.text === "Save")!;
+    const add = await createPatch(f.root, req(await button(), "event", "first", "onClick"));
+    await applyPatch(f.root, add, true);
+    assert.match(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), /onClick=\{first\}/);
+    const change = await createPatch(f.root, req(await button(), "event", "second", "onClick"));
+    await applyPatch(f.root, change, true);
+    assert.match(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), /onClick=\{second\}/);
+    const removal = await createPatch(f.root, req(await button(), "remove-event", undefined, "onClick"));
+    const checkpoint = await applyPatch(f.root, removal, true);
+    const after = await readFile(path.join(f.root, "src/App.tsx"), "utf8");
+    assert.doesNotMatch(after, /onClick=\{second\}/);
+    assert.match(after, /const second=\(\)=>\{\}/);
+    await undoPatch(f.root, checkpoint);
+    assert.match(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), /onClick=\{second\}/);
+    const custom = (await analyzeProject(f.root)).elements.find((element) => element.tag === "button" && element.text === "Custom")!;
+    await assert.rejects(createPatch(f.root, req(custom, "remove-event", undefined, "onClick")), /source-owned|read.only/i);
+    await assert.rejects(createPatch(f.root, req(custom, "event", "first", "onClick")), /source-owned|read.only/i);
+    await assert.rejects(createPatch(f.root, req(await button(), "event", "missing", "onClick")), /not an existing callable/);
+  } finally { await f.cleanup(); }
+});
+
 test("configured insertion validates specific values and existing event functions", async () => {
   const source =
     "import {useCallback} from 'react';export default function App(){const handleSave=useCallback(()=>{},[]);return <main></main>}";
@@ -791,6 +817,8 @@ test("UTF-8 BOM and executable permissions survive apply; malformed UTF-8 is iso
   const f = await fixture(source);
   try {
     await chmod(path.join(f.root, "src/App.tsx"), 0o754);
+    const originalMode = (await stat(path.join(f.root, "src/App.tsx"))).mode & 0o777;
+    if (process.platform !== "win32") assert.equal(originalMode, 0o754);
     const r = await analyzeProject(f.root);
     const patch = await createPatch(
       f.root,
@@ -798,10 +826,9 @@ test("UTF-8 BOM and executable permissions survive apply; malformed UTF-8 is iso
     );
     const cp = await applyPatch(f.root, patch, true);
     assert.equal((await readFile(path.join(f.root, "src/App.tsx")))[0], 0xef);
-    const { stat } = await import("node:fs/promises");
     assert.equal(
       (await stat(path.join(f.root, "src/App.tsx"))).mode & 0o777,
-      0o754,
+      originalMode,
     );
     await undoPatch(f.root, cp);
     assert.equal(

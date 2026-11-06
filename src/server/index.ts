@@ -6,8 +6,8 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { pickDirectory } from "./folder-picker.js";
+import { createReportApi } from "./report-routes.js";
 import type { ViteDevServer } from "vite";
 import type {
   AnalysisReport,
@@ -21,7 +21,6 @@ import {
 } from "../templates/index.js";
 import { PROJECT_ORIGIN, VERSION } from "../provenance.js";
 
-const executeFile = promisify(execFile);
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -107,6 +106,7 @@ export async function startStudio(options: StudioOptions = {}) {
   let watchers: FSWatcher[] = [];
   let watchGeneration = 0;
   let sourceChanged = false;
+  let watchingIncomplete = false;
   let analysisController: AbortController | null = null;
   let progress = { files: 0, file: "", running: false };
   let mutationBusy = false;
@@ -161,6 +161,7 @@ export async function startStudio(options: StudioOptions = {}) {
       });
       report = next;
       sourceChanged = false;
+      watchingIncomplete = false;
       ++watchGeneration;
       for (const active of watchers) active.close();
       watchers = [];
@@ -191,6 +192,7 @@ export async function startStudio(options: StudioOptions = {}) {
           });
           active.on("error", (error) => {
             if (generation !== watchGeneration) return;
+            watchingIncomplete = true;
             logs.push(
               `Source watching stopped for ${path.relative(next.projectRoot, directory) || "."}: ${error.message}`,
             );
@@ -199,6 +201,7 @@ export async function startStudio(options: StudioOptions = {}) {
           });
           watchers.push(active);
         } catch (error) {
+          watchingIncomplete = true;
           logs.push(
             `Source watching unavailable for ${path.relative(next.projectRoot, directory) || "."}: ${error instanceof Error ? error.message : "unknown error"}`,
           );
@@ -229,6 +232,21 @@ export async function startStudio(options: StudioOptions = {}) {
       logs.push("Recent projects could not be persisted.");
     }
   }
+  async function refreshAfterWrite() {
+    let warning = false;
+    try { await preview.overlay(null); } catch { warning = true; }
+    let analysis = current();
+    try { analysis = await analyze(analysis.projectRoot); } catch { warning = true; }
+    if (warning) {
+      sourceChanged = true;
+      logs.push("Source was changed, but the preview or analysis could not be refreshed. Re-analyze the project.");
+    }
+    return { analysis, refreshFailed: warning };
+  }
+  const reports = createReportApi({
+    currentProjectRoot: () => report?.projectRoot ?? null,
+    origin: () => origin,
+  });
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -266,6 +284,10 @@ export async function startStudio(options: StudioOptions = {}) {
             return;
           }
         }
+        if (url.pathname.startsWith("/api/reports/")) {
+          await reports.handle(req, res, url);
+          return;
+        }
         if (req.method === "GET") {
           if (url.pathname === "/api/session") {
             json(res, 200, {
@@ -284,6 +306,8 @@ export async function startStudio(options: StudioOptions = {}) {
               preview: preview.url,
               logs: logs.slice(-50),
               sourceChanged,
+              watchingIncomplete,
+              projectRoot: report?.projectRoot ?? null,
               progress,
             });
             return;
@@ -333,6 +357,8 @@ export async function startStudio(options: StudioOptions = {}) {
         }
         mutationBusy = true;
         locked = true;
+        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
+          throw new Error("Project changed in another tab; reopen your project before editing.");
         switch (url.pathname) {
           case "/api/open": {
             const root = string(data.path, "project path");
@@ -371,10 +397,14 @@ export async function startStudio(options: StudioOptions = {}) {
           case "/api/create": {
             approved(data);
             const plan = await createProject(data as TemplateInput);
-            await preview.stop();
-            staged = null;
-            checkpoint = null;
-            const analysis = await analyze(plan.targetDirectory);
+            let analysis: AnalysisReport;
+            try {
+              await preview.stop();
+              staged = null;
+              checkpoint = null;
+              analysis = await analyze(plan.targetDirectory);
+            }
+            catch { throw new Error(`Project files were created at ${plan.targetDirectory}, but analysis failed. Open that folder to retry; do not create it again.`); }
             await remember(analysis);
             json(res, 200, { plan, analysis });
             return;
@@ -430,11 +460,11 @@ export async function startStudio(options: StudioOptions = {}) {
             );
             const patch = await createPatch(current().projectRoot, data as any);
             checkpoint = await applyPatch(current().projectRoot, patch, true);
-            await preview.overlay(null);
             logs.push(`Saved ${patch.operation} directly to ${patch.file}.`);
+            const refreshed = await refreshAfterWrite();
             json(res, 200, {
               patch,
-              analysis: await analyze(current().projectRoot),
+              ...refreshed,
               checkpoint: {
                 id: checkpoint.id,
                 file: checkpoint.file,
@@ -458,13 +488,13 @@ export async function startStudio(options: StudioOptions = {}) {
               data.items,
             );
             checkpoint = await applyPatch(current().projectRoot, patch, true);
-            await preview.overlay(null);
             logs.push(
               `Saved grouped positioning for ${data.items.length} items to ${patch.file}.`,
             );
+            const refreshed = await refreshAfterWrite();
             json(res, 200, {
               patch,
-              analysis: await analyze(current().projectRoot),
+              ...refreshed,
               checkpoint: {
                 id: checkpoint.id,
                 file: checkpoint.file,
@@ -480,10 +510,9 @@ export async function startStudio(options: StudioOptions = {}) {
             const { applyPatch } = await import("../engine/index.js");
             checkpoint = await applyPatch(current().projectRoot, staged, true);
             staged = null;
-            await preview.overlay(null);
-            const analysis = await analyze(current().projectRoot);
+            const refreshed = await refreshAfterWrite();
             json(res, 200, {
-              analysis,
+              ...refreshed,
               checkpoint: {
                 id: checkpoint.id,
                 file: checkpoint.file,
@@ -502,11 +531,12 @@ export async function startStudio(options: StudioOptions = {}) {
               throw new Error(
                 "No applied checkpoint is available in this session",
               );
+            if (data.expectedCheckpoint !== checkpoint.id)
+              throw new Error("Undo checkpoint changed in another tab; no file was changed.");
             const { undoPatch } = await import("../engine/index.js");
             await undoPatch(current().projectRoot, checkpoint);
             checkpoint = null;
-            await preview.overlay(null);
-            json(res, 200, { analysis: await analyze(current().projectRoot) });
+            json(res, 200, await refreshAfterWrite());
             return;
           }
           case "/api/discard": {
@@ -516,48 +546,7 @@ export async function startStudio(options: StudioOptions = {}) {
             return;
           }
           case "/api/pick-directory": {
-            let result = "";
-            if (process.platform === "darwin")
-              result = (
-                await executeFile(
-                  "osascript",
-                  [
-                    "-e",
-                    'POSIX path of (choose folder with prompt "Choose a React project or parent directory")',
-                  ],
-                  { timeout: 120000 },
-                )
-              ).stdout.trim();
-            else if (process.platform === "win32")
-              result = (
-                await executeFile(
-                  "powershell.exe",
-                  [
-                    "-NoProfile",
-                    "-STA",
-                    "-Command",
-                    'Add-Type -AssemblyName System.Windows.Forms; $picker = New-Object System.Windows.Forms.FolderBrowserDialog; if ($picker.ShowDialog() -eq "OK") { $picker.SelectedPath }',
-                  ],
-                  { timeout: 120000 },
-                )
-              ).stdout.trim();
-            else
-              result = (
-                await executeFile(
-                  "zenity",
-                  [
-                    "--file-selection",
-                    "--directory",
-                    "--title=Choose project directory",
-                  ],
-                  { timeout: 120000 },
-                )
-              ).stdout.trim();
-            if (!result)
-              throw new Error(
-                "No directory selected. You can paste an absolute path instead.",
-              );
-            json(res, 200, { path: result });
+            json(res, 200, await pickDirectory());
             return;
           }
           default:

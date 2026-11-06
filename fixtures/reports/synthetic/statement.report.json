@@ -1,0 +1,357 @@
+{
+  "kind": "react-uiux-report",
+  "schemaVersion": 1,
+  "id": "tpl-statement",
+  "title": "Statement of Account",
+  "locale": "id-ID",
+  "units": "mm",
+  "page": {
+    "height": 297,
+    "margins": {
+      "bottom": 16,
+      "left": 16,
+      "right": 16,
+      "top": 16
+    },
+    "orientation": "portrait",
+    "size": "A4",
+    "width": 210
+  },
+  "styleTokens": {
+    "colors": {
+      "accent": "#0F766E",
+      "muted": "#57636B",
+      "negative": "#8C1D18",
+      "page": "#FFFFFF",
+      "positive": "#0B5132",
+      "primary": "#123F3A",
+      "rule": "#CBD5D1",
+      "surface": "#F4F7F5",
+      "text": "#0F172A"
+    },
+    "family": "neutralFinance",
+    "fonts": {
+      "body": "Helvetica, Arial, sans-serif",
+      "heading": "Helvetica, Arial, sans-serif",
+      "numeric": "'SF Mono', Menlo, Consolas, monospace"
+    },
+    "spacing": [
+      4,
+      8,
+      12,
+      16,
+      24
+    ],
+    "table": {
+      "headerHeight": 8,
+      "rowHeight": 7,
+      "stripe": "#EEF3F1"
+    }
+  },
+  "datasets": [
+    {
+      "id": "accounts",
+      "schema": {
+        "fields": [
+          "contractNumber",
+          "customerName",
+          "currency",
+          "closingBalance"
+        ]
+      }
+    },
+    {
+      "id": "entries",
+      "schema": {
+        "fields": [
+          "date",
+          "reference",
+          "description",
+          "debit",
+          "credit",
+          "balance"
+        ]
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "id": "periodStart",
+      "required": true,
+      "type": "date"
+    },
+    {
+      "id": "periodEnd",
+      "required": true,
+      "type": "date"
+    }
+  ],
+  "bands": [
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 9,
+            "width": 120,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-statement-title",
+          "props": {
+            "color": "#123F3A",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 16,
+            "fontWeight": 700,
+            "text": "LAPORAN TAGIHAN"
+          },
+          "type": "text"
+        },
+        {
+          "box": {
+            "height": 5,
+            "width": 58,
+            "x": 120,
+            "y": 2
+          },
+          "id": "el-statement-period",
+          "props": {
+            "align": "right",
+            "color": "#57636B",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 8,
+            "text": "Periode: {periodStart} – {periodEnd}"
+          },
+          "type": "text"
+        },
+        {
+          "box": {
+            "height": 0.4,
+            "width": 178,
+            "x": 0,
+            "y": 22
+          },
+          "id": "el-statement-rule",
+          "props": {
+            "color": "#123F3A",
+            "strokeWidth": 0.4
+          },
+          "type": "line"
+        }
+      ],
+      "height": 24,
+      "id": "band-title",
+      "kind": "reportTitle"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 5,
+            "width": 90,
+            "x": 0,
+            "y": 2
+          },
+          "id": "el-account-label",
+          "props": {
+            "color": "#57636B",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 8,
+            "text": "Akun / Kontrak"
+          },
+          "type": "text"
+        },
+        {
+          "bindings": {
+            "path": "accounts.contractNumber"
+          },
+          "box": {
+            "height": 5,
+            "width": 88,
+            "x": 90,
+            "y": 2
+          },
+          "id": "el-account-number",
+          "props": {
+            "align": "right",
+            "color": "#57636B",
+            "fontSize": 8
+          },
+          "type": "field"
+        }
+      ],
+      "height": 10,
+      "id": "band-page-header",
+      "kind": "pageHeader",
+      "repeat": true
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 6,
+            "width": 100,
+            "x": 0,
+            "y": 2
+          },
+          "id": "el-contract",
+          "props": {
+            "color": "#123F3A",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 9,
+            "fontWeight": 700,
+            "text": "Kontrak {contractNumber}"
+          },
+          "type": "text"
+        }
+      ],
+      "groupBy": "accounts.contractNumber",
+      "height": 10,
+      "id": "band-group-header",
+      "kind": "groupHeader",
+      "repeat": true
+    },
+    {
+      "elements": [
+        {
+          "bindings": {
+            "path": "entries"
+          },
+          "box": {
+            "height": 74,
+            "width": 178,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-entries-table",
+          "props": {
+            "columns": [
+              {
+                "align": "left",
+                "key": "date",
+                "label": "Tanggal",
+                "width": 22
+              },
+              {
+                "align": "left",
+                "key": "reference",
+                "label": "Referensi",
+                "width": 30
+              },
+              {
+                "align": "left",
+                "key": "description",
+                "label": "Keterangan",
+                "width": 52
+              },
+              {
+                "align": "right",
+                "currency": true,
+                "key": "debit",
+                "label": "Debit",
+                "width": 24
+              },
+              {
+                "align": "right",
+                "currency": true,
+                "key": "credit",
+                "label": "Kredit",
+                "width": 24
+              },
+              {
+                "align": "right",
+                "currency": true,
+                "key": "balance",
+                "label": "Saldo",
+                "width": 26
+              }
+            ],
+            "emptyText": "Tidak ada transaksi",
+            "headerRepeat": true,
+            "rowHeight": 7,
+            "stripe": "#EEF3F1"
+          },
+          "type": "table"
+        }
+      ],
+      "height": 74,
+      "id": "band-detail",
+      "kind": "detail"
+    },
+    {
+      "elements": [
+        {
+          "bindings": {
+            "path": "accounts.closingBalance"
+          },
+          "box": {
+            "height": 6,
+            "width": 60,
+            "x": 118,
+            "y": 2
+          },
+          "id": "el-group-total",
+          "props": {
+            "align": "right",
+            "fontSize": 9,
+            "fontWeight": 700,
+            "format": "currency",
+            "label": "Subtotal kontrak"
+          },
+          "type": "field"
+        }
+      ],
+      "groupBy": "accounts.contractNumber",
+      "height": 10,
+      "id": "band-group-footer",
+      "kind": "groupFooter"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 6,
+            "width": 100,
+            "x": 0,
+            "y": 4
+          },
+          "id": "el-summary-note",
+          "props": {
+            "color": "#57636B",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 8,
+            "text": "Total seluruh kontrak pada periode ini."
+          },
+          "type": "text"
+        }
+      ],
+      "height": 14,
+      "id": "band-summary",
+      "kind": "summary"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 5,
+            "width": 30,
+            "x": 148,
+            "y": 2
+          },
+          "id": "el-statement-page",
+          "props": {
+            "align": "right",
+            "color": "#57636B",
+            "fontSize": 7,
+            "format": "Page {page} of {total}"
+          },
+          "type": "pageNumber"
+        }
+      ],
+      "height": 8,
+      "id": "band-footer",
+      "kind": "pageFooter",
+      "repeat": true
+    }
+  ],
+  "exportProfiles": {}
+}

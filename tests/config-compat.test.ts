@@ -31,7 +31,7 @@ async function project(
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), source);
   }
-  return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
+  return { root, cleanup: () => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
 }
 
 test("jsconfig baseUrl and multiple path targets resolve the first existing module", async () => {

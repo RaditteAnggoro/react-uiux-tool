@@ -143,6 +143,7 @@ export interface PatchRequest {
     | "text"
     | "prop"
     | "event"
+    | "remove-event"
     | "style"
     | "insert"
     | "duplicate"

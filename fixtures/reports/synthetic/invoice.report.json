@@ -1,0 +1,425 @@
+{
+  "kind": "react-uiux-report",
+  "schemaVersion": 1,
+  "id": "tpl-invoice",
+  "title": "Invoice / Faktur",
+  "locale": "id-ID",
+  "units": "mm",
+  "page": {
+    "height": 297,
+    "margins": {
+      "bottom": 16,
+      "left": 16,
+      "right": 16,
+      "top": 16
+    },
+    "orientation": "portrait",
+    "size": "A4",
+    "width": 210
+  },
+  "styleTokens": {
+    "colors": {
+      "accent": "#2F5DA8",
+      "muted": "#5B6474",
+      "negative": "#8A1C1C",
+      "page": "#FFFFFF",
+      "positive": "#0F5132",
+      "primary": "#16233D",
+      "rule": "#C7D0DE",
+      "surface": "#F5F7FA",
+      "text": "#111827"
+    },
+    "family": "corporateNavy",
+    "fonts": {
+      "body": "Helvetica, Arial, sans-serif",
+      "heading": "'Iowan Old Style', Georgia, 'Times New Roman', serif",
+      "numeric": "'SF Mono', Menlo, Consolas, monospace"
+    },
+    "spacing": [
+      4,
+      8,
+      12,
+      16,
+      24
+    ],
+    "table": {
+      "headerHeight": 8,
+      "rowHeight": 7,
+      "stripe": "#F1F4F8"
+    }
+  },
+  "datasets": [
+    {
+      "id": "invoice",
+      "schema": {
+        "fields": [
+          "number",
+          "issuedAt",
+          "dueAt",
+          "customerName",
+          "customerAddress",
+          "currency",
+          "subtotal",
+          "tax",
+          "total"
+        ]
+      }
+    },
+    {
+      "id": "lines",
+      "schema": {
+        "fields": [
+          "description",
+          "quantity",
+          "unitPrice",
+          "amount"
+        ]
+      }
+    }
+  ],
+  "parameters": [],
+  "bands": [
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 14,
+            "width": 32,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-logo",
+          "props": {
+            "alt": "Company logo",
+            "fit": "contain",
+            "src": ""
+          },
+          "type": "image"
+        },
+        {
+          "box": {
+            "height": 9,
+            "width": 120,
+            "x": 0,
+            "y": 15
+          },
+          "id": "el-title",
+          "props": {
+            "color": "#16233D",
+            "font": "'Iowan Old Style', Georgia, 'Times New Roman', serif",
+            "fontSize": 18,
+            "fontWeight": 700,
+            "text": "INVOICE"
+          },
+          "type": "text"
+        },
+        {
+          "box": {
+            "height": 5,
+            "width": 58,
+            "x": 120,
+            "y": 3
+          },
+          "id": "el-subtitle",
+          "props": {
+            "align": "right",
+            "color": "#5B6474",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 8,
+            "text": "Faktur Penjualan"
+          },
+          "type": "text"
+        }
+      ],
+      "height": 26,
+      "id": "band-title",
+      "kind": "reportTitle"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 20,
+            "width": 90,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-seller",
+          "props": {
+            "color": "#111827",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 9,
+            "lineHeight": 1.35,
+            "text": "PT Contoh Nusantara\nJakarta, Indonesia"
+          },
+          "type": "text"
+        },
+        {
+          "bindings": {
+            "path": "invoice.number"
+          },
+          "box": {
+            "height": 5,
+            "width": 60,
+            "x": 118,
+            "y": 0
+          },
+          "id": "el-invoice-number",
+          "props": {
+            "align": "right",
+            "color": "#5B6474",
+            "fontSize": 8,
+            "label": "No. Invoice"
+          },
+          "type": "field"
+        },
+        {
+          "bindings": {
+            "path": "invoice.issuedAt"
+          },
+          "box": {
+            "height": 5,
+            "width": 60,
+            "x": 118,
+            "y": 6
+          },
+          "id": "el-issued",
+          "props": {
+            "align": "right",
+            "color": "#5B6474",
+            "fontSize": 8,
+            "format": "date",
+            "label": "Tanggal"
+          },
+          "type": "field"
+        },
+        {
+          "bindings": {
+            "path": "invoice.customerName"
+          },
+          "box": {
+            "height": 8,
+            "width": 100,
+            "x": 0,
+            "y": 22
+          },
+          "id": "el-customer",
+          "props": {
+            "color": "#111827",
+            "fontSize": 9,
+            "label": "Ditagihkan kepada"
+          },
+          "type": "field"
+        },
+        {
+          "box": {
+            "height": 0.4,
+            "width": 178,
+            "x": 0,
+            "y": 32.5
+          },
+          "id": "el-rule",
+          "props": {
+            "color": "#C7D0DE",
+            "strokeWidth": 0.4
+          },
+          "type": "line"
+        }
+      ],
+      "height": 34,
+      "id": "band-header",
+      "kind": "pageHeader",
+      "repeat": true
+    },
+    {
+      "elements": [
+        {
+          "bindings": {
+            "path": "lines"
+          },
+          "box": {
+            "height": 60,
+            "width": 178,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-lines-table",
+          "props": {
+            "columns": [
+              {
+                "align": "left",
+                "key": "description",
+                "label": "Deskripsi",
+                "width": 90
+              },
+              {
+                "align": "right",
+                "key": "quantity",
+                "label": "Qty",
+                "width": 18
+              },
+              {
+                "align": "right",
+                "currency": true,
+                "key": "unitPrice",
+                "label": "Harga",
+                "width": 34
+              },
+              {
+                "align": "right",
+                "currency": true,
+                "key": "amount",
+                "label": "Jumlah",
+                "width": 36
+              }
+            ],
+            "emptyText": "Belum ada baris",
+            "headerRepeat": true,
+            "rowHeight": 7,
+            "stripe": "#F1F4F8"
+          },
+          "type": "table"
+        }
+      ],
+      "height": 60,
+      "id": "band-lines",
+      "kind": "detail"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 12,
+            "width": 95,
+            "x": 0,
+            "y": 2
+          },
+          "id": "el-terms",
+          "props": {
+            "color": "#5B6474",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 8,
+            "text": "Pembayaran jatuh tempo sesuai tanggal di atas."
+          },
+          "type": "text"
+        },
+        {
+          "bindings": {
+            "path": "invoice.subtotal"
+          },
+          "box": {
+            "height": 5,
+            "width": 60,
+            "x": 118,
+            "y": 2
+          },
+          "id": "el-subtotal",
+          "props": {
+            "align": "right",
+            "fontSize": 8,
+            "format": "currency",
+            "label": "Subtotal"
+          },
+          "type": "field"
+        },
+        {
+          "bindings": {
+            "path": "invoice.tax"
+          },
+          "box": {
+            "height": 5,
+            "width": 60,
+            "x": 118,
+            "y": 8
+          },
+          "id": "el-tax",
+          "props": {
+            "align": "right",
+            "fontSize": 8,
+            "format": "currency",
+            "label": "PPN"
+          },
+          "type": "field"
+        },
+        {
+          "bindings": {
+            "path": "invoice.total"
+          },
+          "box": {
+            "height": 7,
+            "width": 60,
+            "x": 118,
+            "y": 14
+          },
+          "id": "el-total",
+          "props": {
+            "align": "right",
+            "fontSize": 11,
+            "fontWeight": 700,
+            "format": "currency",
+            "label": "Total"
+          },
+          "type": "field"
+        }
+      ],
+      "height": 26,
+      "id": "band-summary",
+      "kind": "summary"
+    },
+    {
+      "elements": [
+        {
+          "box": {
+            "height": 0.3,
+            "width": 178,
+            "x": 0,
+            "y": 0
+          },
+          "id": "el-footer-rule",
+          "props": {
+            "color": "#C7D0DE",
+            "strokeWidth": 0.3
+          },
+          "type": "line"
+        },
+        {
+          "box": {
+            "height": 5,
+            "width": 130,
+            "x": 0,
+            "y": 3
+          },
+          "id": "el-footer-note",
+          "props": {
+            "color": "#5B6474",
+            "font": "Helvetica, Arial, sans-serif",
+            "fontSize": 7,
+            "text": "Dokumen ini dihasilkan secara lokal."
+          },
+          "type": "text"
+        },
+        {
+          "box": {
+            "height": 5,
+            "width": 30,
+            "x": 148,
+            "y": 3
+          },
+          "id": "el-page-number",
+          "props": {
+            "align": "right",
+            "color": "#5B6474",
+            "fontSize": 7,
+            "format": "Page {page} of {total}"
+          },
+          "type": "pageNumber"
+        }
+      ],
+      "height": 10,
+      "id": "band-footer",
+      "kind": "pageFooter",
+      "repeat": true
+    }
+  ],
+  "exportProfiles": {}
+}
