@@ -25,6 +25,57 @@ there is no hidden page schema replacing an existing application.
 
 ![Running local Studio with the demo canvas and inspector](docs/screenshots/canvas-inspector.png)
 
+## Report Studio: design and update reports
+
+**Report Studio is a separate workspace on Home** for creating reports or opening an
+existing report folder. You can also enter it from **Reports** in an open React project.
+It works locally with the report files you choose.
+
+![Report Studio workflow: choose a folder, edit a report, then check the result](docs/screenshots/report-workflow-en.svg)
+
+```mermaid
+flowchart LR
+  Home[Home: Report Studio] --> Folder[Choose report folder]
+  Folder --> Open[Open existing report]
+  Folder --> New[Create from a template]
+  Open --> Design[Design: select, drag and resize]
+  New --> Design
+  Design --> Palette[Palette + properties]
+  Palette --> Save[Save report or save copy]
+  Save --> Check[Preview and check output]
+```
+
+**Workspace map** (illustration):
+
+```text
+┌─────────────────┬──────────────────────────┬────────────────────┐
+│ Reports/Palette │ Design · Code · Preview  │ Properties         │
+│ Choose report   │                          │ Text, size, color  │
+│ Text / Field    │     Report page          │ Data binding       │
+│ Box / Line      │     select and drag      │ Save / Remove      │
+└─────────────────┴──────────────────────────┴────────────────────┘
+```
+
+**Try it in five steps:**
+
+1. Choose **Report Studio** on Home, then **Open existing report** or **Create new report**.
+2. Choose your report folder and select a report from the list, or choose a template.
+3. In **Design**, select an object. Use the left palette to add objects by click or
+   drag-and-drop, and the right inspector to change supported values and dimensions.
+4. Use **Code** to inspect or edit supported source, and **Preview** to check native
+   output with sample data. Save your changes before leaving.
+5. For native reports, choose **Save** and optionally export PDF, HTML, CSV, XLSX,
+   or DOCX. For `.yrf`, choose **Save copy** and check that copy in WaiReport.
+
+| Format | What you can do | What to check |
+| --- | --- | --- |
+| Native `.report.json` | Create and open designs; edit text, fields, tables and other supported objects; preview and export. | Export formats have different limitations; review warnings, rows and totals. |
+| WaiReport `.yrf` | Open existing files; edit available object values, move/resize supported objects, use the experimental palette and save a copy. | Design is approximate; created or edited files have not been verified against the vendor renderer. Validate in WaiReport before business use. |
+| PDF, HTML, CSV, XLSX, DOCX | Export native reports to these formats. | They are output files, not interchangeable editable report designs; fidelity varies. |
+
+See the [step-by-step Report Studio guide](docs/USER_GUIDE_EN.md#14-report-studio-create-and-edit-reports),
+[format capabilities](docs/REPORT_STUDIO_FILE_FORMATS.md), and [known limitations](KNOWN_LIMITATIONS.md).
+
 ## What it does
 
 Two workspaces ship today: the React project editor and **Report Studio**, a

@@ -16,6 +16,57 @@ biasa dan dapat diedit lewat VS Code.
 
 ![Studio lokal dengan Canvas demo dan Inspector](docs/screenshots/canvas-inspector.png)
 
+## Report Studio: membuat dan mengubah laporan
+
+**Report Studio adalah workspace tersendiri di Home** untuk membuat laporan atau
+membuka folder laporan yang sudah ada. Kamu juga bisa membukanya melalui **Reports**
+dari project React. Semua pekerjaan berlangsung lokal pada file yang kamu pilih.
+
+![Alur Report Studio: pilih folder, edit laporan, lalu periksa hasil](docs/screenshots/report-workflow-id.svg)
+
+```mermaid
+flowchart LR
+  Home[Home: Report Studio] --> Folder[Pilih folder laporan]
+  Folder --> Open[Buka laporan existing]
+  Folder --> New[Buat dari template]
+  Open --> Design[Design: pilih, drag dan resize]
+  New --> Design
+  Design --> Palette[Palette dan properties]
+  Palette --> Save[Simpan laporan atau salinan]
+  Save --> Check[Preview dan periksa hasil]
+```
+
+**Peta workspace** (ilustrasi):
+
+```text
+┌─────────────────┬──────────────────────────┬────────────────────┐
+│ Reports/Palette │ Design · Code · Preview  │ Properties         │
+│ Pilih laporan   │                          │ Teks, ukuran, warna│
+│ Text / Field    │     Halaman laporan      │ Binding data       │
+│ Box / Line      │     pilih dan drag       │ Simpan / Hapus     │
+└─────────────────┴──────────────────────────┴────────────────────┘
+```
+
+**Coba dalam lima langkah:**
+
+1. Pilih **Report Studio** di Home, lalu **Open existing report** atau **Create new report**.
+2. Pilih folder laporan, lalu pilih laporan dari daftar atau pilih template.
+3. Di **Design**, pilih objek. Gunakan palette kiri untuk menambah objek lewat klik
+   atau drag-and-drop, dan inspector kanan untuk mengubah nilai dan ukuran yang didukung.
+4. Gunakan **Code** untuk melihat atau mengedit source yang didukung, dan **Preview**
+   untuk memeriksa hasil native dengan data contoh. Simpan sebelum keluar.
+5. Untuk laporan native, pilih **Save** dan bila perlu ekspor PDF, HTML, CSV, XLSX,
+   atau DOCX. Untuk `.yrf`, pilih **Save copy** lalu periksa salinannya di WaiReport.
+
+| Format | Yang bisa dilakukan | Yang perlu diperiksa |
+| --- | --- | --- |
+| Native `.report.json` | Buat dan buka desain; edit teks, field, tabel, dan objek lain yang didukung; preview dan ekspor. | Setiap format ekspor memiliki batas berbeda; periksa warning, baris, dan total. |
+| WaiReport `.yrf` | Buka file existing; edit nilai objek yang tersedia, pindahkan/resize objek yang didukung, gunakan palette eksperimental, dan simpan salinan. | Design bersifat perkiraan; file hasil belum diverifikasi dengan renderer vendor. Periksa di WaiReport sebelum digunakan untuk bisnis. |
+| PDF, HTML, CSV, XLSX, DOCX | Ekspor laporan native ke format ini. | Ini file output, bukan format desain yang otomatis dapat diedit kembali; hasil tiap format berbeda. |
+
+Baca [panduan Report Studio langkah demi langkah](docs/USER_GUIDE_ID.md#14-report-studio-membuat-dan-mengubah-laporan),
+[kemampuan format](docs/REPORT_STUDIO_FILE_FORMATS.md), dan [batasan yang diketahui](KNOWN_LIMITATIONS.md).
+
 ## Yang dapat dilakukan
 
 - Membuka project React tanpa menjalankannya, lalu menjelaskan hasil pemeriksaan.
