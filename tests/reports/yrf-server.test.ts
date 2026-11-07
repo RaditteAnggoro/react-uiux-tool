@@ -191,3 +191,16 @@ test("stale hash refuses to patch", async () => {
     void opened;
   });
 });
+
+test("report ancestor paths preserve Windows drive and UNC roots", async () => {
+  const { reportAncestorPaths } = await import("../../src/server/report-routes.js");
+  assert.deepEqual(reportAncestorPaths("D:\\reports\\alias\\sample.yrf", path.win32), [
+    "D:\\reports", "D:\\reports\\alias",
+  ]);
+  assert.deepEqual(reportAncestorPaths("\\\\server\\share\\reports\\alias\\sample.yrf", path.win32), [
+    "\\\\server\\share\\reports", "\\\\server\\share\\reports\\alias",
+  ]);
+  assert.deepEqual(reportAncestorPaths("/reports/alias/sample.yrf", path.posix), [
+    "/reports", "/reports/alias",
+  ]);
+});

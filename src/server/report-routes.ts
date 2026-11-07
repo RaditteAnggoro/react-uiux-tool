@@ -144,12 +144,22 @@ async function readReportFile(full: string): Promise<string> {
 
 const SYSTEM_SYMLINKS = new Set(["/var", "/tmp", "/etc", "/private"]);
 
-async function assertNoSymlinkAncestors(file: string): Promise<void> {
-  const absolute = path.resolve(file);
-  const parts = absolute.split(path.sep).filter(Boolean);
-  let current: string = path.sep;
+/** Build ancestor paths from the actual filesystem root, including Windows drives and UNC shares. */
+export function reportAncestorPaths(file: string, platformPath: typeof path = path): string[] {
+  const absolute = platformPath.resolve(file);
+  const root = platformPath.parse(absolute).root;
+  const parts = absolute.slice(root.length).split(platformPath.sep).filter(Boolean);
+  const ancestors: string[] = [];
+  let current = root;
   for (const part of parts.slice(0, -1)) {
-    current = path.join(current, part);
+    current = platformPath.join(current, part);
+    ancestors.push(current);
+  }
+  return ancestors;
+}
+
+async function assertNoSymlinkAncestors(file: string): Promise<void> {
+  for (const current of reportAncestorPaths(file)) {
     if (SYSTEM_SYMLINKS.has(current)) continue;
     const info = await fs.lstat(current).catch(() => null);
     if (info?.isSymbolicLink()) {
@@ -317,7 +327,7 @@ async function browseReports(
       if (!info || !info.isFile() || info.size > YRF_MAX_BYTES) continue;
       entries.push({
         name: item.name,
-        path: path.relative(root, full),
+        path: path.relative(root, full).split(path.sep).join("/"),
         absolute: full,
         kind,
         size: info.size,

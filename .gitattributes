@@ -1,0 +1,2 @@
+# Canonical serialized report fixtures must retain their exact bytes on checkout.
+fixtures/reports/synthetic/*.report.json text eol=lf
