@@ -937,7 +937,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         <button className="yrf-ghost" onClick={() => setCreating((value) => !value)}>
           {tr.create}
         </button>
-        {inspection && panel === "design" && <button className="yrf-primary" disabled={busy || !dirty} onClick={() => void saveCopy()}>{tr.saveReport}</button>}
+        {inspection && panel === "design" && <button className="yrf-primary" disabled={busy || !dirty} onClick={() => void saveCopy()}>{tr.saveCopy}</button>}
       </header>
 
       {error && <div className="yrf-alert bad">{error}</div>}
@@ -1193,7 +1193,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                             key={object.path}
                             className={`yrf-object kind-${object.kind
                               .replace(/[^A-Za-z0-9-]/g, "-")
-                              .toLowerCase()} ${selectedPaths.includes(object.path) ? "on" : ""}`}
+                              .toLowerCase()} ${selectedPaths.includes(object.path) ? "on" : ""} ${object.supported && object.editableGeometry ? "movable" : ""}`}
                             style={(() => {
                               const declarations = parseStyleDeclarations(
                                 String(draftChanges[`${object.path}.style`]?.value ?? object.style ?? ""),

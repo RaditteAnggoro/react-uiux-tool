@@ -13,7 +13,7 @@ test("compatibility inventory is read-only and never marks discovery as validati
     await mkdir(path.join(root, "src/views/aw"), { recursive: true });
     await writeFile(path.join(root, "package.json"), '{"name":"fixture","dependencies":{"react":"19"}}');
     const file = path.join(root, "src/views/aw/AW11.tsx");
-    const source = 'export default function AW11(){return <main><button>Test</button></main>}';
+    const source = 'export default function AW11({value,onChange}:{value?:string,onChange?:()=>void}){return <main><button className="safe" onClick={onChange}>{value}</button></main>}';
     await writeFile(file, source);
     const before = await readdir(root);
     const { stdout } = await run(process.execPath, ["--import", "tsx", "scripts/compat-inventory.ts", root], { cwd: process.cwd() });
@@ -23,6 +23,11 @@ test("compatibility inventory is read-only and never marks discovery as validati
     assert.equal(result.validation.notTested, result.indexedComponents);
     assert.equal(result.validation.passed, 0);
     assert.ok(result.components.every((component: { validation: string }) => component.validation === "not-tested"));
+    const component = result.components.find((item: { name: string }) => item.name === "AW11");
+    assert.ok(component.dataPropertyNames.includes("value"));
+    assert.ok(component.eventNames.includes("onChange"));
+    assert.ok(component.observedStyleOrigins.includes("className"));
+    assert.ok(!stdout.includes('"safe"'));
     assert.equal(await readFile(file, "utf8"), source);
     assert.deepEqual(await readdir(root), before);
   } finally {

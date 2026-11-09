@@ -2,6 +2,8 @@
 
 Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua skenario yang secara eksplisit didukung lulus pemeriksaan, dan setiap skenario yang belum dapat dibuktikan aman ditolak dengan alasan yang bisa ditindaklanjuti. Tidak ada tes yang dapat membuktikan nol bug untuk semua project, dependensi, data, browser, dan perilaku React yang mungkin.
 
+Review 25 issue dan daftar pending 9 November tersedia di [Issue review 2026-11-09](ISSUE_REVIEW_2026-11-09.md). Prioritas pertama adalah integritas hasil insert (ISS-013); status sebagian dan belum direproduksi belum dianggap selesai. Issue Report Studio dicatat juga agar tidak hilang dari antrean.
+
 ## Ukuran dan cakupan
 
 - Buat inventaris versi fixture yang dapat direproduksi: React JS/TS, Vite, CRA dan Next (Pages/App), CSS global, CSS Modules, Tailwind, CSS-in-JS, komponen majemuk, alias dan barrel exports. Tentukan versi dan status runtime/inspect-only untuk setiap fixture.
@@ -64,7 +66,8 @@ Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua ske
 
 - `npm run compat:inventory -- <folder-project>` menghasilkan inventaris JSON lokal
   yang memisahkan komponen terindeks dari status validasi. Semua komponen dimulai
-  sebagai `not-tested`; bukti wrapper bukan bukti keberhasilan runtime. Output berisi
+  sebagai `not-tested`; jumlah usage/dynamic, asal style yang teramati, nama prop
+  data, event, dan bukti wrapper bukan bukti keberhasilan runtime. Output berisi
   nama komponen dan path relatif project, jadi simpan hanya di lokasi tepercaya.
 - Salinan dengan beberapa identitas, spread, atau referensi ke ID yang diubah kini
   ditolak sampai seluruh identitas dan referensinya dapat ditangani dengan benar.
@@ -85,6 +88,11 @@ Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua ske
   yang belum bersih, sehingga bukan bukti CI platform lain.
 - Analisis melaporkan ada CSS dengan encoding bukan UTF-8 serta direktori yang
   dikecualikan dari pemindaian; jangan menyimpulkan seluruh style sudah tercakup.
+- Pada pemeriksaan read-only berikutnya terhadap 577 entri yang sama, 182 memiliki
+  usage yang teramati, 88 memiliki usage dinamis, 334 memiliki bukti asal style,
+  45 memiliki nama prop data yang dikenali, dan 107 memiliki event yang dikenali.
+  Kategori ini dapat tumpang tindih dan hanya merupakan bukti statis; semuanya tetap
+  `not-tested` dalam inventaris, dengan 5 file terlewati.
 - P0 belum selesai: pengukuran hash per skenario, pemeriksaan seluruh menu,
   serta smoke test lintas OS dan visual masih diperlukan.
 
@@ -100,5 +108,9 @@ Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua ske
 - Inspector memberi petunjuk bila component yang menyediakan `value` belum
   memiliki prop `value` pada usage terpilih. Petunjuk ini bukan bukti bahwa data
   salah; uncontrolled/default/spread masih memerlukan pemeriksaan tersendiri.
+- Cursor untuk objek terpilih mengikuti kemampuan pindah yang terdeteksi, dan
+  delapan handle resize laporan memakai cursor horizontal, vertikal, atau diagonal.
+  Pengujian cursor menggunakan fixture; ini tidak membuktikan seluruh komponen dapat
+  dipindahkan atau di-resize.
 - Kedua fixture merupakan contoh awal, bukan penyelesaian gate P2/P3. Lihat hasil
   tes aktual pada run yang digunakan; jangan menganggap dokumen ini bukti kelulusan.

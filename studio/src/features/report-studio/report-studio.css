@@ -285,6 +285,7 @@
   border-color: #635bff;
   box-shadow: 0 0 0 1px #635bff;
 }
+.rs-el.on.movable { cursor: move; }
 .rs-el-field {
   display: flex;
   flex-direction: column;

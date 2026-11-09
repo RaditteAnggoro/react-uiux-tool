@@ -1267,11 +1267,14 @@ export default function App() {
       selectedId && !selectedIds.includes(selectedId)
         ? [selectedId]
         : selectedIds;
-    const positionFor = (sourceId: string) =>
-      previewSelections.current.get(sourceId) || {
-        elementId: sourceId,
-        instanceIndex: 0,
-      };
+    const canMove = sourceIds.length > 0 && sourceIds.every((id) => {
+      const item = report?.elements.find((element) => element.id === id);
+      return !!item && ["EDITABLE", "LIMITED"].includes(item.editability) && item.operations.includes("style");
+    });
+    const positionFor = (sourceId: string) => ({
+      ...(previewSelections.current.get(sourceId) || { elementId: sourceId, instanceIndex: 0 }),
+      movable: canMove,
+    });
     frame.current.contentWindow?.postMessage(
       {
         type: "uiux:select-many",
@@ -1688,7 +1691,7 @@ export default function App() {
       .flatMap((usage) => usage.props.filter((prop) => prop.name === "className" && prop.kind === "string" && typeof prop.value === "string").map((prop) => prop.value as string)));
     void editElement(element, "insert", {
       name: tag,
-      value: tag === "button" ? "New button" : "",
+      value: tag === "button" ? "New button" : tag === "p" ? "New paragraph" : "",
       position: "inside",
       insertProps: classNames.size === 1 ? [{ name: "className", value: [...classNames][0] }] : undefined,
     }).finally(() => setPendingInsert(""));
@@ -2722,7 +2725,7 @@ export default function App() {
                     </p>
                   )}
                   {selected.props
-                    .filter((prop) => prop.name !== "style")
+                    .filter((prop) => prop.name !== "style" && !prop.name.startsWith("style."))
                     .map((prop) => (
                       <div className="prop-row" key={prop.name}>
                         <code>{prop.name}</code>
@@ -2760,13 +2763,9 @@ export default function App() {
                     />
                     <datalist id="prop-names">
                       {[
-                        "className",
-                        "title",
-                        "placeholder",
-                        "disabled",
-                        "aria-label",
+                        ...(/^[a-z]/.test(selected.tag) ? ["className", "title", "placeholder", "disabled", "aria-label"] : []),
                         ...propertyContracts.map((prop) => prop.name),
-                        ...selected.props.map((prop) => prop.name),
+                        ...selected.props.filter((prop) => prop.name !== "style" && !prop.name.startsWith("style.")).map((prop) => prop.name),
                       ].map((name, index) => (
                         <option key={index} value={name} />
                       ))}
@@ -4002,7 +4001,7 @@ export default function App() {
             <aside className="left-panel" style={{ width: panelWidths.left }}>
               <div className="panel-heading">
                 <strong>{t(nav as Key)}</strong>
-                {nav === "boards" ? (
+                {nav === "boards" && isDemo ? (
                   <button
                     className="icon-button"
                     aria-label={t("newBoard")}
@@ -4013,17 +4012,17 @@ export default function App() {
                   >
                     <Icon name="plus" size={16} />
                   </button>
-                ) : (
+                ) : nav !== "boards" ? (
                   <Badge>
                     {nav === "components"
                       ? report.components.length
                       : report.files.length}
                   </Badge>
-                )}
+                ) : null}
               </div>
               {nav === "boards" ? (
                 <div className="boards-list">
-                  {boards.map((board) => (
+                  {isDemo && boards.map((board) => (
                     <button
                       className={`board-item ${board.id === boardId ? "selected" : ""}`}
                       key={board.id}
@@ -4039,7 +4038,7 @@ export default function App() {
                   <p className="small muted">
                     {isDemo ? t("boardHint") : t("boardUnavailable")}
                   </p>
-                  {currentBoard && (
+                  {isDemo && currentBoard && (
                     <>
                       <div className="button-pair">
                         <button

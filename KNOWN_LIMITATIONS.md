@@ -157,7 +157,8 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
   CSV sample data can be loaded with a schema preview; clipboard paste, cropping, column
   mapping, per-row CSV errors and large-dataset virtualisation are not implemented.
 - The native Code tab edits the JSON draft and rejects invalid JSON. The `.yrf` Code tab
-  is read-only and displays the vendor source inertly.
+  displays source inertly and starts read-only; **Edit source** enables a draft that can
+  be applied to a saved copy. Vendor scripts are not executed by the inspector.
 - Canvas text uses pt→px with zoom only; content that exceeds its box is visible instead
   of clipped, and the status bar reports an overflow count. There is no automatic
   fit-to-box or silent resize.

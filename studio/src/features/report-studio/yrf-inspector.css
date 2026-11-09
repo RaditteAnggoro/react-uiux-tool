@@ -212,6 +212,7 @@
   background: rgba(238, 237, 255, 0.9);
   z-index: 4;
 }
+.yrf-object.on.movable { cursor: move; }
 .yrf-object span {
   display: block;
   overflow: hidden;

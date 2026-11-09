@@ -28,12 +28,13 @@ test("Report Studio creates, edits, saves and previews a native report", async (
     await page.getByRole("button", { name: /Report Studio/ }).click();
 
     await expect(page.locator(".rs-brand strong")).toHaveText("Report Studio");
+    await expect(page.getByText(/Create report writes the new file/)).toBeVisible();
     await setReportFolder(page, folder);
 
     await page.getByRole("button", { name: "Create report" }).click();
-
     const title = page.getByRole("textbox", { name: "Report title" });
     await expect(title).toHaveValue("Invoice / Faktur");
+    expect(await readFile(path.join(folder, "invoice.report.json"), "utf8")).toContain('"kind": "react-uiux-report"');
 
     await title.fill("Invoice November");
     await expect(page.getByText("Unsaved changes")).toBeVisible();
@@ -49,6 +50,7 @@ test("Report Studio creates, edits, saves and previews a native report", async (
     expect(onDisk).toContain('"kind": "react-uiux-report"');
 
     await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByText("Rendered by the native print engine using the report's preview data.")).toBeVisible();
     const frame = page.frameLocator("iframe");
     await expect(frame.locator("page")).toBeVisible({ timeout: 10_000 });
     await expect(frame.locator("page")).toContainText("INVOICE");
@@ -149,7 +151,7 @@ test("YRF inspector views a report and saves a caption patch as a copy", async (
     await page.getByRole("button", { name: "Preview change" }).click();
     await expect(page.getByText("Before")).toBeVisible();
 
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     await expect(page.getByText(/Copy saved/)).toBeVisible();
     const copy = await readFile(path.join(folder, "sample.edited.yrf"), "utf8");
     expect(copy).toContain("Kop Halaman Baru");
@@ -258,6 +260,7 @@ test("native Design and Code tabs keep the draft and selection, rejecting invali
     await expect(page.locator(".rs-status")).toContainText("Elements overflow their box");
 
     await page.locator('.rs-el[data-id="el-title"]').click();
+    await expect(page.locator('.rs-el[data-id="el-title"]')).toHaveCSS("cursor", "move");
     await expect(page.locator('.rs-el[data-id="el-title"]')).toHaveClass(/on/);
 
     await page.getByRole("button", { name: "Code", exact: true }).click();
@@ -416,6 +419,8 @@ test("all eight handles resize and keyboard resize works", async ({ page }) => {
     for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
       const before = await readBox();
       const target = page.locator(`[data-handle="${handle}"]`);
+      const expectedCursor: Record<string, string> = { nw: "nwse-resize", n: "ns-resize", ne: "nesw-resize", e: "ew-resize", se: "nwse-resize", s: "ns-resize", sw: "nesw-resize", w: "ew-resize" };
+      await expect(target).toHaveCSS("cursor", expectedCursor[handle]);
       const box = await target.boundingBox();
       expect(box, `handle ${handle} exists`).not.toBeNull();
       await page.mouse.move(box!.x + 4, box!.y + 4);
@@ -609,13 +614,13 @@ test("YRF saving a copy continues from the copy", async ({ page }) => {
     await page.getByRole("button", { name: /^label · ph$/ }).click();
 
     await page.getByLabel("Caption").fill("Satu");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const savedMessage = page.getByText(/Copy saved/).last();
     await expect(savedMessage).toBeVisible();
     const firstMessage = await savedMessage.textContent();
 
     await page.getByLabel("Caption").fill("Dua");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     await expect
       .poll(async () => savedMessage.textContent())
       .not.toBe(firstMessage);
@@ -795,6 +800,9 @@ test("YRF objects can be dragged and resized before saving a copy", async ({ pag
 
     const object = page.locator(".yrf-object").filter({ hasText: "Kop Halaman" }).first();
     await object.click();
+    await expect(object).toHaveCSS("cursor", "move");
+    for (const [handle, cursor] of Object.entries({ nw: "nwse-resize", n: "ns-resize", ne: "nesw-resize", e: "ew-resize", se: "nwse-resize", s: "ns-resize", sw: "nesw-resize", w: "ew-resize" }))
+      await expect(page.locator(`[data-yrf-handle="${handle}"]`)).toHaveCSS("cursor", cursor);
     const box = await object.boundingBox();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await page.mouse.down();
@@ -802,7 +810,7 @@ test("YRF objects can be dragged and resized before saving a copy", async ({ pag
     await page.mouse.move(box!.x + box!.width / 2 + 40, box!.y + box!.height / 2, { steps: 8 });
     await page.mouse.up();
 
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = page.getByText(/Copy saved/);
     await expect(saved).toBeVisible();
     const savedPath = (await saved.textContent())?.split(":").slice(1).join(":").trim();
@@ -812,6 +820,25 @@ test("YRF objects can be dragged and resized before saving a copy", async ({ pag
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+test("unsupported YRF objects do not advertise moving or resizing", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-yrf-cursor-"));
+  const file = path.join(folder, "sample.yrf");
+  const fixture = JSON.parse(await readFile(path.resolve("fixtures/reports/synthetic/yrf/minimal.yrf"), "utf8"));
+  fixture.layout.pages[0].bands[0].objects.push({ type: "unsupportedKind", name: "unsupported", left: 20, top: 150, width: 200, height: 30 });
+  await writeFile(file, JSON.stringify(fixture));
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: "YRF (.yrf)" }).click();
+    await page.getByLabel("YRF file path").fill(file);
+    await page.getByRole("button", { name: "Open .yrf" }).click();
+    const object = page.locator('.yrf-object[title="unsupportedKind unsupported"]');
+    await object.click();
+    await expect(object).not.toHaveCSS("cursor", "move");
+    await expect(page.locator(".yrf-handle")).toHaveCount(0);
+  } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
 
@@ -881,7 +908,7 @@ test("YRF visual save refreshes the Code source and keeps earlier edits", async 
     await page.mouse.move(box!.x + box!.width / 2 + 30, box!.y + box!.height / 2, { steps: 5 });
     await page.mouse.up();
 
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = page.getByText(/Copy saved/);
     await expect(saved).toBeVisible();
     const firstCopy = (await saved.textContent())?.split(":").slice(1).join(":").trim();
@@ -948,7 +975,7 @@ test("YRF resize handles change the saved width", async ({ page }) => {
     await page.mouse.down();
     await page.mouse.move(box!.x + 54, box!.y + 24, { steps: 5 });
     await page.mouse.up();
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = page.getByText(/Copy saved/);
     await expect(saved).toBeVisible();
     const copyPath = (await saved.textContent())?.split(":").slice(1).join(":").trim();
@@ -1017,7 +1044,7 @@ test("YRF canvas switching preserves a caption draft and guards leaving", async 
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await page.locator(".yrf-object").filter({ hasText: "Draft yang aman" }).first().click();
     await expect(page.getByLabel("Caption")).toHaveValue("Draft yang aman");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     expect(copy.layout.pages[0].bands[0].objects[0].caption).toBe("Draft yang aman");
@@ -1042,7 +1069,7 @@ test("YRF preview and saved copy use the same typed value after a drag", async (
     await page.getByLabel("left", { exact: true }).fill("250");
     await page.getByRole("button", { name: "Preview change" }).click();
     await expect(page.locator(".yrf-diff")).toContainText("After: 250");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     expect(copy.layout.pages[0].bands[0].objects[0].left).toBe(250);
@@ -1121,7 +1148,7 @@ test("YRF textbox using text and dataField is editable and saves a copy", async 
     await expect(page.getByLabel("Caption")).toBeEnabled();
     await page.getByLabel("Caption").fill("Customer");
     await page.getByLabel("Data field").fill("invoice.customer");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     expect(copy.layout.pages[0].bands[1].objects[0].text).toBe("Customer");
@@ -1147,7 +1174,7 @@ test("YRF palette adds and drags objects into a report and saves a copy", async 
     const band = page.locator(".yrf-band").nth(1);
     await page.locator(".yrf-palette").getByRole("button", { name: "Field" }).dragTo(band);
     await page.getByLabel("Data field").fill("invoice.customer");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     const objects = copy.layout.pages.flatMap((entry: any) => entry.bands.flatMap((item: any) => item.objects));
@@ -1177,7 +1204,7 @@ test("YRF endpoint lines move and existing scalar values can be edited", async (
     await page.getByLabel("style", { exact: true }).fill("color:red");
     await page.getByLabel("style", { exact: true }).blur();
     await page.getByLabel("visible", { exact: true }).selectOption("false");
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     expect(copy.layout.pages[0].bands[1].objects[1].x1).toBe(100);
@@ -1201,7 +1228,7 @@ test("YRF can remove an existing object and save a copy", async ({ page }) => {
     await page.locator(".yrf-tree button").filter({ hasText: "textbox · tb" }).click();
     await page.getByRole("button", { name: "Remove object" }).click();
     await expect(page.locator(".yrf-tree button").filter({ hasText: "textbox · tb" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Save report" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).first().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
     expect(copy.layout.pages[0].bands[1].objects.some((object: any) => object.name === "tb")).toBe(false);
@@ -1288,7 +1315,7 @@ test("existing YRF style reflects on canvas and in the saved copy", async ({ pag
     await page.locator(".yrf-style-chips").getByRole("button", { name: "Italic" }).click();
     await expect(object).toHaveCSS("font-style", "italic");
 
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = page.getByText(/Copy saved/);
     await expect(saved).toBeVisible();
     const copyPath = (await saved.textContent())?.split(":").slice(1).join(":").trim();
@@ -1317,7 +1344,7 @@ test("YRF multi-select alignment is written to the saved copy", async ({ page })
     await expect(page.getByText("2 objects selected")).toBeVisible();
     await page.getByRole("button", { name: "Align left" }).click();
 
-    await page.getByRole("button", { name: "Save copy" }).click();
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = page.getByText(/Copy saved/);
     await expect(saved).toBeVisible();
     const copyPath = (await saved.textContent())?.split(":").slice(1).join(":").trim();

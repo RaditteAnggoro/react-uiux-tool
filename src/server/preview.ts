@@ -57,6 +57,16 @@ export function bridgeSource(parentOrigin: string): string {
     const parentOrigin = ${JSON.stringify(parentOrigin)};
     parent.postMessage({type:'uiux:loading'},parentOrigin);
     let mode = 'design', selected = null, selectedMany = [], dragState = null;
+    let movablePositions=[];
+    const cursorMarked=new Map();
+    const cursorStyle=document.createElement('style');
+    cursorStyle.textContent='[data-uiux-movable="true"], [data-uiux-movable="true"] * { cursor: move !important; }';
+    document.head.append(cursorStyle);
+    const updateCursors=()=>{
+      cursorMarked.forEach((previous,el)=>previous===null?el.removeAttribute('data-uiux-movable'):el.setAttribute('data-uiux-movable',previous));
+      cursorMarked.clear();
+      if(mode==='design')movablePositions.forEach(value=>{const el=findPosition(value);if(el&&!cursorMarked.has(el)){cursorMarked.set(el,el.getAttribute('data-uiux-movable'));el.setAttribute('data-uiux-movable','true')}});
+    };
     const outline = document.createElement('div');
     outline.setAttribute('aria-hidden', 'true');
     outline.dataset.uiuxSelection='primary';
@@ -198,11 +208,12 @@ export function bridgeSource(parentOrigin: string): string {
     },true);
     window.addEventListener('message',event=>{
       if(event.origin!==parentOrigin||event.source!==parent)return;
-      if(event.data?.type==='uiux:mode'){mode=event.data.mode==='interact'?'interact':'design';show(selected);showMany();showHover(null);}
+      if(event.data?.type==='uiux:mode'){mode=event.data.mode==='interact'?'interact':'design';show(selected);showMany();showHover(null);updateCursors();}
       if(event.data?.type==='uiux:select'){selected=findPosition(event.data);selectedMany=selected?[selected]:[];show(selected);showMany();}
       if(event.data?.type==='uiux:select-many'){
         selectedMany=(Array.isArray(event.data.selections)?event.data.selections:[]).map(findPosition).filter(Boolean);
         selected=findPosition(event.data.primary)||selectedMany.at(-1)||null;show(selected);showMany();
+        movablePositions=(Array.isArray(event.data.selections)?event.data.selections:[]).filter(value=>value?.movable===true);updateCursors();
         if(Number.isSafeInteger(event.data.readyToken))parent.postMessage({type:'uiux:selection-applied',token:event.data.readyToken},parentOrigin);
       }
     });

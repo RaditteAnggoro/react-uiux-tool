@@ -2442,7 +2442,7 @@ function BandView({
         <div
           key={element.id}
           data-id={element.id}
-          className={`rs-el rs-el-${element.type} ${selectedIds.includes(element.id) ? "on" : ""}`}
+          className={`rs-el rs-el-${element.type} ${selectedIds.includes(element.id) ? "on" : ""} ${selectedIds.includes(element.id) && !editingId ? "movable" : ""}`}
           style={{
             left: element.box.x * scale,
             top: element.box.y * scale,

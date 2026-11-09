@@ -407,7 +407,7 @@ Untuk menambah objek native, klik tombol objek atau tarik dari palette ke band y
 ### Membuka `.yrf` yang sudah ada
 
 1. Pilih **YRF (.yrf)** dan pilih folder, lalu pilih file dari daftar; path manual tersedia sebagai cadangan.
-2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti; **Code** menampilkan source secara read-only. Script vendor tidak dijalankan saat inspeksi.
+2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti; **Code** awalnya menampilkan source secara read-only. Pilih **Edit source** untuk mengubah draf, lalu **Apply & save copy** untuk menyimpan salinan. Script vendor tidak dijalankan saat inspeksi.
 3. Edit caption/geometri yang tersedia, pilih **Preview change**, lalu **Save copy**. File asli tidak ditimpa. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
 4. Unit, tampilan cetak, dan file yang dibuat/diubah belum divalidasi oleh renderer vendor. Cek salinan dalam WaiReport dengan data uji dan bandingkan total, barcode, halaman, dan cetakan sebelum digunakan.
 

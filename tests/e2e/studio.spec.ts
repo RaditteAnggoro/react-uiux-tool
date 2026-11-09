@@ -84,6 +84,32 @@ test("basic button reuses a consistent existing project class", async ({ page })
   await stopPreview(page);
 });
 
+test("basic paragraph starts with editable visible text", async ({ page }) => {
+  await page.goto("/");
+  const root = await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await page.locator(".primitive-grid").getByRole("button", { name: "Paragraph" }).click();
+  await expect(frame.getByText("New paragraph")).toBeVisible();
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>New paragraph</p>");
+  await frame.getByText("New paragraph").click();
+  await page.getByLabel("Text content").fill("Edited paragraph");
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  await expect(frame.getByText("Edited paragraph")).toBeVisible();
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>Edited paragraph</p>");
+  await stopPreview(page);
+});
+
+test("project boards do not offer demo board actions", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  await page.locator(".icon-rail").getByRole("button", { name: "Boards" }).click();
+  await expect(page.locator(".boards-list")).not.toContainText("Button / States");
+  await expect(page.locator(".boards-list").getByRole("button", { name: "View source" })).toHaveCount(0);
+  await stopPreview(page);
+});
+
 test("preview explains when Tailwind project styling is not loaded", async ({ page }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-tailwind-warning-"));
   fixtureRoots.add(root);
@@ -505,6 +531,11 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
   await expect(
     page.locator(".selected-heading").getByRole("heading", { name: "button" }),
   ).toBeVisible();
+  await expect(frame.getByRole("button", { name: "Create project" })).toHaveCSS("cursor", "move");
+  await page.getByRole("tab", { name: "Interact" }).click();
+  await expect(frame.getByRole("button", { name: "Create project" })).toHaveCSS("cursor", "pointer");
+  await page.getByRole("tab", { name: "Design" }).click();
+  await expect(frame.getByRole("button", { name: "Create project" })).toHaveCSS("cursor", "move");
   await expect(page.locator(".source-location")).toContainText("src/App.tsx");
 
   const textField = page.getByLabel("Text content");
@@ -526,6 +557,7 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
 
   await frame.getByText("Website redesign").click();
   await expect(page.getByText(/Repeated JSX shares one source/i)).toBeVisible();
+  await expect(frame.getByText("Website redesign")).not.toHaveCSS("cursor", "move");
   await expect(
     page
       .locator(".inspector-section")

@@ -405,7 +405,7 @@ To add a native object, click its palette button or drag it onto an eligible ban
 ### Open an existing `.yrf`
 
 1. Choose **YRF (.yrf)** and select a folder, then choose a file from the list; manual path entry is a fallback.
-2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** displays source read-only. Inspection does not execute vendor scripts.
+2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** initially displays source read-only. Choose **Edit source** to edit a draft, then **Apply & save copy** to write a copy. Inspection does not execute vendor scripts.
 3. Edit available caption/geometry values, choose **Preview change**, then **Save copy**. The original is not overwritten. Creating a new `.yrf` requires acknowledging that output is experimental.
 4. Units, print appearance, and created/edited files have not been validated by the vendor renderer. Open the copy in WaiReport with test data and compare totals, barcodes, pagination, and print output before use.
 
