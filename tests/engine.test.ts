@@ -249,6 +249,26 @@ test("type-safe custom literal prop edits resolve exact file and preserve shared
     await f.cleanup();
   }
 });
+test("declared untyped JavaScript props accept an explicitly selected primitive", async () => {
+  const source = "import Button from './Button'; export default function App(){return <main><Button /></main>}";
+  const f = await fixture(source, { "src/Button.jsx": "export default function Button({ label }) { return <button>{label}</button> }" });
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((element) => element.tag === "Button")!;
+    const definition = report.components.find((component) => component.id === button.componentId)!;
+    assert.equal(definition.props.find((prop) => prop.name === "label")?.type, "unknown");
+    const patch = await createPatch(f.root, req(button, "prop", "Search", "label"));
+    assert.match(patch.after, /<Button label="Search"\s*\/>/);
+    await assert.rejects(createPatch(f.root, req(button, "prop", "x", "invented")), /known component contract/);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+    await applyPatch(f.root, patch, true);
+    const updated = (await analyzeProject(f.root)).elements.find((element) => element.tag === "Button")!;
+    const second = await createPatch(f.root, req(updated, "prop", "Find", "label"));
+    assert.match(second.after, /label="Find"/);
+  } finally {
+    await f.cleanup();
+  }
+});
 test("exported component implementations require shared scope even with zero indexed usages", async () => {
   const f = await fixture(
     "export default function App(){return <main>Route</main>}",
@@ -274,6 +294,38 @@ test("exported component implementations require shared scope even with zero ind
     });
     assert.equal(patch.impact.knownUsages, 0);
     assert.deepEqual(patch.impact.usageFiles, []);
+  } finally {
+    await f.cleanup();
+  }
+});
+test("literal React.lazy usage links the imported default screen without weakening shared scope", async () => {
+  const f = await fixture('import {lazy as load} from "react"; const Menu=load(()=>import("./Screen")); export default function App(){return <main><Menu /></main>}', {
+    "src/Screen.tsx": 'export default function Screen(){return <section><button>Run</button></section>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const usage = report.elements.find((element) => element.tag === "Menu")!;
+    const screen = report.components.find((component) => component.name === "Screen")!;
+    assert.equal(usage.componentId, screen.id);
+    assert.equal(screen.references.length, 1);
+    const button = report.elements.find((element) => element.source.file === "src/Screen.tsx" && element.tag === "button")!;
+    assert.equal(button.references.knownCount, 1);
+    await assert.rejects(createPatch(f.root, req(button, "text", "Changed")), /shared|exported/i);
+    const patch = await createPatch(f.root, { ...req(button, "text", "Changed"), scope: "shared", confirmScope: true });
+    assert.match(patch.after, />Changed<\/button>/);
+  } finally {
+    await f.cleanup();
+  }
+});
+test("computed and non-React lazy factories are not treated as static screen imports", async () => {
+  const f = await fixture('function lazy(x:any){return x} const menu = "./Screen"; const Menu=lazy(()=>import(menu)); export default function App(){return <main><Menu /></main>}', {
+    "src/Screen.tsx": 'export default function Screen(){return <button>Run</button>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const screen = report.components.find((component) => component.name === "Screen")!;
+    assert.equal(screen.references.length, 0);
+    assert.ok(!report.files.find((file) => file.file === "src/App.tsx")!.imports.some((item) => item.kind === "lazy-default"));
   } finally {
     await f.cleanup();
   }
@@ -350,6 +402,36 @@ test("static reorder, insertion, removal, text escaping and nesting constraints"
       createPatch(f.root, req(main, "insert", "bad", "script")),
       /registered/,
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("multiline insertion keeps child indentation and CRLF while single-line insertion stays minimal", async () => {
+  const source = 'export default function App(){\r\n  return (\r\n    <main>\r\n      <span>Keep</span>\r\n    </main>\r\n  );\r\n}\r\n';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const main = report.elements.find((element) => element.tag === "main")!;
+    const patch = await createPatch(f.root, { ...req(main, "insert", "New", "p"), position: "inside" });
+    assert.equal(patch.after, source.replace('    </main>', '      <p>New</p>\r\n    </main>'));
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally {
+    await f.cleanup();
+  }
+});
+test("empty text elements accept their first literal without allowing container rewrites", async () => {
+  const source = 'export default function App(){return <main><p></p><div></div><span>{value}</span></main>}';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const paragraph = report.elements.find((element) => element.tag === "p")!;
+    assert.ok(paragraph.operations.includes("text"));
+    const patch = await createPatch(f.root, req(paragraph, "text", "Hello & welcome"));
+    assert.equal(patch.after, source.replace('<p></p>', '<p>Hello &amp; welcome</p>'));
+    const div = report.elements.find((element) => element.tag === "div")!;
+    await assert.rejects(createPatch(f.root, req(div, "text", "unsafe")), /static text child/);
+    const span = report.elements.find((element) => element.tag === "span")!;
+    await assert.rejects(createPatch(f.root, req(span, "text", "unsafe")), /static text child|read.only/i);
   } finally {
     await f.cleanup();
   }

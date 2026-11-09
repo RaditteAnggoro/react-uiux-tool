@@ -31,6 +31,10 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
   are parsed without executing configuration. Dynamic/computed aliases, dynamic
   imports, higher-order components, wrappers, runtime data, and third-party
   implementations may remain unresolved.
+- Static reference indexing recognizes literal default-export `React.lazy` / imported
+  `lazy` calls with a direct arrow-function import. Other dynamic imports, named-export
+  adapters and runtime menu mappings can remain undiscovered. Editing exported screen
+  implementations still requires shared-scope confirmation when ownership is uncertain.
 - Source analysis and editing require UTF-8. Legacy-encoded source files are reported
   and skipped without conversion so the tool cannot silently corrupt their bytes.
 - Literal text/props/classes and supported inline styles can be patched. Primitive
@@ -39,6 +43,9 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
   destructuring defaults, and static JSX usage. Hooks, new handler logic, imperative
   methods, backend actions, permissions, controlled bindings, spreads,
   conditional/repeated JSX, and uncertain ownership are not rewritten speculatively.
+- A declared JavaScript prop with unresolved type accepts an explicitly chosen literal
+  string, number or boolean. Its runtime type and business meaning are not verified;
+  undeclared custom props and complex values still require source review.
 - Event bindings can be added or changed to a validated existing in-scope function,
   and a simple named binding can be removed. Inline event expressions remain source-owned;
   changing a binding does not validate the application's business behavior.

@@ -636,6 +636,7 @@ export default function App() {
     new Map<string, { elementId: string; instanceIndex: number }>(),
   );
   const pendingUndo = useRef(false);
+  const propDraft = useRef<{ elementId: string | null; dirty: boolean }>({ elementId: null, dirty: false });
   const readySelectionToken = useRef(0);
   const allElements = report?.elements || [];
   const elementById = useMemo(
@@ -1101,6 +1102,7 @@ export default function App() {
   }, [selectedId]);
   useEffect(() => {
     if (!selected) return;
+    if (propDraft.current.elementId !== selectedId) propDraft.current = { elementId: selectedId, dirty: false };
     setTextValue(selected.text || "");
     const firstProp =
       selected.props.find((prop) => prop.editable && prop.name !== "style") ??
@@ -1112,14 +1114,14 @@ export default function App() {
     const contractProp = selectedDefinition?.props.find(
       (prop) => prop.name === nextPropName,
     );
-    setPropName(nextPropName);
-    setPropValue(
-      String(instanceProp?.value ?? contractProp?.defaultValue ?? ""),
-    );
-    const nextType = contractProp?.type.match(/^(string|number|boolean)$/)?.[1]
-      ?? instanceProp?.kind.match(/^(string|number|boolean)$/)?.[1]
-      ?? "string";
-    setPropValueType(nextType as "string" | "number" | "boolean");
+    if (!propDraft.current.dirty) {
+      setPropName(nextPropName);
+      setPropValue(String(instanceProp?.value ?? contractProp?.defaultValue ?? ""));
+      const nextType = contractProp?.type.match(/^(string|number|boolean)$/)?.[1]
+        ?? instanceProp?.kind.match(/^(string|number|boolean)$/)?.[1]
+        ?? "string";
+      setPropValueType(nextType as "string" | "number" | "boolean");
+    }
     const firstEvent =
       selected.events[0]?.name ??
       selectedDefinition?.events[0] ??
@@ -1136,8 +1138,10 @@ export default function App() {
     }>("source?file=" + encodeURIComponent(selected.source.file))
       .then((value) => setSource(value.source))
       .catch((err) => setError(err.message));
+  }, [selectedId, report?.analyzedAt]);
+  useEffect(() => {
     sendCanvasSelection();
-  }, [selectedId, report?.analyzedAt, selectedIds.join("|")]);
+  }, [selectedId, report?.analyzedAt, selectedIds.join("|"), preview]);
   useEffect(() => {
     const candidate = duplicateCandidates[0];
     if (!candidate) {
@@ -1351,6 +1355,7 @@ export default function App() {
         confirmScope: shared,
         ...extra,
       });
+      if (operation === "prop") propDraft.current.dirty = false;
       applyReport(value.analysis);
       if (operation === "remove") {
         setSelectedId(null);
@@ -1375,6 +1380,23 @@ export default function App() {
         if (inserted) {
           setSelectedId(inserted.id);
           setInspectorTab("props");
+        }
+      } else if (operation === "insert" && typeof extra.name === "string") {
+        const before = value.patch.before;
+        const after = value.patch.after;
+        let start = 0;
+        while (start < before.length && before[start] === after[start]) start++;
+        const insertedLength = after.length - before.length;
+        if (insertedLength > 0 && after.slice(start + insertedLength) === before.slice(start)) {
+          const matches = value.analysis.elements.filter((candidate) =>
+            candidate.source.file === element.source.file && candidate.tag === extra.name &&
+            candidate.source.start < start + insertedLength && candidate.source.end > start);
+          if (matches.length === 1) {
+            setSelectedId(matches[0]!.id);
+            setSelectedIds([matches[0]!.id]);
+            previewSelections.current.clear();
+            setInspectorTab("props");
+          }
         }
       }
       setPatch(null);
@@ -1596,6 +1618,7 @@ export default function App() {
   );
   const editableSelected =
     selected &&
+    !busy &&
     selected.editability !== "READ_ONLY" &&
     selected.editability !== "UNRESOLVED" &&
     selected.editability !== "ERROR";
@@ -1951,7 +1974,7 @@ export default function App() {
     setDraggingPalette(false);
     const target = selected;
     if (!target?.operations.includes("insert")) {
-      setError(t("simpleDropError"));
+      setError(t(previewState === "error" ? "previewFailedDrop" : "simpleDropError"));
       return;
     }
     const componentId = event.dataTransfer.getData("uiux/component");
@@ -1986,6 +2009,7 @@ export default function App() {
       setRoute("/");
       setMode("design");
       setPreviewState("starting");
+      if (frame.current) frame.current.src = frame.current.src;
     });
   };
   const renderElementNode = (element: JsxElement, depth: number): ReactNode => {
@@ -2396,6 +2420,14 @@ export default function App() {
       bullets: [],
     },
   ];
+  function renderWarnings(warnings: string[]) {
+    const encoding = warnings.filter((warning) => warning.endsWith(": source is not valid UTF-8; excluded from analysis and editing."));
+    const others = warnings.filter((warning) => !encoding.includes(warning));
+    return <>
+      {others.map((warning, index) => <p key={index}><span>△</span>{evidence(warning)}</p>)}
+      {encoding.length > 0 && <details><summary>△ {t("encodingWarnings")} ({encoding.length})</summary>{encoding.map((warning, index) => <p key={index}>{evidence(warning)}</p>)}</details>}
+    </>;
+  }
   function renderAnalysis(compact = false) {
     if (!report) return null;
     return (
@@ -2484,7 +2516,7 @@ export default function App() {
               />
             </div>
             <p className="small muted">
-              {report.coverage.reasons.map(evidence).join(" · ")}
+              {report.coverage.reasons.filter((reason) => !report.warnings.includes(reason) || !reason.endsWith(": source is not valid UTF-8; excluded from analysis and editing.")).map(evidence).join(" · ")}
             </p>
             <h3>{t("build")}</h3>
             <p className="small">{evidence(report.readiness.reason)}</p>
@@ -2496,12 +2528,7 @@ export default function App() {
             {t("warnings")} <Badge>{report.warnings.length}</Badge>
           </h3>
           {report.warnings.length ? (
-            report.warnings.map((warning, index) => (
-              <p key={index}>
-                <span>△</span>
-                {evidence(warning)}
-              </p>
-            ))
+            renderWarnings(report.warnings)
           ) : (
             <p className="muted">{t("noWarnings")}</p>
           )}
@@ -2733,12 +2760,14 @@ export default function App() {
                           {prop.expression || String(prop.value)}
                         </span>
                         {!prop.editable && <Icon name="lock" size={12} />}
+                        {!prop.editable && prop.reason && <small>{evidence(prop.reason)}</small>}
                       </div>
                     ))}
                   <Field label={t("propName")}>
                     <input
                       value={propName}
                       onChange={(e) => {
+                        propDraft.current.dirty = true;
                         const name = e.target.value;
                         setPropName(name);
                         const instance = selected.props.find(
@@ -2774,11 +2803,12 @@ export default function App() {
                   <Field label={t("valueType")}>
                     <select
                       value={propValueType}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        propDraft.current.dirty = true;
                         setPropValueType(
                           event.target.value as "string" | "number" | "boolean",
-                        )
-                      }
+                        );
+                      }}
                       disabled={
                         !editableSelected ||
                         activePropertyLocked ||
@@ -2794,7 +2824,7 @@ export default function App() {
                     {activeContract?.options?.length ? (
                       <select
                         value={propValue}
-                        onChange={(event) => setPropValue(event.target.value)}
+                        onChange={(event) => { propDraft.current.dirty = true; setPropValue(event.target.value); }}
                         disabled={!editableSelected || activePropertyLocked}
                       >
                         {!activeContract.options.includes(propValue) && (
@@ -2807,7 +2837,7 @@ export default function App() {
                     ) : propValueType === "boolean" ? (
                       <select
                         value={propValue || "false"}
-                        onChange={(event) => setPropValue(event.target.value)}
+                        onChange={(event) => { propDraft.current.dirty = true; setPropValue(event.target.value); }}
                         disabled={!editableSelected || activePropertyLocked}
                       >
                         <option value="false">false</option>
@@ -2817,7 +2847,7 @@ export default function App() {
                       <input
                         type={propValueType === "number" ? "number" : "text"}
                         value={propValue}
-                        onChange={(e) => setPropValue(e.target.value)}
+                        onChange={(e) => { propDraft.current.dirty = true; setPropValue(e.target.value); }}
                         disabled={!editableSelected || activePropertyLocked}
                       />
                     )}
@@ -2952,18 +2982,12 @@ export default function App() {
                   <Field label={t("formattingChoice")}>
                     <select value={styleName} disabled={!editableSelected || !selected.operations.includes("style")} onChange={(event) => setStyleName(event.target.value)}>
                       {[
-                        ["padding", "Padding"], ["fontFamily", "Font family"], ["fontSize", "Font size"],
-                        ["fontWeight", "Font weight"], ["fontStyle", "Italic"],
-                        ["textDecorationLine", "Underline / strikethrough"], ["color", "Text color"],
-                        ["backgroundColor", "Background"], ["letterSpacing", "Letter spacing"],
-                        ["lineHeight", "Line height"], ["textAlign", "Alignment"],
-                        ["borderWidth", "Border width"], ["borderColor", "Border color"],
-                        ["whiteSpace", "Wrap text"], ["transform", "Rotation"],
-                      ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        "padding", "fontFamily", "fontSize", "fontWeight", "fontStyle", "textDecorationLine", "color", "backgroundColor", "letterSpacing", "lineHeight", "textAlign", "borderWidth", "borderColor", "whiteSpace", "transform",
+                      ].map((value, index) => <option key={value} value={value}>{t("formatOptions").split("|")[index]}</option>)}
                     </select>
                   </Field>
                   <Field label={t("cssValue")}>
-                    <input value={styleValue} onChange={(event) => setStyleValue(event.target.value)} disabled={!editableSelected || !selected.operations.includes("style")} placeholder="e.g. 16px, italic, underline" />
+                    <input value={styleValue} onChange={(event) => setStyleValue(event.target.value)} disabled={!editableSelected || !selected.operations.includes("style")} placeholder={t("formatValueExample")} />
                   </Field>
                   <button className="button full" disabled={busy || !editableSelected || !selected.operations.includes("style") || !styleValue.trim()} onClick={() => void stage("style", { name: styleName, value: styleValue })}>{t("stage")}</button>
                 </section>
@@ -2981,6 +3005,15 @@ export default function App() {
                           {origin.source.file}:{origin.source.line} ·{" "}
                           {origin.confidence} · {origin.scope}
                         </small>
+                        {(() => {
+                          const prop = selected.props.find((item) => item.name === `style.${origin.property}`);
+                          return origin.origin === "inline" && prop?.editable && selected.operations.includes("style") && editableSelected ? (
+                            <button className="text-button" onClick={() => {
+                              setStyleName(origin.property);
+                              setStyleValue(String(prop.value ?? ""));
+                            }}>{t("editInlineOrigin")}</button>
+                          ) : <small>{t("sourceOwnedStyle")}</small>;
+                        })()}
                       </div>
                     ))
                   ) : (
@@ -3669,7 +3702,7 @@ export default function App() {
                 <div className="path-summary">
                   <span>{t("fullPath")}</span>
                   <code>
-                    {form.parentDirectory.replace(/[\\/]$/, "")}/{form.name}
+                    {form.parentDirectory}  ·  {form.name}
                   </code>
                 </div>
               </>
@@ -3729,8 +3762,8 @@ export default function App() {
                 <div className="notice">
                   <Icon name="layers" />
                   <div>
-                    <strong>{t("primitives")}</strong>
-                    <p>{t("createHint")}</p>
+                    <strong>{t("styling")}</strong>
+                    <p>{t(form.styling === "css-modules" ? "stylingModulesHint" : form.styling === "tailwind" ? "stylingTailwindHint" : "stylingCssHint")}</p>
                   </div>
                 </div>
               </>
@@ -3741,8 +3774,7 @@ export default function App() {
                 <div className="path-summary">
                   <span>{t("fullPath")}</span>
                   <code>
-                    {plan?.targetDirectory ||
-                      `${form.parentDirectory}/${form.name}`}
+                    {plan?.targetDirectory || `${form.parentDirectory}  ·  ${form.name}`}
                   </code>
                 </div>
                 <dl className="detail-list">
@@ -3765,7 +3797,16 @@ export default function App() {
                         "react, react-dom"}
                     </dd>
                   </div>
+                  <div>
+                    <dt>{t("devDependencies")}</dt>
+                    <dd>{Object.keys(plan?.devDependencies || {}).join(", ") || "—"}</dd>
+                  </div>
                 </dl>
+                {!!plan?.commands?.length && (
+                  <div className="notice">
+                    <div><strong>{t("suggestedCommands")}</strong><pre>{plan.commands.join("\n")}</pre></div>
+                  </div>
+                )}
                 {plan?.files && (
                   <details>
                     <summary>
@@ -4199,13 +4240,13 @@ export default function App() {
                           </details>
                           <div
                             className={`component-drop-target ${selected?.operations.includes("insert") ? "ready" : ""}`}
-                            onDragOver={(event) => {
-                              if (selected?.operations.includes("insert"))
-                                event.preventDefault();
-                            }}
+                            onDragOver={(event) => event.preventDefault()}
                             onDrop={(event) => {
                               event.preventDefault();
-                              if (!selected?.operations.includes("insert")) return;
+                              if (!selected?.operations.includes("insert")) {
+                                setError(t(previewState === "error" ? "previewFailedDrop" : "simpleDropError"));
+                                return;
+                              }
                               const tag = event.dataTransfer.getData("uiux/tag");
                               const componentId = event.dataTransfer.getData(
                                 "uiux/component",
@@ -4567,6 +4608,7 @@ export default function App() {
                       <button className="button" aria-label={t("nextMatch")} disabled={!codeMatches.length} onClick={() => setCodeMatch((current) => (current + 1) % codeMatches.length)}>↓</button>
                       <button className="button" aria-label={t("closeSearch")} onClick={() => setCodeSearchOpen(false)}>×</button>
                     </div>}
+                    <p className="small muted">{t("sourceEditHint")}</p>
                     <pre ref={codeSource}>{codeMatches.length ? <>{codeMatches.map((start, index) => <span key={start}>{source.slice(index ? codeMatches[index - 1] + codeSearch.length : 0, start)}<mark data-current-match={index === codeMatch}>{source.slice(start, start + codeSearch.length)}</mark></span>)}{source.slice(codeMatches[codeMatches.length - 1] + codeSearch.length)}</> : source || t("selectHint")}</pre>
                   </div>
                 ) : preview && (nav !== "boards" || isDemo) ? (
@@ -4752,12 +4794,7 @@ export default function App() {
                 {bottomTab === "problems" && (
                   <div className="problem-list">
                     {report.warnings.length ? (
-                      report.warnings.map((warning, index) => (
-                        <p key={index}>
-                          <span>△</span>
-                          {evidence(warning)}
-                        </p>
-                      ))
+                      renderWarnings(report.warnings)
                     ) : (
                       <p className="muted">{t("noWarnings")}</p>
                     )}

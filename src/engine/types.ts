@@ -82,7 +82,7 @@ export interface AnalyzedFile {
   file: string;
   hash: string;
   bytes: number;
-  imports: { name: string; from: string; resolved?: string }[];
+  imports: { name: string; from: string; resolved?: string; kind?: "lazy-default" }[];
   errors: string[];
 }
 export interface AnalysisReport {

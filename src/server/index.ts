@@ -349,8 +349,16 @@ export async function startStudio(options: StudioOptions = {}) {
           return;
         }
         if (mutationBusy) {
+          const action = ({
+            "/api/open": "open the project",
+            "/api/analyze": "analyze the project",
+            "/api/preview/design": "switch the design view",
+            "/api/edit": "save the edit",
+            "/api/edit-group": "save the group edit",
+            "/api/undo": "undo the last edit",
+          } as Record<string, string>)[url.pathname] ?? "repeat the selected action";
           json(res, 409, {
-            error: "Another operation is still running",
+            error: `Another operation is still running. This action was not performed; wait, then ${action}.`,
             code: "BUSY",
           });
           return;

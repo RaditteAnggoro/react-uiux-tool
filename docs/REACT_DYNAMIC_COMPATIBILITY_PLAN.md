@@ -4,6 +4,12 @@ Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua ske
 
 Review 25 issue dan daftar pending 9 November tersedia di [Issue review 2026-11-09](ISSUE_REVIEW_2026-11-09.md). Prioritas pertama adalah integritas hasil insert (ISS-013); status sebagian dan belum direproduksi belum dianggap selesai. Issue Report Studio dicatat juga agar tidak hilang dari antrean.
 
+Pembaruan berikutnya menangani style origin, pengelompokan peringatan encoding,
+format insert multiline, dan sebagian review project/BUSY/lokalisasi. ISS-006 tetap
+sebagian: pemakaian literal React.lazy terindeks pada fixture, sementara cakupan screen
+yang dipanggil dinamis lain belum terbukti; jangan melepas
+konfirmasi perubahan shared hanya berdasarkan nama folder atau jumlah referensi nol.
+
 ## Ukuran dan cakupan
 
 - Buat inventaris versi fixture yang dapat direproduksi: React JS/TS, Vite, CRA dan Next (Pages/App), CSS global, CSS Modules, Tailwind, CSS-in-JS, komponen majemuk, alias dan barrel exports. Tentukan versi dan status runtime/inspect-only untuk setiap fixture.

@@ -921,6 +921,35 @@ export async function analyzeProject(
         }
         for (const name of names) imports.push({ name, from });
       }
+    // Recognize only the direct, literal React.lazy(() => import("...")) form.
+    // Dynamic expressions, wrappers and named-export adapters remain unresolved.
+    const reactImports = sf.statements.filter((s): s is ts.ImportDeclaration =>
+      ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier) && s.moduleSpecifier.text === "react");
+    const reactNamespaces = new Set<string>();
+    const lazyBindings = new Set<string>();
+    for (const declaration of reactImports) {
+      const clause = declaration.importClause;
+      if (clause?.name) reactNamespaces.add(clause.name.text);
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) reactNamespaces.add(clause.namedBindings.name.text);
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings))
+        for (const item of clause.namedBindings.elements)
+          if ((item.propertyName?.text ?? item.name.text) === "lazy") lazyBindings.add(item.name.text);
+    }
+    for (const statement of sf.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !ts.isCallExpression(declaration.initializer)) continue;
+        const call = declaration.initializer;
+        const callee = call.expression;
+        const isLazy = (ts.isIdentifier(callee) && lazyBindings.has(callee.text)) ||
+          (ts.isPropertyAccessExpression(callee) && callee.name.text === "lazy" && ts.isIdentifier(callee.expression) && reactNamespaces.has(callee.expression.text));
+        const callback = call.arguments[0];
+        if (!isLazy || call.arguments.length !== 1 || !callback || !ts.isArrowFunction(callback) || !ts.isCallExpression(callback.body)) continue;
+        const imported = callback.body;
+        if (imported.expression.kind !== ts.SyntaxKind.ImportKeyword || imported.arguments.length !== 1 || !ts.isStringLiteral(imported.arguments[0]!)) continue;
+        imports.push({ name: declaration.name.text, from: imported.arguments[0]!.text, kind: "lazy-default" });
+      }
+    }
     report.files.push({
       file,
       hash,
@@ -1059,7 +1088,7 @@ export async function analyzeProject(
         }
         const textChildren =
           ts.isJsxElement(n) &&
-          n.children.length > 0 &&
+          (n.children.length > 0 || /^(?:p|span|h[1-6]|button|label|a|li|legend)$/.test(tag)) &&
           n.children.every(ts.isJsxText)
             ? n.children.map((c) => c.getText(sf)).join("")
             : null;
@@ -1186,7 +1215,7 @@ export async function analyzeProject(
     const definition =
       local ??
       report.components.find(
-        (c) => c.name === el.tag && c.source.file === imp?.resolved,
+        (c) => c.source.file === imp?.resolved && (c.name === el.tag || (imp?.kind === "lazy-default" && c.defaultExported)),
       ) ??
       (sameName.length === 1 ? sameName[0] : undefined);
     if (definition) {

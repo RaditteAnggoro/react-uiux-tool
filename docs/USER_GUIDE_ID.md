@@ -212,6 +212,8 @@ prop TypeScript dan default destructuring JavaScript. Literal union menjadi pili
 dan prop literal opsional yang belum ada dapat ditambahkan ke pemakaian JSX.
 Expression seperti `{customer.name}`, spread, dan controlled binding tetap dimiliki
 source. Control yang terlihat tetap harus lolos validasi engine.
+Elemen teks HTML kosong yang didukung, seperti paragraph, dapat diberi teks pertama
+melalui **Text content**; expression dan container lain tetap perlu ditinjau di source.
 
 **Style/Layout:** lihat bukti asal inline declaration, class, CSS variable, atau
 stylesheet reference. Hanya source yang jelas dapat diedit. Class declaration
@@ -219,6 +221,9 @@ berbeda dari computed cascade browser; resolusi seluruh cascade dan global-token
 rewrite belum tersedia. Inline style edit memang perubahan inline, bukan klaim
 mengedit aturan global. Tailwind standalone build/dev didukung starter, tetapi
 adapter preview internal tidak memuat plugin Tailwind project.
+Di **Asal style**, pilih **Edit style inline ini** untuk memuat property inline dan
+nilainya ke editor. Ubah nilainya lalu simpan; asal class dan stylesheet perlu
+diedit melalui file source masing-masing.
 
 **Events/Data/A11y:** callback prop yang dideklarasikan (atau event React native yang
 didukung) dapat ditambah/diganti dengan function yang sudah ditemukan pada owner.

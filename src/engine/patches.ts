@@ -399,6 +399,7 @@ function knownType(
     const contractKind = contract?.type.match(/^(string|number|boolean)$/)?.[1];
     const kind = contractKind ??
       PRIMITIVE_PROPS[name] ??
+      (contract?.type === "unknown" && ["string", "number", "boolean"].includes(typeof value) ? typeof value : undefined) ??
       (/^(aria-|data-)[a-zA-Z0-9_-]+$/.test(name) ? "string" : undefined);
     if (!kind)
       fail("Unknown prop type. Add a supported registry contract first.");
@@ -569,7 +570,7 @@ export async function createPatch(
   if (request.operation === "text") {
     if (
       !ts.isJsxElement(node) ||
-      node.children.length === 0 ||
+      (node.children.length === 0 && !/^(?:p|span|h[1-6]|button|label|a|li|legend)$/.test(opening.tagName.getText(sf))) ||
       !node.children.every(ts.isJsxText)
     )
       fail("Only a static text child can be edited.");
@@ -825,7 +826,20 @@ export async function createPatch(
         markup = `${wrapper}${markup}</${wrapperTag}>`;
       }
       const offset = node.closingElement.getStart(sf);
-      after = applySpan(before, offset, offset, markup);
+      const lineStart = before.lastIndexOf("\n", offset - 1) + 1;
+      const closingIndent = before.slice(lineStart, offset);
+      if (lineStart > node.openingElement.end && /^[\t ]*$/.test(closingIndent)) {
+        const previousChild = [...node.children].reverse().find((child) => ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child));
+        const childStart = previousChild?.getStart(sf);
+        const childLine = childStart === undefined ? -1 : before.lastIndexOf("\n", childStart - 1) + 1;
+        const observedIndent = childStart === undefined || childLine < 0 ? "" : before.slice(childLine, childStart);
+        const indent = /^[\t ]+$/.test(observedIndent) && observedIndent.length > closingIndent.length
+          ? observedIndent : `${closingIndent}  `;
+        const newline = before.includes("\r\n") ? "\r\n" : "\n";
+        after = applySpan(before, lineStart, lineStart, `${indent}${markup}${newline}`);
+      } else {
+        after = applySpan(before, offset, offset, markup);
+      }
     } else {
       parent = node.parent;
       if (!staticChildren(parent))

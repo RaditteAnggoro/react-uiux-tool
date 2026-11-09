@@ -19,6 +19,49 @@ test("design preview uses Vite-style module IDs on Windows and Unix", () => {
   assert.equal(designModulePath('/tmp/project/'), '/tmp/project/__uiux_design.jsx');
 });
 
+test("successive insert, prop and event edits retain prior writes on success and conflict", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-sequential-edits-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "sequential-edits", dependencies: { react: "^19.0.0", vite: "^7.0.0" } }));
+    const sourcePath = path.join(root, "src/App.jsx");
+    await writeFile(sourcePath, "export default function App(){const handleSearch=()=>{};return <main><form><span>Keep</span></form></main>}");
+    await withStudio(async (base) => {
+      const { token } = await (await fetch(`${base}/api/session`)).json() as { token: string };
+      const headers = { "content-type": "application/json", origin: base, "x-uiux-token": token };
+      const post = async (endpoint: string, data: object) => {
+        const response = await fetch(`${base}/api/${endpoint}`, { method: "POST", headers, body: JSON.stringify(data) });
+        return { status: response.status, value: await response.json() as any };
+      };
+      const opened = await post("open", { path: root });
+      assert.equal(opened.status, 200);
+      const project = opened.value.projectRoot;
+      const form = opened.value.elements.find((element: any) => element.tag === "form");
+      assert.ok(form);
+      const inserted = await post("edit", { expectedProject: project, file: form.source.file, elementId: form.id, expectedHash: form.hash, operation: "insert", name: "p", value: "New paragraph", position: "inside", scope: "instance" });
+      assert.equal(inserted.status, 200, JSON.stringify(inserted.value));
+      const paragraph = inserted.value.analysis.elements.find((element: any) => element.tag === "p");
+      assert.ok(paragraph);
+      const afterInsert = await readFile(sourcePath, "utf8");
+      assert.match(afterInsert, /<p>New paragraph<\/p>/);
+      const prop = await post("edit", { expectedProject: project, file: paragraph.source.file, elementId: paragraph.id, expectedHash: paragraph.hash, operation: "prop", name: "title", value: "Example", scope: "instance" });
+      assert.equal(prop.status, 200, JSON.stringify(prop.value));
+      const updated = prop.value.analysis.elements.find((element: any) => element.tag === "p");
+      const event = await post("edit", { expectedProject: project, file: updated.source.file, elementId: updated.id, expectedHash: updated.hash, operation: "event", name: "onClick", value: "handleSearch", scope: "instance" });
+      assert.equal(event.status, 200, JSON.stringify(event.value));
+      const afterEvent = await readFile(sourcePath, "utf8");
+      assert.match(afterEvent, /<p[^>]*title="Example"[^>]*>New paragraph<\/p>/);
+      assert.match(afterEvent, /onClick=\{handleSearch\}/);
+      assert.match(afterEvent, /<span>Keep<\/span>/);
+      const stale = await post("edit", { expectedProject: project, file: paragraph.source.file, elementId: paragraph.id, expectedHash: paragraph.hash, operation: "prop", name: "title", value: "Stale", scope: "instance" });
+      assert.notEqual(stale.status, 200);
+      assert.equal(await readFile(sourcePath, "utf8"), afterEvent);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
 async function withStudio(run: (base: string) => Promise<void>) {
   const recentDirectory = await mkdtemp(
     path.join(os.tmpdir(), "uiux-server-test-"),
@@ -202,6 +245,22 @@ test("controller rejects mutation without explicit approval and oversized input"
       body: JSON.stringify({ path: "x".repeat(140_000) }),
     });
     assert.equal(oversized.status, 400);
+  });
+});
+
+test("concurrent requests explain that the rejected action must be retried", async () => {
+  await withStudio(async (base) => {
+    const { token } = await (await fetch(`${base}/api/session`)).json() as { token: string };
+    const headers = { "content-type": "application/json", origin: base, "x-uiux-token": token };
+    const responses = await Promise.all(Array.from({ length: 6 }, () => fetch(`${base}/api/demo`, { method: "POST", headers, body: "{}" })));
+    const rejected = responses.filter((response) => response.status === 409);
+    assert.ok(rejected.length > 0);
+    for (const response of rejected) {
+      const value = await response.json() as { code: string; error: string };
+      assert.equal(value.code, "BUSY");
+      assert.match(value.error, /not performed.*wait.*repeat/i);
+    }
+    assert.equal(responses.filter((response) => response.status === 200).length, 1);
   });
 });
 

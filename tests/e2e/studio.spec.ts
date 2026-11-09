@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -48,6 +48,10 @@ test("palette warns without a selected container and copies a button without an 
   await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
   await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).click();
   await expect(page.getByRole("alert")).toContainText("Select the form or section");
+  await page.getByRole("alert").getByRole("button").last().click();
+  await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).dragTo(page.locator(".component-drop-target"));
+  await expect(page.getByRole("alert")).toContainText("Select the form or section");
+  await page.getByRole("alert").getByRole("button").last().click();
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).click();
   await page.getByRole("tab", { name: "Layout" }).click();
@@ -92,12 +96,79 @@ test("basic paragraph starts with editable visible text", async ({ page }) => {
   await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
   await page.locator(".primitive-grid").getByRole("button", { name: "Paragraph" }).click();
   await expect(frame.getByText("New paragraph")).toBeVisible();
+  await expect(page.locator(".selected-heading").getByRole("heading", { name: "p", exact: true })).toBeVisible();
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>New paragraph</p>");
   await frame.getByText("New paragraph").click();
   await page.getByLabel("Text content").fill("Edited paragraph");
   await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
   await expect(frame.getByText("Edited paragraph")).toBeVisible();
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>Edited paragraph</p>");
+  await stopPreview(page);
+});
+
+test("declared untyped JavaScript prop can be added and edited in the inspector", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-js-prop-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/Button.jsx"), "export default function Button({ label }) { return <button>{label || 'Empty'}</button> }");
+  await writeFile(path.join(root, "src/App.tsx"), "import Button from './Button.jsx'; export default function App(){return <main><Button /></main>}");
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await expect(frame.getByRole("button", { name: "Empty" })).toBeVisible();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: /App\.tsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "App" }).click();
+  await explorer.locator(".explorer-name", { hasText: /^main$/ }).first().locator("..").click();
+  await explorer.locator(".explorer-name", { hasText: /^Button$/ }).first().locator("..").click();
+  await page.getByRole("tab", { name: "Props" }).click();
+  await page.getByLabel("Property name").fill("label");
+  await page.getByLabel("Literal value").fill("Search");
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Save to source" }).click();
+  await expect(frame.getByRole("button", { name: "Search" })).toBeVisible();
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain('label="Search"');
+  await stopPreview(page);
+});
+
+test("insert then edit props and event keeps the inserted element", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-sequential-ui-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  const sourcePath = path.join(root, "src/App.tsx");
+  await writeFile(sourcePath, 'export default function App(){const handleSearch=()=>{};return <main><section><span>Keep existing</span></section></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section").click();
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await page.locator(".primitive-grid").getByRole("button", { name: "Paragraph" }).click();
+  await expect.poll(() => readFile(sourcePath, "utf8")).toContain("<p>New paragraph</p>");
+  await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await frame.getByText("New paragraph").click();
+  await page.getByLabel("Property name").fill("title");
+  await page.getByLabel("Literal value").fill("Example");
+  await expect(page.getByLabel("Property name")).toHaveValue("title");
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Save to source" }).click();
+  await expect.poll(() => readFile(sourcePath, "utf8")).toContain('title="Example"');
+  await page.getByRole("tab", { name: "Events" }).click();
+  await page.getByLabel("Event property").selectOption("onClick");
+  await page.getByLabel("Existing function").fill("handleSearch");
+  await page.getByRole("button", { name: "Bind event to source" }).click();
+  await expect.poll(() => readFile(sourcePath, "utf8")).toContain("onClick={handleSearch}");
+  const source = await readFile(sourcePath, "utf8");
+  expect(source).toContain('title="Example"');
+  expect(source).toContain("New paragraph</p>");
+  expect(source).toContain("<span>Keep existing</span>");
   await stopPreview(page);
 });
 
@@ -126,6 +197,87 @@ test("preview explains when Tailwind project styling is not loaded", async ({ pa
   await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Tailwind project configuration is not loaded" })).toBeVisible();
   await stopPreview(page);
+});
+
+test("a failed design screen does not prevent opening another screen", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-design-recovery-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await mkdir(path.join(root, "src/views"), { recursive: true });
+  await writeFile(path.join(root, "src/views/Bad.jsx"), 'export default function Bad(){throw new Error("Broken fixture screen"); return <div /> }');
+  await writeFile(path.join(root, "src/views/Good.jsx"), 'export default function Good(){return <main><h1>Recovered screen</h1></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: "views" }).click();
+  await explorer.getByRole("treeitem", { name: /Bad\.jsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "Bad" }).click();
+  await expect(page.frameLocator('iframe[title="Live preview"]').getByText(/Broken fixture screen/)).toBeVisible({ timeout: 15000 });
+  await explorer.getByRole("treeitem", { name: /Good\.jsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "Good" }).click();
+  await expect(page.frameLocator('iframe[title="Live preview"]').getByRole("heading", { name: "Recovered screen" })).toBeVisible({ timeout: 15000 });
+  await stopPreview(page);
+});
+
+test("inline style origin loads its property and value into the editor", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-style-origin-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/App.tsx"), 'export default function App(){return <main><button style={{marginTop: "12px"}}>Example</button></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  await page.frameLocator('iframe[title="Live preview"]').getByRole("button", { name: "Example" }).click();
+  await page.getByRole("tab", { name: "Style" }).click();
+  await page.getByRole("button", { name: "Edit this inline style" }).click();
+  await expect(page.getByLabel("CSS property")).toHaveValue("marginTop");
+  await expect(page.getByLabel("CSS value").last()).toHaveValue("12px");
+  await page.getByLabel("Language").selectOption("id");
+  await expect(page.getByRole("option", { name: "Ukuran font" })).toBeAttached();
+  await stopPreview(page);
+});
+
+test("new project review shows styling details, development dependencies and manual commands", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-review-"));
+  fixtureRoots.add(root);
+  await page.goto("/");
+  await page.getByRole("button", { name: /New Project/i }).click();
+  await page.getByLabel("Parent directory").fill(root);
+  await page.getByLabel("Project name").fill("example-app");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByLabel("Components & styling").selectOption("tailwind");
+  await expect(page.getByText(/Tailwind CSS v4 uses utility classes/)).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByText("Development dependencies")).toBeVisible();
+  await expect(page.getByText(/@tailwindcss\/vite/).first()).toBeVisible();
+  await expect(page.getByText(/npm install/)).toBeVisible();
+  await expect(page.getByText(/npm run build/)).toBeVisible();
+  await expect.poll(() => readdir(root)).toEqual([]);
+});
+
+test("non UTF-8 warnings are grouped with each skipped file still available", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-encoding-warning-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  const file = path.join(root, "src/legacy.css");
+  const bytes = Buffer.from([0xff, 0xfe, 0x61]);
+  await writeFile(file, bytes);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByText(/Files skipped because they are not valid UTF-8/).click();
+  await expect(page.locator("details").filter({ hasText: "Files skipped because they are not valid UTF-8" }).getByText(/src\/legacy.css.*not valid UTF-8/)).toBeVisible();
+  expect(await readFile(file)).toEqual(bytes);
 });
 
 test("code search handles Ctrl+F and navigates source matches", async ({ page }) => {

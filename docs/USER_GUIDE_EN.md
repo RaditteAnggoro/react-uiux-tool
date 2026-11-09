@@ -212,12 +212,17 @@ prop declarations and JavaScript destructuring defaults. Literal-union options b
 a select control, and a missing optional literal prop can be added to the JSX usage.
 Values such as `{customer.name}`, spreads, and controlled bindings stay source-owned.
 A control being visible does not bypass engine validation.
+Empty supported HTML text elements such as paragraphs can receive their first text
+through **Text content**; expressions and other containers still require source review.
 
 **Style/Layout:** inspect source evidence for inline declarations, classes, CSS
 variables, or stylesheet references. Only grounded source is editable. Class
 declarations and computed browser cascade are not interchangeable; full computed
 cascade resolution and global-token rewriting are unavailable. A supported inline
 style change is explicitly an inline change, not a claim to edit a global rule.
+Under **Style origin**, choose **Edit this inline style** to load an editable inline
+property and its current value into the editor. Change the value and save it; class
+and stylesheet origins must be edited in their source files.
 
 **Events/Data/A11y:** a declared callback prop (or supported native React event) can
 be added or replaced with an existing function discovered in the owning component.
