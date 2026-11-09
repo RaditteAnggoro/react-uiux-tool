@@ -12,6 +12,12 @@ import path from "node:path";
 import os from "node:os";
 import { createConnection } from "node:net";
 import { startStudio } from "../src/server/index.js";
+import { designModulePath } from "../src/server/preview.js";
+
+test("design preview uses Vite-style module IDs on Windows and Unix", () => {
+  assert.equal(designModulePath('C:\\Users\\tester\\project'), 'C:/Users/tester/project/__uiux_design.jsx');
+  assert.equal(designModulePath('/tmp/project/'), '/tmp/project/__uiux_design.jsx');
+});
 
 async function withStudio(run: (base: string) => Promise<void>) {
   const recentDirectory = await mkdtemp(

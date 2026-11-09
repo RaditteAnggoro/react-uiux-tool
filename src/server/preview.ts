@@ -20,6 +20,11 @@ type DesignTarget = {
   defaultExported: boolean;
 };
 
+/** Vite uses forward-slash module IDs on every platform. */
+export function designModulePath(root: string): string {
+  return `${root.replace(/\\/g, "/").replace(/\/+$/, "")}/__uiux_design.jsx`;
+}
+
 export function instrumentSource(code: string, file: string): string {
   const source = ts.createSourceFile(
     file,
@@ -475,7 +480,7 @@ createRoot(document.getElementById("root")).render(
         );
     }
     const owner = this;
-    const designModuleId = path.join(this.root, "__uiux_design.jsx");
+    const designModuleId = designModulePath(this.root);
     this.cacheDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), "react-uiux-preview-"),
     );
