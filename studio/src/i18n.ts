@@ -227,8 +227,15 @@ export const en = {
   identityProperty: "ID / name to change",
   newIdentityValue: "New ID / name",
   duplicateNow: "Duplicate directly",
+  findInCode: "Find in code",
+  previousMatch: "Previous match",
+  nextMatch: "Next match",
+  closeSearch: "Close search",
+  copyToAnotherArea: "Copy to another area",
+  pasteCopiedInside: "Paste copied component inside",
+  copiedSelectDestination: "Copied. Select the destination form or section, then paste inside.",
   duplicateIdentityHint:
-    "Select a component containing a fixed id, name, fromName, toName, or *Id property.",
+    "Copy this component. Components with an ID or name need a new identity.",
   insertPrimitive: "Add a basic HTML element",
   insert: "Add inside",
   remove: "Remove element",
@@ -263,10 +270,13 @@ export const en = {
   addingComponentHint:
     "Please wait. It will appear automatically when the source is ready.",
   simpleDropError:
-    "Drop it onto the large form or section area. The tool will choose the correct source location.",
+    "Select the form or section where you want to add the component first. Choose a fixed, editable container.",
+  ambiguousCanvasTarget: "The exact component instance could not be determined. Select the form or container in the Pages source tree before adding a component.",
   releaseToAdd: "Release here to add",
   addInside: "Add inside",
   noProjectComponents: "No reusable project components match this search.",
+  previewStylingWarning: "Tailwind project configuration is not loaded in this preview. Styles may differ; verify them with the project's own approved preview.",
+  unboundComponentData: "This component exposes a value but no value is bound here. Check its data and event bindings before relying on it.",
   dragWritesDirectly:
     "Click once, or drag directly onto the picture. The result is saved and shown automatically.",
   savedDirectly: "Saved directly to the source directory.",
@@ -754,8 +764,15 @@ export const id: Record<Key, string> = {
   identityProperty: "ID / nama yang diubah",
   newIdentityValue: "ID / nama baru",
   duplicateNow: "Duplikasi langsung",
+  findInCode: "Cari di code",
+  previousMatch: "Hasil sebelumnya",
+  nextMatch: "Hasil berikutnya",
+  closeSearch: "Tutup pencarian",
+  copyToAnotherArea: "Salin ke area lain",
+  pasteCopiedInside: "Tempel component di dalam",
+  copiedSelectDestination: "Tersalin. Pilih form atau section tujuan, lalu tempel di dalam.",
   duplicateIdentityHint:
-    "Pilih component yang memiliki properti tetap id, name, fromName, toName, atau *Id.",
+    "Salin component ini. Component dengan ID atau nama memerlukan identitas baru.",
   insertPrimitive: "Tambahkan elemen HTML dasar",
   insert: "Tambahkan di dalam",
   remove: "Hapus elemen",
@@ -790,10 +807,13 @@ export const id: Record<Key, string> = {
   addingComponentHint:
     "Tunggu sebentar. Component akan tampil otomatis setelah source siap.",
   simpleDropError:
-    "Lepaskan component di area form atau bagian besar pada gambar. Tool akan memilih lokasi source yang benar.",
+    "Pilih form atau section tujuan terlebih dahulu. Pilih container yang tetap dan bisa diedit.",
+  ambiguousCanvasTarget: "Instance component tidak dapat ditentukan dengan pasti. Pilih form atau container yang tepat di source tree Pages sebelum menambahkan component.",
   releaseToAdd: "Lepaskan di sini untuk menambahkan",
   addInside: "Tambahkan ke dalam",
   noProjectComponents: "Tidak ada component project reusable yang cocok dengan pencarian.",
+  previewStylingWarning: "Konfigurasi Tailwind project tidak dimuat pada preview ini. Style dapat berbeda; periksa dengan preview project yang sudah disetujui.",
+  unboundComponentData: "Component ini menyediakan value, tetapi belum ada value yang terhubung di sini. Periksa data dan event sebelum menggunakannya.",
   dragWritesDirectly:
     "Cukup klik sekali, atau tarik langsung ke gambar. Hasil otomatis disimpan dan ditampilkan.",
   savedDirectly: "Langsung disimpan ke folder source.",

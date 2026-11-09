@@ -17,6 +17,7 @@ import type {
   Checkpoint,
   JsxElement,
   ComponentInfo,
+  AnalysisReport,
 } from "./types.js";
 const INSERT_TAGS = new Set([
   "div",
@@ -304,15 +305,54 @@ function validateNesting(parent: string, child: string): void {
     BLOCK.has(child)
   )
     fail("Invalid HTML nesting for this container.");
+  if (["p", "h1", "h2", "h3", "h4"].includes(parent) && /^[A-Z]/.test(child))
+    fail("This text element cannot safely accept an unresolved project component. Select a form or section instead.");
   if (
     parent === "button" &&
-    ["button", "input", "a", "textarea", "select", "form"].includes(child)
+    (["button", "input", "a", "textarea", "select", "form"].includes(child) || /^[A-Z]/.test(child))
   )
-    fail("Interactive controls cannot be nested in a button.");
+    fail("Interactive or unresolved project components cannot be nested in a button. Select a form or section instead.");
   if (parent === "a" && child === "a") fail("Links cannot be nested.");
   if (parent === "form" && child === "form") fail("Forms cannot be nested.");
   if (["table", "thead", "tbody", "tr", "select"].includes(parent))
     fail("This structured container requires an explicit registry adapter.");
+}
+/** Infer only observed, direct compound-component relationships. */
+function compoundWrapper(
+  report: AnalysisReport,
+  target: JsxElement,
+  tag: string,
+  component: ComponentInfo | undefined,
+): string | undefined {
+  if (!/^[A-Z][\w$]*$/.test(target.tag)) return undefined;
+  const byId = new Map(report.elements.map((item) => [item.id, item]));
+  const wrappers = report.elements.filter((item) => {
+    if (!item.tag.startsWith(`${target.tag}.`)) return false;
+    const parent = item.parentId ? byId.get(item.parentId) : undefined;
+    if (!parent || parent.tag !== target.tag) return false;
+    return target.componentId ? parent.componentId === target.componentId : parent.source.file === target.source.file;
+  });
+  if (!wrappers.length) return undefined;
+  const wrapperIds = new Set(wrappers.map((item) => item.id));
+  const examples = report.elements.filter((item) =>
+    !!item.parentId && wrapperIds.has(item.parentId) && item.tag === tag &&
+    (component ? item.componentId === component.id : !item.componentId),
+  );
+  const local = examples.filter((item) => item.source.file === target.source.file);
+  const matching = local.length ? local : examples;
+  const members = new Set(matching.map((item) => byId.get(item.parentId!)!.tag));
+  if (members.size !== 1)
+    fail(`Cannot determine a unique ${target.tag} wrapper for ${tag}. Select the intended section or configure it in source.`);
+  const member = [...members][0];
+  const memberExamples = examples.map((item) => byId.get(item.parentId!)!).filter((item) =>
+    item.tag === member &&
+    !item.props.some((prop) => !["label", "style"].includes(prop.name) && !prop.name.startsWith("style.")) &&
+    !item.props.some((prop) => prop.name === "label" && prop.kind !== "string"),
+  );
+  if (!memberExamples.length)
+    fail(`The ${member} wrapper needs project-specific properties; select it directly or configure it in source.`);
+  const labels = memberExamples.flatMap((item) => item.props.filter((prop) => prop.name === "label"));
+  return `<${member}${labels.length ? ' label="New field"' : ""}>`;
 }
 function sfDefaultExport(source: string, file: string, name: string): boolean {
   const sf = parseSource(file, source);
@@ -755,8 +795,15 @@ export async function createPatch(
         );
       attributes += ` ${name}={${handler}}`;
     }
+    if (indexedComponent) {
+      const missing = indexedComponent.props.filter((prop) =>
+        prop.requiredProven && !seenProps.has(prop.name) && request.insertEvent?.name !== prop.name,
+      );
+      if (missing.length)
+        fail(`Component ${tag} is not supported for direct insertion: required ${missing.map((prop) => prop.name).join(", ")} must be configured first.`);
+    }
     const content = typeof request.value === "string" ? escapeText(request.value) : "";
-    const markup = requestedComponent
+    let markup = requestedComponent
       ? `<${tag}${attributes} />`
       : VOID.has(tag)
         ? `<${tag}${attributes} />`
@@ -764,11 +811,19 @@ export async function createPatch(
     const position = request.position ?? "inside";
     let parent: ts.Node = node;
     if (position === "inside") {
-      if (!staticChildren(node))
+      if (!ts.isJsxElement(node))
         fail(
-          "Insertion requires a static JSX container without expression children.",
+          "Insertion requires a JSX container with a closing tag.",
         );
       validateNesting(opening.tagName.getText(sf), tag);
+      const parentTag = opening.tagName.getText(sf);
+      if (/^(?:TabPane|Tabs|TabPanel)$/.test(parentTag))
+        fail("Select the form inside the tab before adding a component; inserting directly into the tab container is not supported.");
+      const wrapper = compoundWrapper(report, element, tag, indexedComponent);
+      if (wrapper) {
+        const wrapperTag = wrapper.slice(1).split(/[\s>]/, 1)[0];
+        markup = `${wrapper}${markup}</${wrapperTag}>`;
+      }
       const offset = node.closingElement.getStart(sf);
       after = applySpan(before, offset, offset, markup);
     } else {
@@ -809,7 +864,52 @@ export async function createPatch(
     }
   } else if (request.operation === "duplicate") {
     const duplicate = request.duplicateProp;
-    if (!duplicate) fail("Choose an ID or name property for the copied component.");
+    if (!duplicate) {
+      let hasIdentity = false;
+      const inspect = (item: ts.Node) => {
+        if (ts.isJsxSpreadAttribute(item) || (ts.isJsxAttribute(item) && /^(?:key|id|name|fromName|toName|[A-Za-z_$][\w$]*(?:Id|ID))$/.test(item.name.getText(sf)))) hasIdentity = true;
+        ts.forEachChild(item, inspect);
+      };
+      inspect(node);
+      if (hasIdentity) fail("Choose an ID or name property for the copied component; dynamic identities and spreads require source review.");
+      if (request.targetId) {
+        const target = report.elements.find((candidate) => candidate.id === request.targetId && candidate.source.file === request.file);
+        if (!target || target.dynamic || !target.operations.includes("insert") || target.ownerComponent !== element.ownerComponent)
+          fail("Choose an editable destination in the same component and source file.");
+        const targetNode = findNode(sf, target.id, request.file);
+        if (!ts.isJsxElement(targetNode) || (targetNode.getStart(sf) >= node.getStart(sf) && targetNode.end <= node.end))
+          fail("Choose a destination outside the copied component.");
+        const scopes = (current: ts.Node) => {
+          const result: ts.Node[] = [];
+          for (let parent = current.parent; parent; parent = parent.parent)
+            if (ts.isBlock(parent) || ts.isFunctionLike(parent)) result.push(parent);
+          return result;
+        };
+        const sourceScopes = scopes(node), targetScopes = scopes(targetNode);
+        if (sourceScopes.length !== targetScopes.length || sourceScopes.some((scope, index) => scope !== targetScopes[index]))
+          fail("Copying across different variable scopes requires source review.");
+        validateNesting(targetNode.openingElement.tagName.getText(sf), opening.tagName.getText(sf));
+        after = applySpan(before, targetNode.closingElement.getStart(sf), targetNode.closingElement.getStart(sf), node.getText(sf));
+      } else {
+      if (!staticChildren(node.parent)) fail("Copying requires static siblings in one container.");
+      const lineStart = before.lastIndexOf("\n", node.getStart(sf) - 1) + 1;
+      const indent = before.slice(lineStart, node.getStart(sf)).match(/^\s*/)?.[0] ?? "";
+      const newline = before.includes("\r\n") ? "\r\n" : "\n";
+      after = applySpan(before, node.end, node.end, `${newline}${indent}${node.getText(sf)}`);
+      }
+    } else {
+    if (request.targetId) fail("Copying identified components to another container requires source review.");
+    if (!staticChildren(node.parent)) fail("Copying requires static siblings in one container.");
+    let identities = 0;
+    let hasSpread = false;
+    const inspectIdentities = (item: ts.Node) => {
+      if (ts.isJsxSpreadAttribute(item)) hasSpread = true;
+      if (ts.isJsxAttribute(item) && /^(?:key|id|name|fromName|toName|[A-Za-z_$][\w$]*(?:Id|ID))$/.test(item.name.getText(sf))) identities++;
+      ts.forEachChild(item, inspectIdentities);
+    };
+    inspectIdentities(node);
+    if (hasSpread || identities !== 1)
+      fail("Copying multiple or dynamic identities requires source review; no changes were made.");
     if (!/^(?:id|name|fromName|toName|[A-Za-z_$][\w$]*(?:Id|ID))$/.test(duplicate.name))
       fail("Choose a supported identity property such as id, name, or *Id.");
     const descendants = new Set<string>();
@@ -831,6 +931,18 @@ export async function createPatch(
     );
     if (!identityElement || !knownProperty)
       fail("The copied identity must be a literal property.");
+    if (duplicate.name === "id" && typeof knownProperty.value === "string") {
+      let referenced = false;
+      const inspectReferences = (item: ts.Node) => {
+        if (ts.isJsxAttribute(item) && /^(?:htmlFor|aria-labelledby|aria-describedby|aria-controls)$/.test(item.name.getText(sf))) {
+          const value = jsxAttributeLiteral(item);
+          if (typeof value !== "string" || value.split(/\s+/).includes(knownProperty.value as string)) referenced = true;
+        }
+        ts.forEachChild(item, inspectReferences);
+      };
+      inspectReferences(node);
+      if (referenced) fail("Copying identity references requires source review; no changes were made.");
+    }
     if (typeof duplicate.value !== typeof knownProperty.value)
       fail("The copied identity must keep its original value type.");
     if (duplicate.value === knownProperty.value)
@@ -872,7 +984,9 @@ export async function createPatch(
     );
     const lineStart = before.lastIndexOf("\n", rootStart - 1) + 1;
     const indent = before.slice(lineStart, rootStart).match(/^\s*/)?.[0] ?? "";
-    after = applySpan(before, node.end, node.end, `\n${indent}${clone}`);
+    const newline = before.includes("\r\n") ? "\r\n" : "\n";
+    after = applySpan(before, node.end, node.end, `${newline}${indent}${clone}`);
+    }
   } else if (request.operation === "move") {
     if (request.direction !== "up" && request.direction !== "down")
       fail("Choose move up or down.");

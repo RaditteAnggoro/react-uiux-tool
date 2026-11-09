@@ -48,8 +48,26 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
   Indexed reusable components support direct JSX insertion and relative auto-import;
   private/dynamic components, cross-file moves, general drag-reparenting, required
   prop synthesis, and full framework-specific HTML semantics remain unavailable.
-- Existing static JSX subtrees can be duplicated when a literal identity property
-  can be changed. Cross-reference rewriting beyond that chosen identity is unavailable.
+- Insertion into compound components can reuse an observed direct parent–wrapper–child
+  pattern; conflicting or missing patterns and wrappers needing unsupported properties
+  are rejected. Evidence is limited to indexed source and is not proof of runtime
+  compatibility. Direct insertion into tab containers is refused. Repeated visual
+  container instances may be ambiguous and must be selected in the source tree.
+  Other component-specific layout contracts and all project styles cannot be inferred.
+- Palette insertion rejects components with known required TypeScript properties
+  that were not supplied. JavaScript and imported or complex type contracts may be
+  incomplete, so passing this check does not prove a component can render safely.
+  Project components keep their own styling; basic HTML elements rely on applicable
+  project styles, and visual equivalence cannot be inferred for arbitrary CSS.
+- The inspector flags a component that declares `value` when no `value` prop is
+  present on the selected usage. This is a hint, not proof of a missing binding:
+  uncontrolled components, defaults, and spread props need individual review.
+- Existing static JSX subtrees without identity attributes or spreads can be copied
+  beside the original, or into another eligible container in the same file and
+  lexical scope; event bindings are copied too. For other subtrees, a literal
+  identity property must be changed; copies with multiple identities, spreads, or
+  references to a changed ID are rejected. Cross-container copy with identity is unavailable.
+  Cross-reference rewriting beyond the chosen identity remains unavailable.
 - Scope is validated internally for direct writes.
   Automatic global-token/theme rewrites are blocked; unknown style origin does not
   become a guessed global declaration.

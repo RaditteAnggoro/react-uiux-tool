@@ -421,6 +421,140 @@ test("configured insertion validates specific values and existing event function
     await f.cleanup();
   }
 });
+test("project components with proven required props are rejected before writing", async () => {
+  const f = await fixture('export default function App(){return <main></main>}', {
+    'src/Badge.tsx': 'export default function Badge({caption}:{caption:string}){return <span>{caption.toUpperCase()}</span>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const main = report.elements.find((element) => element.tag === "main")!;
+    const badge = report.components.find((component) => component.name === "Badge")!;
+    const request = { ...req(main, "insert"), insertComponent: { name: badge.name, sourceFile: badge.source.file, defaultExported: true } };
+    await assert.rejects(createPatch(f.root, request), /not supported.*required caption/i);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), 'export default function App(){return <main></main>}');
+    const patch = await createPatch(f.root, { ...request, insertProps: [{ name: "caption", value: "Ready" }] });
+    assert.match(patch.after, /<Badge caption="Ready" \/>/);
+  } finally { await f.cleanup(); }
+});
+test("project components cannot be inserted inside an HTML button", async () => {
+  const source = 'export default function App(){return <main><button>Existing</button><p>Text</p></main>}';
+  const f = await fixture(source, { 'src/Control.tsx': 'export default function Control(){return <button>Control</button>}' });
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((element) => element.tag === "button")!;
+    const control = report.components.find((component) => component.name === "Control")!;
+    await assert.rejects(createPatch(f.root, { ...req(button, "insert"), insertComponent: { name: control.name, sourceFile: control.source.file, defaultExported: true } }), /cannot be nested in a button/);
+    const paragraph = report.elements.find((element) => element.tag === "p")!;
+    await assert.rejects(createPatch(f.root, { ...req(paragraph, "insert"), insertComponent: { name: control.name, sourceFile: control.source.file, defaultExported: true } }), /cannot safely accept/);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
+test("form insertions use existing project wrappers and refuse a tab container", async () => {
+  const source = 'import Button from "./Button";export default function App(){return <main><Form><Form.Field label="Name"><input /></Form.Field><Form.Button><Button label="Save" /></Form.Button></Form><TabPane>{renderTabBody()}</TabPane></main>}';
+  const f = await fixture(source, { 'src/Button.tsx': 'export default function Button({label}:{label?:string}){return <button>{label}</button>}' });
+  try {
+    const report = await analyzeProject(f.root);
+    const form = report.elements.find((element) => element.tag === "Form")!;
+    const button = report.components.find((component) => component.name === "Button")!;
+    const request = { ...req(form, "insert"), insertComponent: { name: button.name, sourceFile: button.source.file, defaultExported: true }, insertProps: [{ name: "label", value: "New button" }] };
+    const patch = await createPatch(f.root, request);
+    assert.match(patch.after, /<Form\.Button><Button label="New button" \/><\/Form\.Button><\/Form>/);
+    const input = await createPatch(f.root, req(form, "insert", "", "input"));
+    assert.match(input.after, /<Form\.Field label="New field"><input \/><\/Form\.Field><\/Form>/);
+    const tab = report.elements.find((element) => element.tag === "TabPane")!;
+    await assert.rejects(createPatch(f.root, { ...request, elementId: tab.id }), /select the form inside the tab/i);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
+test("compound wrappers are inferred from actual component usage and ambiguity is rejected", async () => {
+  const source = 'import CodeCombo from "./CodeCombo";import Button from "./Button";export default function App(){return <Form><Form.Field label="Code"><CodeCombo /></Form.Field><Form.Button><Button /></Form.Button><Form.Field label="Action"><Button /></Form.Field></Form>}';
+  const f = await fixture(source, {
+    'src/CodeCombo.tsx': 'export default function CodeCombo(){return <select/>}',
+    'src/Button.tsx': 'export default function Button(){return <button/>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const form = report.elements.find((element) => element.tag === "Form")!;
+    const combo = report.components.find((component) => component.name === "CodeCombo")!;
+    const button = report.components.find((component) => component.name === "Button")!;
+    const request = (component: typeof combo) => ({ ...req(form, "insert"), insertComponent: { name: component.name, sourceFile: component.source.file, defaultExported: true } });
+    const patch = await createPatch(f.root, request(combo));
+    assert.match(patch.after, /<Form\.Field label="New field"><CodeCombo \/><\/Form\.Field><\/Form>/);
+    await assert.rejects(createPatch(f.root, request(button)), /unique Form wrapper/);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
+test("memoized public component names resolve to their implementation and wrapper", async () => {
+  const source = 'import InputText from "./InputText";export default function App(){return <Form><Form.Field label="Name"><InputText /></Form.Field></Form>}';
+  const f = await fixture(source, { 'src/InputText.tsx': 'import {memo,forwardRef} from "react";const InputTextComponent=forwardRef(({onKeyDown: handler}:any,ref:any)=><input ref={ref} onKeyDown={handler}/>);const InputText=memo(InputTextComponent);export default InputText;' });
+  try {
+    const report = await analyzeProject(f.root);
+    const component = report.components.find((item) => item.name === "InputText" && item.defaultExported)!;
+    assert.ok(component);
+    assert.ok(component.events.includes("onKeyDown"));
+    const usage = report.elements.find((item) => item.tag === "InputText")!;
+    assert.equal(usage.componentId, component.id);
+    const form = report.elements.find((item) => item.tag === "Form")!;
+    const patch = await createPatch(f.root, { ...req(form, "insert"), insertComponent: { name: component.name, sourceFile: component.source.file, defaultExported: true } });
+    assert.match(patch.after, /<Form\.Field label="New field"><InputText \/><\/Form\.Field><\/Form>/);
+  } finally { await f.cleanup(); }
+});
+test("aliased destructured callbacks retain the public property name", async () => {
+  const f = await fixture('export default function App(){return <main></main>}', {
+    'src/Field.tsx': 'export default function Field({onKeyDown: externalOnKeyDown}:{onKeyDown?:()=>void}){return <input onKeyDown={externalOnKeyDown}/>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const component = report.components.find((item) => item.name === "Field")!;
+    assert.ok(component.events.includes("onKeyDown"));
+    assert.ok(component.props.some((prop) => prop.name === "onKeyDown"));
+    assert.ok(!component.props.some((prop) => prop.name === "externalOnKeyDown"));
+  } finally { await f.cleanup(); }
+});
+test("wrapper inference also works for compound components outside forms", async () => {
+  const source = 'import Title from "./Title";export default function App(){return <Card><Card.Header><Title /></Card.Header></Card>}';
+  const f = await fixture(source, { 'src/Title.tsx': 'export default function Title(){return <h2>Title</h2>}' });
+  try {
+    const report = await analyzeProject(f.root);
+    const card = report.elements.find((item) => item.tag === "Card")!;
+    const title = report.components.find((item) => item.name === "Title" && item.exported)!;
+    const patch = await createPatch(f.root, { ...req(card, "insert"), insertComponent: { name: title.name, sourceFile: title.source.file, defaultExported: true } });
+    assert.match(patch.after, /<Card\.Header><Title \/><\/Card\.Header><\/Card>/);
+  } finally { await f.cleanup(); }
+});
+test("wrapper evidence can use another file without copying dynamic business labels", async () => {
+  const source = 'import Form from "./Form";import Combo from "./Combo";export default function App(){return <Form><Form.Field label={labels.code}><Combo /></Form.Field></Form>}';
+  const f = await fixture(source, {
+    'src/Other.tsx': 'import Form from "./Form";import Combo from "./Combo";export function Other(){return <Form><Form.Field label="Code"><Combo /></Form.Field></Form>}',
+    'src/Form.tsx': 'export default function Form({children}:any){return <div>{children}</div>}',
+    'src/Combo.tsx': 'export default function Combo(){return <select/>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const form = report.elements.find((item) => item.tag === "Form" && item.source.file === "src/App.tsx")!;
+    const combo = report.components.find((item) => item.name === "Combo" && item.exported)!;
+    const patch = await createPatch(f.root, { ...req(form, "insert"), insertComponent: { name: combo.name, sourceFile: combo.source.file, defaultExported: true } });
+    assert.match(patch.after, /<Form\.Field label="New field"><Combo \/><\/Form\.Field><\/Form>/);
+    assert.match(patch.after, /label=\{labels\.code\}/);
+  } finally { await f.cleanup(); }
+});
+test("basic palette inserts into the selected static form and copies a button without an identity", async () => {
+  const source = 'export default function App(){const save=()=>{};return <main><form><button onClick={save}>Save</button></form></main>}';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const form = report.elements.find((element) => element.tag === "form")!;
+    for (const tag of ["div", "button", "p", "h2", "section", "input"]) {
+      const patch = await createPatch(f.root, { ...req(form, "insert", tag === "button" ? "New button" : "", tag), position: "inside" });
+      assert.match(patch.after, new RegExp(`<${tag}(?:>|\\s)`));
+      assert.match(patch.after, /<button onClick=\{save\}>Save<\/button>/);
+    }
+    const button = report.elements.find((element) => element.tag === "button")!;
+    const copy = await createPatch(f.root, req(button, "duplicate"));
+    assert.equal(copy.after.match(/<button onClick=\{save\}>Save<\/button>/g)?.length, 2);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
 test("project components insert with imports and existing JSX duplicates with a new nested identity", async () => {
   const source =
     "import Field from './Field';const registry:any={};const{CodeCombo,Form}=registry;export default function App(){return <main><Form><Field name=\"customerId\"><input name=\"customerCode\" /></Field></Form></main>}";
@@ -471,21 +605,25 @@ test("project components insert with imports and existing JSX duplicates with a 
 
     const field = report.elements.find((element) => element.tag === "Field")!;
     const input = report.elements.find((element) => element.tag === "input")!;
-    const duplicated = await createPatch(f.root, {
+    await assert.rejects(createPatch(f.root, {
       ...req(field, "duplicate"),
       duplicateProp: {
         elementId: input.id,
         name: "name",
         value: "customerCodeCopy",
       },
+    }), /multiple or dynamic identities/);
+    const duplicated = await createPatch(f.root, {
+      ...req(input, "duplicate"),
+      duplicateProp: { elementId: input.id, name: "name", value: "customerCodeCopy" },
     });
     assert.match(
       duplicated.after,
-      /<Field name="customerId"><input name="customerCodeCopy" \/><\/Field>/,
+      /<input name="customerCodeCopy" \/>/,
     );
     assert.equal(
       duplicated.after.match(/<Field name="customerId">/g)?.length,
-      2,
+      1,
     );
   } finally {
     await f.cleanup();
@@ -549,7 +687,7 @@ export default function App() {
     await f.cleanup();
   }
 });
-test("analyzer offers insertion only for containers with static JSX children", async () => {
+test("insertion appends without rewriting expression children", async () => {
   const source = `import React from "react";
 export function Panel({ children }) { return <div className="panel">{children}</div>; }
 export default function App() { return <Panel><p>Static child</p></Panel>; }`;
@@ -560,11 +698,72 @@ export default function App() { return <Panel><p>Static child</p></Panel>; }`;
       (element) => element.tag === "div",
     )!;
     const usage = report.elements.find((element) => element.tag === "Panel")!;
-    assert.equal(implementation.operations.includes("insert"), false);
+    assert.equal(implementation.operations.includes("insert"), true);
     assert.equal(usage.operations.includes("insert"), true);
+    const patch = await createPatch(f.root, { ...req(implementation, "insert", "Added", "button"), scope: "shared", confirmScope: true });
+    assert.match(patch.after, /\{children\}<button>Added<\/button>/);
   } finally {
     await f.cleanup();
   }
+});
+test("copy into another form preserves its existing contents", async () => {
+  const source = `export default function App(){ const save=()=>{}; return <main><form><button onClick={save}>Save</button></form><form><p>Keep</p></form></main> }`;
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((element) => element.tag === "button")!;
+    const forms = report.elements.filter((element) => element.tag === "form");
+    const patch = await createPatch(f.root, { ...req(button, "duplicate"), targetId: forms[1].id });
+    assert.match(patch.after, /<form><p>Keep<\/p><button onClick=\{save\}>Save<\/button><\/form>/);
+    assert.equal(patch.after.match(/<button onClick=\{save\}>Save<\/button>/g)?.length, 2);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
+test("copy refuses a destination in another component", async () => {
+  const f = await fixture('function Other(){return <form><p>Other</p></form>} export default function App(){return <form><button>Save</button></form>}');
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((element) => element.tag === "button")!;
+    const destination = report.elements.find((element) => element.tag === "form" && element.ownerComponent?.endsWith("#Other"))!;
+    await assert.rejects(createPatch(f.root, { ...req(button, "duplicate"), targetId: destination.id }), /same component/);
+  } finally { await f.cleanup(); }
+});
+test("copy rejects identity references rather than silently breaking labels", async () => {
+  const source = 'export default function App(){return <main><label id="field" htmlFor="field">Name</label></main>}';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const label = report.elements.find((item) => item.tag === "label")!;
+    await assert.rejects(createPatch(f.root, { ...req(label, "duplicate"), duplicateProp: { elementId: label.id, name: "id", value: "fieldCopy" } }), /identity references/);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
+  } finally { await f.cleanup(); }
+});
+test("copy with an identity preserves CRLF source line endings", async () => {
+  const source = 'export default function App(){\r\n  return <main>\r\n    <button id="save">Save</button>\r\n  </main>;\r\n}\r\n';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((item) => item.tag === "button")!;
+    const patch = await createPatch(f.root, { ...req(button, "duplicate"), duplicateProp: { elementId: button.id, name: "id", value: "saveCopy" } });
+    assert.match(patch.after, /<button id="save">Save<\/button>\r\n    <button id="saveCopy">Save<\/button>/);
+    assert.ok(!/(?<!\r)\n/.test(patch.after));
+  } finally { await f.cleanup(); }
+});
+test("insertion and undo leave every other project file byte-identical", async () => {
+  const source = 'export default function App(){return <main><section><p>Original</p></section></main>}';
+  const f = await fixture(source, { 'src/Other.tsx': 'export const value = "untouched";\r\n', 'src/styles.css': '/* untouched */\r\nbody { color: red; }\r\n' });
+  try {
+    const files = ["package.json", "src/App.tsx", "src/Other.tsx", "src/styles.css"];
+    const before = new Map(await Promise.all(files.map(async (file) => [file, await readFile(path.join(f.root, file))] as const)));
+    const report = await analyzeProject(f.root);
+    const section = report.elements.find((item) => item.tag === "section")!;
+    const patch = await createPatch(f.root, { ...req(section, "insert", "New button", "button"), position: "inside" });
+    const checkpoint = await applyPatch(f.root, patch, true);
+    for (const file of files.filter((file) => file !== "src/App.tsx"))
+      assert.deepEqual(await readFile(path.join(f.root, file)), before.get(file));
+    await undoPatch(f.root, checkpoint);
+    for (const file of files) assert.deepEqual(await readFile(path.join(f.root, file)), before.get(file));
+  } finally { await f.cleanup(); }
 });
 test("grouped positioning moves multiple source elements atomically and undo restores both", async () => {
   const source =

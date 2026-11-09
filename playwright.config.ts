@@ -15,7 +15,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'UIUX_NO_OPEN=1 node dist/cli.js --port 41791 --no-open',
+    command: 'node dist/cli.js --port 41791 --no-open',
     url: 'http://127.0.0.1:41791/api/session',
     reuseExistingServer: false,
     timeout: 30_000,

@@ -1397,6 +1397,7 @@ details summary {
   height: 100%;
   overflow: hidden;
 }
+.canvas-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); background: var(--surface); z-index: 10; }
 .canvas-drop-overlay {
   position: absolute;
   inset: 0;
@@ -1517,6 +1518,11 @@ details summary {
   line-height: 1.9;
   tab-size: 2;
 }
+.code-find { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--surface2); border-bottom: 1px solid var(--border); }
+.code-find input { min-width: 0; max-width: 300px; flex: 1; }
+.code-find span { color: var(--muted); white-space: nowrap; }
+.canvas-source mark { background: #ffe79b; color: #201700; }
+.canvas-source mark[data-current-match="true"] { background: #ffaf38; outline: 1px solid #a55300; }
 .source-file-label {
   display: flex;
   align-items: center;

@@ -42,6 +42,204 @@ async function stopPreview(page: import("@playwright/test").Page) {
   if (await stop.isVisible().catch(() => false)) await stop.click();
 }
 
+test("palette warns without a selected container and copies a button without an identity", async ({ page }) => {
+  await page.goto("/");
+  const root = await openFixtureProject(page);
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).click();
+  await expect(page.getByRole("alert")).toContainText("Select the form or section");
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("tab", { name: "Layout" }).click();
+  await page.getByRole("button", { name: "Duplicate directly" }).click();
+  await expect(frame.getByRole("button", { name: "Create project" })).toHaveCount(2);
+  expect((await readFile(path.join(root, "src/App.tsx"), "utf8")).match(/title="Create project"/g)).toHaveLength(2);
+  await stopPreview(page);
+});
+
+test("copies a button into another selected section", async ({ page }) => {
+  await page.goto("/");
+  const root = await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("tab", { name: "Layout" }).click();
+  await page.getByRole("button", { name: "Copy to another area" }).click();
+  await frame.locator("section.stats-grid").click({ position: { x: 5, y: 5 } });
+  await page.getByRole("button", { name: "Paste copied component inside" }).click();
+  await expect(frame.locator("section.stats-grid").getByRole("button", { name: "Create project" })).toHaveCount(1);
+  expect((await readFile(path.join(root, "src/App.tsx"), "utf8")).match(/title="Create project"/g)).toHaveLength(2);
+  await stopPreview(page);
+});
+
+test("basic button reuses a consistent existing project class", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).click();
+  const button = frame.getByRole("button", { name: "New button" });
+  await expect(button).toHaveClass("primary-button");
+  expect(await button.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(await frame.getByRole("button", { name: "Create project" }).evaluate((element) => getComputedStyle(element).backgroundColor));
+  await stopPreview(page);
+});
+
+test("preview explains when Tailwind project styling is not loaded", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-tailwind-warning-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  const manifestFile = path.join(root, "package.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  manifest.devDependencies.tailwindcss = "4.0.0";
+  await writeFile(manifestFile, JSON.stringify(manifest));
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Tailwind project configuration is not loaded" })).toBeVisible();
+  await stopPreview(page);
+});
+
+test("code search handles Ctrl+F and navigates source matches", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("tab", { name: "Code" }).click();
+  await page.keyboard.press("Control+f");
+  const search = page.getByRole("search").getByLabel("Find in code");
+  await expect(search).toBeFocused();
+  await search.fill("button");
+  await expect(page.locator(".canvas-source mark").first()).toBeVisible();
+  const first = await page.locator('.canvas-source mark[data-current-match="true"]').textContent();
+  expect(first?.toLowerCase()).toBe("button");
+  await search.press("Enter");
+  await expect(page.getByRole("search")).toContainText(/^.*2\//);
+  await search.press("Escape");
+  await expect(page.getByRole("search")).toHaveCount(0);
+  await stopPreview(page);
+});
+
+test("editing a shared implementation requires explicit confirmation", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-shared-confirm-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await mkdir(path.join(root, "src/components"), { recursive: true });
+  const file = path.join(root, "src/components/Shared.tsx");
+  const source = 'export default function Shared(){return <button>Before</button>}';
+  await writeFile(file, source);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Inspect only" }).click();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: "components" }).click();
+  await explorer.getByRole("treeitem", { name: /Shared\.tsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "Shared" }).click();
+  await explorer.locator(".explorer-name", { hasText: /^button$/ }).first().locator("..").click();
+  await page.getByRole("tab", { name: "Props" }).click();
+  await page.getByLabel("Text content").fill("After");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  expect(await readFile(file, "utf8")).toBe(source);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  await expect.poll(() => readFile(file, "utf8")).toContain(">After</button>");
+});
+
+test("an existing event handler updates local data after binding", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-event-data-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/App.tsx"), 'import {useState} from "react";export default function App(){const [count,setCount]=useState(0);const increment=()=>setCount(value=>value+1);return <main><button>Increment</button><p>Count: {count}</p></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Increment" }).click();
+  await page.getByRole("tab", { name: "Events" }).click();
+  await page.getByLabel("Event property").selectOption("onClick");
+  await page.getByLabel("Existing function").fill("increment");
+  await page.getByRole("button", { name: "Bind event to source" }).click();
+  await expect.poll(() => readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("onClick={increment}");
+  await page.getByRole("tab", { name: "Interact" }).click();
+  await frame.getByRole("button", { name: "Increment" }).click();
+  await expect(frame.getByText("Count: 1")).toBeVisible();
+  await page.getByRole("button", { name: "Undo last source edit" }).click();
+  await expect.poll(() => readFile(path.join(root, "src/App.tsx"), "utf8")).not.toContain("onClick={increment}");
+  await stopPreview(page);
+});
+
+test("project palette button retains its CSS module styling", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-styled-button-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/Button.tsx"), 'import styles from "./Button.module.css"; export default function Button({label,children,variant}:{label?:string,children?:React.ReactNode,variant?:string}){return <button className={styles.button} data-variant={variant}>{children || label}</button>}');
+  await writeFile(path.join(root, "src/Button.module.css"), '.button { background: rgb(80, 20, 120); height: 30px; color: white; }');
+  await mkdir(path.join(root, "src/components"), { recursive: true });
+  await writeFile(path.join(root, "src/components/Badge.tsx"), 'export default function Badge({caption}:{caption:string}){return <span>{caption.toUpperCase()}</span>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await page.locator(".project-component-list").getByRole("button", { name: /^Button/ }).click();
+  const button = frame.getByRole("button", { name: "New button" });
+  await expect(button).toHaveCSS("background-color", "rgb(80, 20, 120)");
+  await expect(button).toHaveCSS("height", "30px");
+  await expect(button).toHaveAttribute("data-variant", "secondary");
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.locator(".project-component-list").getByRole("button", { name: /^Badge/ }).dragTo(page.locator(".component-drop-target.ready"));
+  await expect(page.getByRole("alert")).toContainText("not supported for direct insertion");
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).not.toContain("<Badge");
+  await stopPreview(page);
+});
+
+test("project palette uses an observed compound wrapper for a non-button component", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-compound-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await mkdir(path.join(root, "src/components"), { recursive: true });
+  await writeFile(path.join(root, "src/components/Widget.tsx"), 'import styles from "./Widget.module.css"; export default function Widget({value}:{value?:string}){return <span className={styles.widget}>Widget</span>}');
+  await writeFile(path.join(root, "src/components/Widget.module.css"), '.widget { color: rgb(40, 60, 80); }');
+  await writeFile(path.join(root, "src/Form.jsx"), 'function Form({children}){return <div>{children}</div>} Form.Field=({label,children})=><div><label>{label}</label>{children}</div>;export default Form;');
+  await writeFile(path.join(root, "src/App.tsx"), 'import Form from "./Form";import Widget from "./components/Widget";export default function App(){return <main><Form><Form.Field label="Existing"><Widget /></Form.Field></Form></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: /App\.tsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "App" }).click();
+  await explorer.locator(".explorer-name", { hasText: /^main$/ }).first().locator("..").click();
+  await explorer.locator(".explorer-name", { hasText: /^Form$/ }).first().locator("..").click();
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  const before = await frame.getByText("Widget", { exact: true }).first().boundingBox();
+  await page.locator(".project-component-list").getByRole("button", { name: /^Widget/ }).click();
+  await expect(frame.getByText("Widget", { exact: true })).toHaveCount(2);
+  await expect(frame.getByText("Widget", { exact: true }).last()).toHaveCSS("color", "rgb(40, 60, 80)");
+  await expect(page.getByRole("status").filter({ hasText: "no value is bound" })).toBeVisible();
+  const after = await frame.getByText("Widget", { exact: true }).first().boundingBox();
+  expect(after).toEqual(before);
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain('<Form.Field label="New field"><Widget /></Form.Field>');
+  await stopPreview(page);
+});
+
 test("leaving the project requires an explicit choice", async ({ page }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-leave-"));
   fixtureRoots.add(root);
@@ -380,7 +578,7 @@ test("project component drag and component copy write directly to source", async
     );
     await writeFile(
       path.join(root, "src/App.jsx"),
-      "import React from'react';import{createRoot}from'react-dom/client';import DateField from'./components/DateField';function App(){const handleDateChange=()=>{};return <main><section><label id=\"customerField\"><span>Customer</span><input name=\"customerCode\" /></label><DateField name=\"firstDate\" /></section></main>}createRoot(document.getElementById('root')).render(<App/>);export default App;",
+      "import React from'react';import{createRoot}from'react-dom/client';import DateField from'./components/DateField';function App(){const handleDateChange=()=>{};return <main><section><label id=\"customerField\"><span>Customer</span><input /></label><DateField name=\"firstDate\" /></section></main>}createRoot(document.getElementById('root')).render(<App/>);export default App;",
     );
     await writeFile(
       path.join(root, "src/components/DateField.jsx"),
@@ -519,6 +717,7 @@ test("project component drag and component copy write directly to source", async
     }).toBe(2);
     await expect(page.getByText("Live", { exact: true })).toBeVisible();
     await expect(frame.getByLabel("Project date field")).toHaveCount(2);
+    await expect(frame.locator('[data-uiux-selection="additional"]')).toHaveCount(1);
     const groupDragField = frame.getByLabel("Project date field").nth(0);
     const groupBox = await groupDragField.boundingBox();
     expect(groupBox).not.toBeNull();
@@ -648,6 +847,7 @@ test("selecting a menu component opens an isolated provider-backed design instea
     ).toHaveCount(0);
     const target = page.locator(".component-drop-target.ready");
     await expect(target).toContainText("Panel");
+    page.once("dialog", (dialog) => dialog.accept());
     await page
       .locator(".primitive-grid")
       .getByRole("button", { name: "Button" })

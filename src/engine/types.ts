@@ -67,6 +67,7 @@ export interface ComponentInfo {
     name: string;
     type: string;
     optional: boolean;
+    requiredProven?: boolean;
     options?: string[];
     defaultValue?: string | number | boolean;
   }[];

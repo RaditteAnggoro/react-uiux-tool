@@ -227,13 +227,23 @@ function hasJsx(node: ts.Node): boolean {
 function typeProps(node: ts.Node, sf: ts.SourceFile): ComponentInfo["props"] {
   let fn: ts.FunctionLikeDeclaration | undefined;
   if (ts.isFunctionDeclaration(node)) fn = node;
-  if (
-    ts.isVariableDeclaration(node) &&
-    node.initializer &&
-    (ts.isArrowFunction(node.initializer) ||
-      ts.isFunctionExpression(node.initializer))
-  )
-    fn = node.initializer;
+  const unwrap = (expression: ts.Expression, visited: Set<string>): ts.FunctionLikeDeclaration | undefined => {
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return expression;
+    if (ts.isParenthesizedExpression(expression)) return unwrap(expression.expression, visited);
+    if (ts.isCallExpression(expression)) {
+      const name = ts.isIdentifier(expression.expression) ? expression.expression.text : ts.isPropertyAccessExpression(expression.expression) ? expression.expression.name.text : "";
+      if (["memo", "forwardRef"].includes(name) && expression.arguments[0]) return unwrap(expression.arguments[0], visited);
+    }
+    if (ts.isIdentifier(expression) && !visited.has(expression.text)) {
+      visited.add(expression.text);
+      for (const statement of sf.statements) if (ts.isVariableStatement(statement))
+        for (const declaration of statement.declarationList.declarations)
+          if (ts.isIdentifier(declaration.name) && declaration.name.text === expression.text && declaration.initializer)
+            return unwrap(declaration.initializer, visited);
+    }
+    return undefined;
+  };
+  if (ts.isVariableDeclaration(node) && node.initializer) fn = unwrap(node.initializer, new Set());
   const seen = new Set<string>();
   function declared(
     name: string,
@@ -292,6 +302,7 @@ function typeProps(node: ts.Node, sf: ts.SourceFile): ComponentInfo["props"] {
         name,
         type: member.type?.getText(sf) ?? "unknown",
         optional: !!member.questionToken,
+        requiredProven: !member.questionToken,
         ...(options?.length ? { options } : {}),
       });
     }
@@ -299,7 +310,9 @@ function typeProps(node: ts.Node, sf: ts.SourceFile): ComponentInfo["props"] {
   if (parameter && ts.isObjectBindingPattern(parameter.name))
     for (const element of parameter.name.elements) {
       if (!ts.isIdentifier(element.name) || element.dotDotDotToken) continue;
-      const name = element.name.text;
+      const name = element.propertyName && (ts.isIdentifier(element.propertyName) || ts.isStringLiteral(element.propertyName))
+        ? element.propertyName.text
+        : element.name.text;
       const value = element.initializer
         ? literal(element.initializer)
         : { value: null, kind: "expression" as const };
@@ -317,6 +330,7 @@ function typeProps(node: ts.Node, sf: ts.SourceFile): ComponentInfo["props"] {
             ? previous.type
             : inferredType,
         optional: !!element.initializer || previous?.optional === true,
+        requiredProven: previous?.requiredProven === true && !element.initializer,
         ...(value.value !== null && value.kind !== "expression"
           ? { defaultValue: value.value }
           : {}),
@@ -922,7 +936,7 @@ export async function analyzeProject(
       const name = nameOf(n);
       if (name && /^[A-Z]/.test(name) && hasJsx(n)) {
         const props = typeProps(n, sf);
-        report.components.push({
+        const info: ComponentInfo = {
           id: `${file}#${name}`,
           name,
           source: location(sf, n, file),
@@ -937,7 +951,18 @@ export async function analyzeProject(
           references: [],
           confidence: "high",
           editability: "LIMITED",
-        });
+        };
+        report.components.push(info);
+        // Exports such as `export default memo(Component)` may have a public
+        // binding distinct from the implementation declaration.
+        const exportedAlias = sf.statements.find((statement): statement is ts.ExportAssignment =>
+          ts.isExportAssignment(statement) && !statement.isExportEquals && ts.isIdentifier(statement.expression),
+        );
+        const alias = exportedAlias && ts.isIdentifier(exportedAlias.expression) ? exportedAlias.expression.text : undefined;
+        if (alias && alias !== name && /^[A-Z]/.test(alias) && info.defaultExported && defaultExportWraps(name, sf) &&
+            !report.components.some((candidate) => candidate.id === `${file}#${alias}`)) {
+          report.components.push({ ...info, id: `${file}#${alias}`, name: alias, props: info.props.map((prop) => ({ ...prop })), events: [...info.events], callables: [...info.callables], references: [] });
+        }
       }
       ts.forEachChild(n, findComponents);
     }
@@ -1038,14 +1063,8 @@ export async function analyzeProject(
           n.children.every(ts.isJsxText)
             ? n.children.map((c) => c.getText(sf)).join("")
             : null;
-        const acceptsStaticChildren =
-          ts.isJsxElement(n) &&
-          n.children.every(
-            (child) =>
-              ts.isJsxText(child) ||
-              ts.isJsxElement(child) ||
-              ts.isJsxSelfClosingElement(child),
-          );
+        // Appending a sibling does not rewrite any existing expression children.
+        const acceptsStaticChildren = ts.isJsxElement(n);
         const own = owner(n);
         const el: JsxElement = {
           id,

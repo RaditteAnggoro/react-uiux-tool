@@ -558,6 +558,36 @@ export default function App() {
     [zoom, setZoom] = useState(100),
     [route, setRoute] = useState("/");
   const [source, setSource] = useState("");
+  const [codeSearchOpen, setCodeSearchOpen] = useState(false);
+  const [codeSearch, setCodeSearch] = useState("");
+  const [codeMatch, setCodeMatch] = useState(0);
+  const codeSearchInput = useRef<HTMLInputElement>(null);
+  const codeSource = useRef<HTMLPreElement>(null);
+  const codeMatches = useMemo(() => {
+    if (!codeSearch) return [];
+    const text = source.toLocaleLowerCase(), query = codeSearch.toLocaleLowerCase();
+    const matches: number[] = [];
+    for (let index = text.indexOf(query); index !== -1 && matches.length < 2000; index = text.indexOf(query, index + query.length)) matches.push(index);
+    return matches;
+  }, [source, codeSearch]);
+  useEffect(() => { setCodeMatch(0); }, [codeSearch, source]);
+  useEffect(() => {
+    if (codeSearchOpen) codeSearchInput.current?.focus();
+  }, [codeSearchOpen]);
+  useEffect(() => {
+    codeSource.current?.querySelector('[data-current-match="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [codeMatch, codeMatches, codeSearchOpen]);
+  useEffect(() => {
+    const onFind = (event: KeyboardEvent) => {
+      if (screen === "studio" && mode === "code" && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault(); setCodeSearchOpen(true); requestAnimationFrame(() => codeSearchInput.current?.focus());
+      }
+    };
+    window.addEventListener("keydown", onFind);
+    return () => window.removeEventListener("keydown", onFind);
+  }, [screen, mode]);
+  const [copiedElement, setCopiedElement] = useState<JsxElement | null>(null);
+  useEffect(() => { setCopiedElement(null); }, [report?.projectRoot]);
   const [textValue, setTextValue] = useState(""),
     [propName, setPropName] = useState("className"),
     [propValue, setPropValue] = useState(""),
@@ -606,6 +636,7 @@ export default function App() {
     new Map<string, { elementId: string; instanceIndex: number }>(),
   );
   const pendingUndo = useRef(false);
+  const readySelectionToken = useRef(0);
   const allElements = report?.elements || [];
   const elementById = useMemo(
     () => new Map(allElements.map((element) => [element.id, element])),
@@ -690,6 +721,7 @@ export default function App() {
       await fn();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      if (preview && previewState === "ready") setPreviewState("ready");
     } finally {
       setBusy(false);
     }
@@ -876,9 +908,11 @@ export default function App() {
       if (event.origin !== origin) return;
       if (event.data?.type === "uiux:loading") setPreviewState("starting");
       if (event.data?.type === "uiux:ready") {
-        setPreviewState("ready");
-        sendCanvasSelection();
+        readySelectionToken.current += 1;
+        sendCanvasSelection(readySelectionToken.current);
       }
+      if (event.data?.type === "uiux:selection-applied" && event.data.token === readySelectionToken.current && readySelectionToken.current > 0)
+        setPreviewState("ready");
       if (event.data?.type === "uiux:error") {
         setPreviewState("error");
         setError(
@@ -916,25 +950,27 @@ export default function App() {
                 element.ownerComponent === designTarget &&
                 element.componentId === sourceElement.ownerComponent,
             );
-            const instanceIndex = Number(event.data.instanceIndex);
-            if (
-              Number.isInteger(instanceIndex) &&
-              instanceIndex >= 0 &&
-              usages[instanceIndex]
-            )
-              target = usages[instanceIndex];
-            else if (usages.length === 1) target = usages[0];
+            if (usages.length === 1) target = usages[0];
+            else {
+              if (["div", "section", "form", "fieldset"].includes(sourceElement.tag) && event.data.type === "uiux:select") {
+                setSelectedId(null);
+                setSelectedIds([]);
+                setError(t("ambiguousCanvasTarget"));
+                return;
+              }
+              if (usages.length > 1) {
+                const instanceIndex = Number(event.data.instanceIndex);
+                if (Number.isInteger(instanceIndex) && instanceIndex >= 0 && usages[instanceIndex]) target = usages[instanceIndex];
+              }
+            }
           }
           if (event.data.type === "uiux:drop") {
-            while (target && !target.operations.includes("insert")) {
-              const parent = target.parentId
-                ? report?.elements.find(
-                    (element) => element.id === target.parentId,
-                  )
-                : undefined;
-              if (!parent) break;
-              target = parent;
+            const selectedTarget = report?.elements.find((element) => element.id === selectedId);
+            if (!selectedTarget?.operations.includes("insert")) {
+              setError(t("simpleDropError"));
+              return;
             }
+            target = selectedTarget;
           }
           if (event.data.type === "uiux:select") {
             const rect = event.data.rect;
@@ -1039,6 +1075,7 @@ export default function App() {
     designTarget,
     language,
     selectedIds,
+    selectedId,
     checkpoint,
     busy,
   ]);
@@ -1224,7 +1261,7 @@ export default function App() {
       sendCanvasSelection();
     }
   }
-  function sendCanvasSelection() {
+  function sendCanvasSelection(readyToken?: number) {
     if (!preview || !frame.current) return;
     const sourceIds =
       selectedId && !selectedIds.includes(selectedId)
@@ -1240,6 +1277,7 @@ export default function App() {
         type: "uiux:select-many",
         selections: sourceIds.map(positionFor),
         primary: selectedId ? positionFor(selectedId) : null,
+        readyToken,
       },
       new URL(preview.url).origin,
     );
@@ -1282,6 +1320,11 @@ export default function App() {
       }
     });
   }
+  function isSharedImplementation(element: JsxElement) {
+    const owner = report?.components.find((component) => component.id === element.ownerComponent);
+    const routeOwner = !!owner && !!report?.routes.some((route) => route.file === owner.source.file) && ((owner.name === "App" && owner.references.length <= 1) || !!owner.defaultExported);
+    return !!owner && !routeOwner && element.sourceOwnership === "shared-component";
+  }
   async function editElement(
     element: JsxElement,
     operation: PatchRequest["operation"],
@@ -1289,18 +1332,9 @@ export default function App() {
   ) {
     const oldIds = new Set(report?.elements.map((candidate) => candidate.id));
     const insertionAnchor = element.source.end;
-    const owner = report?.components.find(
-      (component) => component.id === element.ownerComponent,
-    );
-    const routeOwner =
-      !!owner &&
-      !!report?.routes.some((route) => route.file === owner.source.file) &&
-      ((owner.name === "App" && owner.references.length <= 1) ||
-        !!owner.defaultExported);
-    const shared =
-      !!owner &&
-      !routeOwner &&
-      element.sourceOwnership === "shared-component";
+    const shared = isSharedImplementation(element);
+    if (shared && !window.confirm(t("sharedConfirm"))) return;
+    if (preview) setPreviewState("starting");
     await act(async () => {
       const value = await api<{
         patch: SourcePatch;
@@ -1344,6 +1378,9 @@ export default function App() {
       setCheckpoint(true);
       if (preview && frame.current) {
         setPreviewState("starting");
+        // A focused iframe loses its keyboard listener during reload. Return
+        // focus to the studio so Undo remains available while preview restarts.
+        if (document.activeElement === frame.current) frame.current.blur();
         frame.current.src = frame.current.src;
       }
       flash(t("savedDirectly"));
@@ -1380,6 +1417,7 @@ export default function App() {
     });
   }
   async function undo() {
+    if (preview) setPreviewState("starting");
     await act(async () => {
       const value = await api("undo", { approved: true });
       applyReport(value.analysis);
@@ -1645,10 +1683,14 @@ export default function App() {
   function stageDroppedElement(element: JsxElement, tag: string) {
     setSelectedId(element.id);
     setPendingInsert(tag);
+    const classNames = new Set((report?.elements ?? [])
+      .filter((usage) => usage.tag === tag && usage.source.file === element.source.file && !usage.dynamic)
+      .flatMap((usage) => usage.props.filter((prop) => prop.name === "className" && prop.kind === "string" && typeof prop.value === "string").map((prop) => prop.value as string)));
     void editElement(element, "insert", {
       name: tag,
       value: tag === "button" ? "New button" : "",
       position: "inside",
+      insertProps: classNames.size === 1 ? [{ name: "className", value: [...classNames][0] }] : undefined,
     }).finally(() => setPendingInsert(""));
   }
   function stageDroppedComponent(
@@ -1657,9 +1699,26 @@ export default function App() {
   ) {
     setSelectedId(element.id);
     setPendingInsert(component.name);
+    const insertProps: NonNullable<PatchRequest["insertProps"]> = [];
+    const label = component.props.find((prop) => prop.name === "label" && (!prop.options || prop.options.includes("New button")));
+    if (component.name === "Button" && label)
+      insertProps.push({ name: "label", value: "New button" });
+    // Reuse an unambiguous literal styling choice already used in this file.
+    for (const name of ["variant", "size", "className"]) {
+      const contract = component.props.find((prop) => prop.name === name);
+      if (!contract) continue;
+      const values = new Set((report?.elements ?? [])
+        .filter((usage) => usage.componentId === component.id && usage.source.file === element.source.file && !usage.dynamic)
+        .flatMap((usage) => usage.props.filter((prop) => prop.name === name && prop.kind === "string" && typeof prop.value === "string").map((prop) => prop.value as string)));
+      if (values.size === 1) {
+        const value = [...values][0];
+        if (!contract.options || contract.options.includes(value)) insertProps.push({ name, value });
+      }
+    }
     void editElement(element, "insert", {
       name: component.name,
       position: "inside",
+      insertProps,
       insertComponent: {
         name: component.name,
         sourceFile: component.source.file,
@@ -1689,20 +1748,11 @@ export default function App() {
       setError(t("groupSameScreen"));
       return;
     }
+    if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
+    if (preview) setPreviewState("starting");
     void act(async () => {
       const items = group.map((item) => {
-        const owner = report?.components.find(
-          (component) => component.id === item.ownerComponent,
-        );
-        const routeOwner =
-          !!owner &&
-          !!report?.routes.some((route) => route.file === owner.source.file) &&
-          ((owner.name === "App" && owner.references.length <= 1) ||
-            !!owner.defaultExported);
-        const shared =
-          !!owner &&
-          !routeOwner &&
-          item.sourceOwnership === "shared-component";
+        const shared = isSharedImplementation(item);
         return {
           file: item.source.file,
           elementId: item.id,
@@ -1826,20 +1876,11 @@ export default function App() {
       });
       return;
     }
+    if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
+    if (preview) setPreviewState("starting");
     void act(async () => {
       const items = changes.map(({ element: item, name, value }) => {
-        const owner = report?.components.find(
-          (component) => component.id === item.ownerComponent,
-        );
-        const routeOwner =
-          !!owner &&
-          !!report?.routes.some((route) => route.file === owner.source.file) &&
-          ((owner.name === "App" && owner.references.length <= 1) ||
-            !!owner.defaultExported);
-        const shared =
-          !!owner &&
-          !routeOwner &&
-          item.sourceOwnership === "shared-component";
+        const shared = isSharedImplementation(item);
         return {
           file: item.source.file,
           elementId: item.id,
@@ -1901,23 +1942,12 @@ export default function App() {
       (element) => values.get(element.id)!,
     );
   }
-  function nearestInsertTarget(element: JsxElement | null | undefined) {
-    let target = element;
-    while (target && !target.operations.includes("insert")) {
-      target = target.parentId
-        ? report?.elements.find(
-            (candidate) => candidate.id === target!.parentId,
-          )
-        : undefined;
-    }
-    return target;
-  }
   function dropPaletteOnCanvas(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
     setDraggingPalette(false);
-    const target = nearestInsertTarget(selected);
-    if (!target) {
+    const target = selected;
+    if (!target?.operations.includes("insert")) {
       setError(t("simpleDropError"));
       return;
     }
@@ -2610,6 +2640,7 @@ export default function App() {
           </div>
         ) : (
           <div className="inspector-content">
+            {selectedDefinition?.props.some((prop) => prop.name === "value") && !selected.props.some((prop) => prop.name === "value") && <p className="small muted" role="status">{t("unboundComponentData")}</p>}
             <div className="selected-heading">
               <span className="node-large">
                 <Icon name={editableSelected ? "code" : "lock"} size={20} />
@@ -3162,6 +3193,11 @@ export default function App() {
                 </div>
                 <div className="structure-divider" />
                 <h4>{t("duplicateComponent")}</h4>
+                {copiedElement && selected.id !== copiedElement.id && (
+                  <button className="button full" disabled={busy || !selected.operations.includes("insert")} onClick={() => void editElement(copiedElement, "duplicate", { targetId: selected.id })}>
+                    {t("pasteCopiedInside")}
+                  </button>
+                )}
                 {duplicateCandidates.length ? (
                   <>
                     <Field label={t("identityProperty")}>
@@ -3217,7 +3253,15 @@ export default function App() {
                     </button>
                   </>
                 ) : (
-                  <p className="small muted">{t("duplicateIdentityHint")}</p>
+                  <>
+                    <p className="small muted">{t("duplicateIdentityHint")}</p>
+                    <button className="button full" disabled={busy || !selected.operations.includes("duplicate")} onClick={() => void stage("duplicate")}>
+                      <Icon name="copy" size={14} /> {t("duplicateNow")}
+                    </button>
+                    <button className="button full" disabled={busy || !selected.operations.includes("duplicate")} onClick={() => { setCopiedElement(selected); flash(t("copiedSelectDestination")); }}>
+                      <Icon name="copy" size={14} /> {t("copyToAnotherArea")}
+                    </button>
+                  </>
                 )}
                 <div className="structure-divider" />
                 <h4>{t("insertPrimitive")}</h4>
@@ -4239,6 +4283,7 @@ export default function App() {
                                         selected,
                                         component,
                                       );
+                                    else setError(t("simpleDropError"));
                                   }}
                                   title={`${component.source.file} · ${t("dragWritesDirectly")}`}
                                 >
@@ -4285,6 +4330,7 @@ export default function App() {
                                 onClick={() => {
                                   if (selected?.operations.includes("insert"))
                                     stageDroppedElement(selected, item.tag);
+                                  else setError(t("simpleDropError"));
                                 }}
                                 title={`${t(item.label)} · ${t("dragWritesDirectly")}`}
                               >
@@ -4465,6 +4511,7 @@ export default function App() {
               )}
               {projectSwitched && <div className="conflict-banner" role="alert">{t("projectSwitched")}</div>}
               {watchingIncomplete && <div className="conflict-banner" role="status">{t("watchingIncomplete")}</div>}
+              {preview && report.detected.styling.includes("tailwind") && <div className="conflict-banner" role="status">{t("previewStylingWarning")}</div>}
               {nav === "boards" && isDemo && (
                 <div className="scenario-toolbar">
                   <span>{t("scenario")}</span>
@@ -4511,11 +4558,22 @@ export default function App() {
                       <Icon name="file" size={15} />
                       {selected?.source.file || t("sourceReadOnly")}
                     </div>
-                    <pre>{source || t("selectHint")}</pre>
+                    {codeSearchOpen && <div className="code-find" role="search">
+                      <input ref={codeSearchInput} aria-label={t("findInCode")} placeholder={t("findInCode")} value={codeSearch} onChange={(event) => setCodeSearch(event.target.value)} onKeyDown={(event) => {
+                        if (event.key === "Escape") { setCodeSearchOpen(false); event.stopPropagation(); }
+                        if (event.key === "Enter" && codeMatches.length) { event.preventDefault(); setCodeMatch((current) => (current + (event.shiftKey ? -1 : 1) + codeMatches.length) % codeMatches.length); }
+                      }} />
+                      <span aria-live="polite">{codeMatches.length ? `${codeMatch + 1}/${codeMatches.length}${codeMatches.length === 2000 ? "+" : ""}` : `0/0`}</span>
+                      <button className="button" aria-label={t("previousMatch")} disabled={!codeMatches.length} onClick={() => setCodeMatch((current) => (current - 1 + codeMatches.length) % codeMatches.length)}>↑</button>
+                      <button className="button" aria-label={t("nextMatch")} disabled={!codeMatches.length} onClick={() => setCodeMatch((current) => (current + 1) % codeMatches.length)}>↓</button>
+                      <button className="button" aria-label={t("closeSearch")} onClick={() => setCodeSearchOpen(false)}>×</button>
+                    </div>}
+                    <pre ref={codeSource}>{codeMatches.length ? <>{codeMatches.map((start, index) => <span key={start}>{source.slice(index ? codeMatches[index - 1] + codeSearch.length : 0, start)}<mark data-current-match={index === codeMatch}>{source.slice(start, start + codeSearch.length)}</mark></span>)}{source.slice(codeMatches[codeMatches.length - 1] + codeSearch.length)}</> : source || t("selectHint")}</pre>
                   </div>
                 ) : preview && (nav !== "boards" || isDemo) ? (
                   <div
                     className={`frame-shell ${viewport}`}
+                    aria-busy={previewState === "starting"}
                     style={{
                       width:
                         viewport === "mobile"
@@ -4527,6 +4585,7 @@ export default function App() {
                       transformOrigin: "top center",
                     }}
                   >
+                    {previewState === "starting" && <div className="canvas-loading" role="status">{t("working")}</div>}
                     {draggingPalette && (
                       <div
                         className="canvas-drop-overlay"
@@ -4548,6 +4607,7 @@ export default function App() {
                     <iframe
                       ref={frame}
                       src={frameSrc}
+                      style={{ visibility: previewState === "starting" ? "hidden" : undefined }}
                       title={t("preview")}
                       onLoad={sendMode}
                       sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"

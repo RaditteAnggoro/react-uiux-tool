@@ -41,6 +41,7 @@
     "test": "node --import tsx --test tests/*.test.ts tests/reports/*.test.ts",
     "test:e2e": "playwright test",
     "benchmark": "node --expose-gc --import tsx scripts/benchmark.ts",
+    "compat:inventory": "node --import tsx scripts/compat-inventory.ts",
     "docs:screenshots": "npm run build && node scripts/capture-docs.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "notices:generate": "node scripts/generate-third-party-notices.mjs",

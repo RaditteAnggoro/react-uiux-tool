@@ -198,6 +198,7 @@ export function bridgeSource(parentOrigin: string): string {
       if(event.data?.type==='uiux:select-many'){
         selectedMany=(Array.isArray(event.data.selections)?event.data.selections:[]).map(findPosition).filter(Boolean);
         selected=findPosition(event.data.primary)||selectedMany.at(-1)||null;show(selected);showMany();
+        if(Number.isSafeInteger(event.data.readyToken))parent.postMessage({type:'uiux:selection-applied',token:event.data.readyToken},parentOrigin);
       }
     });
     let failed = false;
