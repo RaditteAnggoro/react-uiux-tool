@@ -2,6 +2,7 @@ import type { ReportDocumentV1, ReportElement } from "../core/types.js";
 import { paginateReport, type PlacedBand } from "../core/pagination.js";
 import { evaluateExpression } from "../core/expressions.js";
 import { toDecimalString } from "../core/decimal.js";
+import { decodePdfImage, type PdfImageData } from "./pdf-image.js";
 
 const MM = 72 / 25.4;
 type PdfContent = string[] & { unsupportedCharacters: number };
@@ -82,6 +83,7 @@ function drawBand(
   totalPages: number,
   bodyTop: number,
   content: PdfContent,
+  images: Map<string, { name: string; data: PdfImageData }>,
 ): void {
   const bandY = bodyTop - placed.y;
   for (const element of placed.band.elements) {
@@ -89,7 +91,22 @@ function drawBand(
     const y = bandY - element.box.y;
     const size = Number(element.props.fontSize ?? 9);
     const bold = Number(element.props.fontWeight ?? 400) >= 600;
-    if (element.type === "text") {
+    if (element.type === "image") {
+      const image = typeof element.props.src === "string" ? images.get(element.props.src) : undefined;
+      if (image && element.box.width > 0 && element.box.height > 0) {
+        const boxWidth = element.box.width * MM, boxHeight = element.box.height * MM;
+        const scale = element.props.fit === "cover" ? Math.max(boxWidth / image.data.width, boxHeight / image.data.height) : Math.min(boxWidth / image.data.width, boxHeight / image.data.height);
+        const width = image.data.width * scale, height = image.data.height * scale;
+        const left = x * MM, bottom = (y - element.box.height) * MM;
+        const color = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+          ? [1, 3, 5].map((offset) => (parseInt(value.slice(offset, offset + 2), 16) / 255).toFixed(3)).join(" ") : null;
+        const background = color(element.props.background);
+        if (background) content.push(`q ${background} rg ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re f Q`);
+        content.push(`q ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re W n ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${(left + (boxWidth - width) / 2).toFixed(2)} ${(bottom + (boxHeight - height) / 2).toFixed(2)} cm /${image.name} Do Q`);
+        const border = Number(element.props.borderWidth ?? 0), borderColor = color(element.props.borderColor) ?? "0 0 0";
+        if (Number.isFinite(border) && border > 0) content.push(`q ${borderColor} RG ${(border * MM).toFixed(2)} w ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re S Q`);
+      }
+    } else if (element.type === "text") {
       String(element.props.text ?? "")
         .split("\n")
         .forEach((line, index) => textLine(content, x, y - index * (size / MM) * 0.42, line, size, bold));
@@ -161,18 +178,27 @@ function drawBand(
 }
 
 /** Dependency-free PDF 1.4 writer that follows the same pagination as the HTML print renderer. */
-export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number }): Uint8Array {
+export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number; unsupportedImages?: number }): Uint8Array {
   const layouts = paginateReport(document, { data });
+  const images = new Map<string, { name: string; data: PdfImageData }>();
+  let unsupportedImages = 0;
+  for (const element of document.bands.flatMap((band) => band.elements)) {
+    if (element.type !== "image" || typeof element.props.src !== "string" || !element.props.src) continue;
+    if (images.has(element.props.src)) continue;
+    const decoded = decodePdfImage(element.props.src);
+    if (decoded) images.set(element.props.src, { name: `Im${images.size + 1}`, data: decoded });
+    else unsupportedImages++;
+  }
   const totalPages = layouts.length;
   const bodyTop = document.page.height - document.page.margins.top;
   const pages: PdfContent[] = layouts.map((layout, index) => {
     const content = Object.assign([] as string[], { unsupportedCharacters: 0 });
     for (const placed of layout.bands) {
-      drawBand(document, placed, data, index + 1, totalPages, bodyTop, content);
+      drawBand(document, placed, data, index + 1, totalPages, bodyTop, content, images);
     }
     return content;
   });
-  if (diagnostics) diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0);
+  if (diagnostics) { diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0); diagnostics.unsupportedImages = unsupportedImages; }
 
   const width = (document.page.width * MM).toFixed(2);
   const height = (document.page.height * MM).toFixed(2);
@@ -183,18 +209,30 @@ export function exportPdf(document: ReportDocumentV1, data: Record<string, unkno
   objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
   const firstPageObject = 5;
   const firstContentObject = firstPageObject + totalPages;
+  let nextImageObject = firstContentObject + totalPages;
+  const imageObjects: string[] = [];
+  const imageResources: string[] = [];
+  for (const image of images.values()) {
+    const ref = nextImageObject++;
+    const maskRef = image.data.alpha ? nextImageObject++ : null;
+    imageResources.push(`/${image.name} ${ref} 0 R`);
+    const { width: w, height: h, colors, bytes, filter, alpha } = image.data;
+    imageObjects.push(`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /Device${colors === 1 ? "Gray" : "RGB"} /BitsPerComponent 8 /Filter /${filter} /Length ${bytes.length}${maskRef ? ` /SMask ${maskRef} 0 R` : ""} >>\nstream\n${bytes.toString("latin1")}\nendstream`);
+    if (alpha) imageObjects.push(`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${alpha.length} >>\nstream\n${alpha.toString("latin1")}\nendstream`);
+  }
   objects[1] = `<< /Type /Pages /Kids [${pages
     .map((_, index) => `${firstPageObject + index} 0 R`)
     .join(" ")}] /Count ${totalPages} >>`;
   pages.forEach((_, index) => {
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${firstContentObject + index} 0 R >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << ${imageResources.join(" ")} >> >> /Contents ${firstContentObject + index} 0 R >>`,
     );
   });
   pages.forEach((page) => {
     const stream = page.join("\n");
     objects.push(`<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`);
   });
+  objects.push(...imageObjects);
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [];

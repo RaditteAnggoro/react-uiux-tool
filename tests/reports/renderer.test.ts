@@ -58,8 +58,12 @@ test("embedded base64 images are allowed", () => {
   const document = buildTemplate("invoice");
   const logo = document.bands[0].elements[0];
   logo.props.src = "data:image/png;base64,iVBORw0KGgo=";
+  logo.props.fit = "cover";
+  logo.props.background = "#112233";
   const html = renderReportHtml(document);
   assert.match(html, /<img alt="Company logo" src="data:image\/png;base64,iVBORw0KGgo="/);
+  assert.match(html, /object-fit:cover/);
+  assert.match(html, /background:#112233/);
 });
 
 test("rendering is deterministic", () => {

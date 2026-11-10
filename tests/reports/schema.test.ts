@@ -25,6 +25,18 @@ test("a template document validates and round trips through JSON", () => {
   assert.deepEqual(parsed.document, document);
 });
 
+test("embedded image data can exceed the normal string limit without relaxing other strings", () => {
+  const document = buildTemplate("invoice");
+  const image = document.bands.flatMap((band) => band.elements).find((element) => element.type === "image")!;
+  image.props.src = `data:image/png;base64,${Buffer.alloc(30000, 42).toString("base64")}`;
+  assert.equal(validateReportDocument(document).ok, true);
+  const other = clone(document);
+  other.title = "x".repeat(DEFAULT_LIMITS.maxStringLength + 1);
+  assert.ok(validateReportDocument(other).errors.some((issue) => issue.code === "STRING_LIMIT"));
+  image.props.src = `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1).toString("base64")}`;
+  assert.ok(validateReportDocument(document).errors.some((issue) => issue.code === "STRING_LIMIT"));
+});
+
 test("serialization is deterministic regardless of key insertion order", () => {
   const document = buildTemplate("statement");
   const reordered = JSON.parse(JSON.stringify(document)) as ReportDocumentV1;

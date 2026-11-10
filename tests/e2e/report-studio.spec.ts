@@ -470,11 +470,27 @@ test("image import, CSV sample data and style controls update the draft", async 
   );
   try {
     await createInvoice(page, folder);
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement("canvas"); canvas.width = 128; canvas.height = 128;
+      const context = canvas.getContext("2d")!; const pixels = context.createImageData(128, 128);
+      let seed = 1234567;
+      for (let i = 0; i < pixels.data.length; i += 4) {
+        for (let c = 0; c < 3; c++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; pixels.data[i + c] = seed >>> 24; }
+        pixels.data[i + 3] = 255;
+      }
+      context.putImageData(pixels, 0, 0);
+      return canvas.toDataURL("image/png").split(",")[1]!;
+    });
+    await writeFile(pngPath, Buffer.from(png, "base64"));
+    expect(Buffer.from(png, "base64").length).toBeGreaterThan(20000);
 
     await page.locator('.rs-el[data-id="el-logo"]').click();
     await page.locator('input[type=file][accept*="image"]').setInputFiles(pngPath);
     await expect(page.locator(".rs-image-thumb")).toBeVisible();
     await expect(page.locator('.rs-el[data-id="el-logo"] img')).toBeVisible();
+    await page.getByLabel("Image fit").selectOption("cover");
+    await expect(page.locator('.rs-el[data-id="el-logo"] img')).toHaveCSS("object-fit", "cover");
+    await page.locator(".rs-right").getByLabel("W", { exact: true }).fill("40");
 
     await page.getByRole("button", { name: "Import data (CSV/JSON)" }).click();
     await page.locator('input[type=file][accept*="csv"]').setInputFiles(csvPath);
@@ -485,6 +501,7 @@ test("image import, CSV sample data and style controls update the draft", async 
     await expect(page.frameLocator("iframe").locator("body")).toContainText("Jasa CSV", {
       timeout: 10_000,
     });
+    await expect(page.frameLocator("iframe").locator('img[alt="dot.png"]')).toHaveCSS("object-fit", "cover");
     await page.getByRole("button", { name: "Design", exact: true }).click();
 
     await page.locator('.rs-el[data-id="el-title"]').click();
@@ -498,6 +515,29 @@ test("image import, CSV sample data and style controls update the draft", async 
     expect(saved).toContain('"italic": true');
     expect(saved).toContain('"background": "#112233"');
     expect(saved).toContain('"src": "data:image/png;base64,');
+    expect(saved).toContain('"fit": "cover"');
+    const savedLogo = JSON.parse(saved).bands.flatMap((band: { elements: Array<{ id: string; box: { width: number } }> }) => band.elements).find((element: { id: string }) => element.id === "el-logo");
+    expect(savedLogo.box.width).toBe(40);
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    const download = await downloadPromise;
+    const pdfPath = await download.path();
+    expect(pdfPath).not.toBeNull();
+    const pdf = (await readFile(pdfPath!)).toString("latin1");
+    expect(pdf).toContain("/Subtype /Image");
+    expect(pdf).toContain("/Im1 Do");
+    const jpeg = await page.evaluate(() => {
+      const canvas = document.createElement("canvas"); canvas.width = 8; canvas.height = 8;
+      const context = canvas.getContext("2d")!; context.fillStyle = "#ff3300"; context.fillRect(0, 0, 8, 8);
+      return canvas.toDataURL("image/jpeg").split(",")[1]!;
+    });
+    await page.locator('.rs-el[data-id="el-logo"]').click();
+    await page.locator('input[type=file][accept*="image"]').setInputFiles({ name: "logo.jpg", mimeType: "image/jpeg", buffer: Buffer.from(jpeg, "base64") });
+    await expect(page.locator('.rs-el[data-id="el-logo"] img')).toHaveAttribute("alt", "logo.jpg");
+    const jpegDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    const jpegPdfPath = await (await jpegDownloadPromise).path();
+    expect((await readFile(jpegPdfPath!)).toString("latin1")).toContain("/DCTDecode");
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

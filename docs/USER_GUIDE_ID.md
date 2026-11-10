@@ -53,6 +53,11 @@ node dist/cli.js --help
 
 ## 2. Pertama kali membuka dan mengenal layar
 
+Buka **Riwayat perubahan** dari header beranda atau sidebar project untuk melihat
+tanggal, jam, dan isi perubahan yang tercatat. Waktu adalah waktu commit Git kecuali
+yang ditandai sebagai waktu persiapan; waktu deploy atau instalasi sebenarnya belum
+dicatat. Catatan rilis dikelola di aplikasi.
+
 Pilih **English** atau **Bahasa Indonesia**. Bahasa dapat diganti di header tanpa
 restart atau menerjemahkan isi project. Theme light, dark, dan system hanya
 memengaruhi Studio, bukan CSS aplikasi target.
@@ -63,7 +68,7 @@ memengaruhi Studio, bukan CSS aplikasi target.
 | Pemeriksaan Project | Hasil deteksi, cakupan pemeriksaan, kesiapan, status edit, peringatan |
 | Rail/panel kiri | Pages, Components, Tree, Files, Boards |
 | Canvas | Preview nyata yang disetujui, Design/Interact, lebar viewport, zoom |
-| Inspector | Props, Style, Layout, Events, Data, A11y, Source |
+| Inspector | Props, Style, Layout, Events, Data, A11y |
 | Panel bawah | Analysis, Problems, Changes, Console, Scenarios |
 | Alur source | Simpan langsung dengan pemeriksaan konflik, Batalkan sesi, review Git sebelum push |
 
@@ -185,8 +190,8 @@ kosong agar screen menu dapat dibuka tanpa backend perusahaan. App preview, Inte
 WebSocket/EventSource, serta efek saat halaman dibuka tetap dapat berjalan. Gunakan
 environment development yang dipercaya.
 
-**Code** menampilkan source tanpa menjalankannya; untuk `.yrf` tersedia **Edit source**. Tab Source menyediakan lokasi dan
-IDE link jika didukung. File tetap dapat diedit normal melalui VS Code. Setelah ada
+**Code** menampilkan source tanpa menjalankannya; untuk `.yrf` tersedia **Edit source**. Di Props, klik lokasi source untuk membuka file pada Code.
+File tetap dapat diedit normal melalui VS Code. Setelah ada
 external edit, lakukan re-analysis. Patch lama tidak boleh menimpa source yang baru.
 
 ![Seleksi Canvas dan Inspector dengan lokasi source](screenshots/canvas-inspector.png)
@@ -499,8 +504,10 @@ Pilih objek terlebih dahulu. Kontrol tertentu hanya muncul untuk tipe yang sesua
 | Choose image, Alt text, Image fit | Pada objek gambar, pilih PNG/JPEG/WebP maksimal 2 MiB; isi deskripsi; `contain` menjaga gambar utuh, `cover` mengisi kotak dan dapat memotong tepi. |
 
 Untuk logo, klik **Add image**, pilih objek gambar, tekan **Choose image**, lalu
-pilih file lokal. Atur W/H dan lihat Preview. Gambar disimpan sebagai bagian dari
-sumber laporan; jangan masukkan gambar rahasia ke dokumen yang akan dibagikan.
+pilih file lokal. Tarik gambar atau handle resize, atur W/H, fit, background dan
+border, lalu lihat Preview. PDF mendukung JPEG dan PNG 8-bit non-interlaced; WebP
+atau format yang tidak didukung menghasilkan warning PDF. XLSX/DOCX tidak mengekspor
+gambar. Gambar disimpan di source; jangan masukkan gambar rahasia ke dokumen yang dibagikan.
 
 ### Data, parameter, pengulangan, dan total
 

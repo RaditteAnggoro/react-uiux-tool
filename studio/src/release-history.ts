@@ -1,0 +1,16 @@
+// Publication records are maintained with each release. These are Git publication
+// commit times, not proof of publication, installation or deployment.
+export const releaseHistory = [
+  { commit: "2026-11-09 update", publishedAt: "2026-11-09T22:14:25+07:00", kind: "prepared", en: "Improve report image import, styling and PDF output; simplify the React inspector; fix deletion of selected buttons and add change history.", id: "Peningkatan import gambar, styling dan output PDF report; penyederhanaan inspector React; perbaikan hapus tombol terpilih dan penambahan riwayat perubahan." },
+  { commit: "4588de1", publishedAt: "2026-11-09T21:36:38+07:00", en: "React editing reliability, compatibility checks, report and inspector improvements.", id: "Keandalan edit React, pemeriksaan kompatibilitas, serta peningkatan report dan inspector." },
+  { commit: "64bbe3e", publishedAt: "2026-11-09T17:49:23+07:00", en: "Studio usability, report labels, editing cursors and issue review.", id: "Kemudahan Studio, label report, cursor edit, dan review issue." },
+  { commit: "75c915d", publishedAt: "2026-11-09T15:56:05+07:00", en: "Normalize Windows Design preview module paths.", id: "Perbaikan path preview Design pada Windows." },
+  { commit: "dbd6b55", publishedAt: "2026-11-09T15:49:10+07:00", en: "Improve React editor safety and compatibility evidence.", id: "Peningkatan keamanan editor React dan bukti kompatibilitas." },
+  { commit: "ce363ef", publishedAt: "2026-11-07T13:38:17+07:00", en: "Fix Windows report paths and test fixtures.", id: "Perbaikan path report Windows dan fixture pengujian." },
+  { commit: "600b75e", publishedAt: "2026-11-06T15:52:43+07:00", en: "Document Report Studio in the README.", id: "Menambahkan dokumentasi Report Studio di README." },
+  { commit: "98d448e", publishedAt: "2026-11-06T15:48:21+07:00", en: "Add Report Studio and improve visual editing.", id: "Menambahkan Report Studio dan meningkatkan visual editing." },
+  { commit: "682db4d", publishedAt: "2026-11-04T08:52:54+07:00", en: "Improve repository discoverability.", id: "Meningkatkan kemudahan menemukan repository." },
+  { commit: "b8a7bec", publishedAt: "2026-11-03T14:40:40+07:00", en: "Document licenses and project inspirations.", id: "Dokumentasi lisensi dan inspirasi project." },
+  { commit: "ad2afe9", publishedAt: "2026-11-03T08:56:58+07:00", en: "Release the local React visual editor.", id: "Rilis editor visual React lokal." },
+  { commit: "1f56177", publishedAt: "2026-11-03T08:54:42+07:00", en: "Initialize the repository.", id: "Inisialisasi repository." },
+] as const;

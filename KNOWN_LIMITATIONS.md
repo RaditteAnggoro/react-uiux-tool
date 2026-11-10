@@ -3,6 +3,13 @@
 This is a source-aware local editing subset of the supplied design baseline. It
 must not be represented as complete compatibility with arbitrary React/Next.js.
 
+- Change history is a curated list of repository commits maintained with releases.
+  Commit timestamps and the explicitly marked preparation timestamp are not deployment or installation timestamps; new entries must
+  be added to `studio/src/release-history.ts` when publishing changes.
+- Native report PDF image export supports JPEG and non-interlaced 8-bit PNG; WebP,
+  interlaced and other unsupported image encodings generate an export warning. HTML
+  preview supports PNG/JPEG/WebP. XLSX and DOCX do not export report images and warn.
+
 ## Runtime and framework coverage
 
 - The Design preview supports conventional client-rendered React applications
@@ -49,6 +56,10 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
 - Event bindings can be added or changed to a validated existing in-scope function,
   and a simple named binding can be removed. Inline event expressions remain source-owned;
   changing a binding does not validate the application's business behavior.
+- Static JSX elements with event handlers can be deleted after confirmation; deleting
+  the element also removes its event binding, but does not delete the handler function.
+  When multiple rendered component instances cannot be distinguished by grounded
+  literal text or identity, select the exact JSX usage in the source tree.
 - Static insert/move/align/remove is constrained by source/container validation.
   The Components list prefers reusable visual exports and excludes business views,
   pages, screens, routes, providers, contexts, hooks, services, stores, and utilities.

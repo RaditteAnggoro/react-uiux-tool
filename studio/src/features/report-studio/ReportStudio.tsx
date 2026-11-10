@@ -146,6 +146,10 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [overflowCount, setOverflowCount] = useState(0);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const imageDocumentRef = useRef(document);
+  const imageFileRef = useRef(file);
+  imageDocumentRef.current = document;
+  imageFileRef.current = file;
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [sampleSchema, setSampleSchema] = useState<string>("");
   const [showFormats, setShowFormats] = useState(false);
@@ -813,6 +817,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
 
   const importImage = (file: File | undefined) => {
     if (!file) return;
+    const targetId = selectedId;
+    const reportFile = imageFileRef.current;
+    if (!targetId || !selected || selected.type !== "image") return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
       setErrors([tr("imageTypeError")]);
       return;
@@ -823,9 +830,15 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     }
     const reader = new FileReader();
     reader.onload = () => {
-      patchElement({
-        props: { ...selected?.props, src: String(reader.result), alt: file.name },
-      });
+      const current = imageDocumentRef.current;
+      if (!current || imageFileRef.current !== reportFile) return;
+      const target = current.bands.flatMap((band) => band.elements).find((element) => element.id === targetId && element.type === "image");
+      if (!target) return;
+      const next = { ...current, bands: current.bands.map((band) => ({ ...band, elements: band.elements.map((element) => element.id === targetId ? { ...element, props: { ...element.props, src: String(reader.result), alt: file.name } } : element) })) };
+      setPast((entries) => [...entries.slice(-49), current]);
+      setFuture([]);
+      imageDocumentRef.current = next;
+      setDocument(next);
       setErrors([]);
     };
     reader.onerror = () => setErrors([tr("imageTypeError")]);
@@ -2099,11 +2112,12 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
                     hidden
-                    onChange={(event) => importImage(event.target.files?.[0])}
+                    onChange={(event) => { importImage(event.target.files?.[0]); event.currentTarget.value = ""; }}
                   />
                   <button className="rs-ghost" onClick={() => imageInputRef.current?.click()}>
                     {tr("chooseImage")}
                   </button>
+                  <p className="rs-hint">{tr("imageImportHint")}</p>
                   {typeof selected.props.src === "string" &&
                     selected.props.src.startsWith("data:image") && (
                       <img className="rs-image-thumb" src={selected.props.src} alt="" />
@@ -2569,6 +2583,7 @@ function BandView({
                 className="rs-image"
                 src={element.props.src}
                 alt={String(element.props.alt ?? "")}
+                style={{ objectFit: element.props.fit === "cover" ? "cover" : "contain" }}
               />
             ) : (
               <span className="rs-image-stub">{String(element.props.alt || "LOGO")}</span>

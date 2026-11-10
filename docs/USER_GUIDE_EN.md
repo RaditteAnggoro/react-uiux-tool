@@ -53,6 +53,11 @@ node dist/cli.js --help
 
 ## 2. First launch and screen map
 
+Open **Change history** from the home header or project sidebar to see recorded
+commit dates, times and changes. Entries are Git commit times except where marked
+as preparation time; actual deployment or installation times are not tracked.
+Release notes are maintained in the application.
+
 Choose **English** or **Bahasa Indonesia** on first use. The header language control
 works without restarting and does not translate project content. Choose light,
 dark, or system theme; this affects only Studio.
@@ -63,7 +68,7 @@ dark, or system theme; this affects only Studio.
 | Project Check | What was found, scan coverage, readiness, editing status, warnings |
 | Left rail/panel | Pages, Components, Tree, Files, Boards |
 | Canvas | Approved real preview, Design/Interact, viewport width, zoom |
-| Inspector | Props, Style, Layout, Events, Data, A11y, Source |
+| Inspector | Props, Style, Layout, Events, Data, A11y |
 | Bottom panel | Analysis, Problems, Changes, Console, Scenarios |
 | Source workflow | Direct conflict-checked writes, one-session Undo, Git review before push |
 
@@ -184,8 +189,8 @@ local response so a menu screen can open without its backend. App preview, Inter
 WebSocket/EventSource, and other actions that run when a page opens can still affect
 real systems. Use a trusted development environment for your own applications.
 
-**Code** displays source without editing it. The Source inspector provides a
-location and an IDE link where supported; ordinary manual editing in VS Code is
+**Code** displays source without editing it. In Props, click the source location
+to open that file in Code; ordinary manual editing in VS Code is
 always possible. After an external edit, re-analyze. A stale patch cannot be applied.
 
 ![Canvas selection and source-aware inspector](screenshots/canvas-inspector.png)
@@ -494,8 +499,11 @@ Select an object first. Some controls only appear for the relevant object type.
 | Choose image, Alt text, Image fit | On an image, choose PNG/JPEG/WebP up to 2 MiB; add a description. `contain` shows the whole image; `cover` fills the box and may crop. |
 
 For a logo, click **Add image**, select the image object, click **Choose image**,
-and select a local file. Set W/H and inspect Preview. The image is stored in the
-report source, so do not put sensitive images into documents you plan to share.
+and select a local file. Drag the image or its resize handles, set W/H, fit,
+background and border, then inspect Preview. PNG and JPEG are supported in PDF
+(8-bit non-interlaced PNG); WebP and unsupported image encodings show a PDF warning.
+XLSX/DOCX do not export images. The image is stored in the report source, so do not
+put sensitive images into documents you plan to share.
 
 ### Data, parameters, repeating rows, and totals
 

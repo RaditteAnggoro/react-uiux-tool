@@ -19,9 +19,10 @@ import type {
 } from "../../src/engine/types";
 import { api, setProject, setToken } from "./api";
 import { en, id, evidenceText, type Key } from "./i18n";
+import { releaseHistory } from "./release-history";
 const ReportStudio = lazy(() => import("./features/report-studio/ReportStudio"));
 type Screen = "home" | "wizard" | "open" | "analysis" | "studio" | "report";
-type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | null;
+type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | "history" | null;
 type ProjectTreeEntry = {
   name: string;
   path: string;
@@ -960,8 +961,28 @@ export default function App() {
                 return;
               }
               if (usages.length > 1) {
-                const instanceIndex = Number(event.data.instanceIndex);
-                if (Number.isInteger(instanceIndex) && instanceIndex >= 0 && usages[instanceIndex]) target = usages[instanceIndex];
+                const text = typeof event.data.renderedText === "string" ? event.data.renderedText.trim() : "";
+                const matching = text ? usages.filter((usage) => !usage.dynamic && (
+                  usage.text?.trim() === text || usage.props.some((prop) =>
+                    ["label", "children"].includes(prop.name) && prop.kind === "string" && String(prop.value).trim() === text)
+                )) : [];
+                const identity = event.data.identity;
+                const componentDefinition = report?.components.find((component) => component.id === sourceElement.ownerComponent);
+                const identityMatches = identity && typeof identity === "object" ? usages.filter((usage) => !usage.dynamic && ["id", "name", "aria-label"].some((name) => {
+                  if (typeof identity[name] !== "string") return false;
+                  const prop = usage.props.find((item) => item.name === name);
+                  if (prop) return prop.kind === "string" && prop.value === identity[name];
+                  const fallback = componentDefinition?.props.find((item) => item.name === name)?.defaultValue;
+                  return typeof fallback === "string" && fallback === identity[name];
+                })) : [];
+                const exact = matching.length === 1 && identityMatches.length === 1 && matching[0] !== identityMatches[0]
+                  ? [] : matching.length === 1 ? matching : identityMatches.length === 1 ? identityMatches : [];
+                if (exact.length !== 1) {
+                  if (event.data.type === "uiux:select") { setSelectedId(null); setSelectedIds([]); }
+                  setError(t("ambiguousCanvasTarget"));
+                  return;
+                }
+                target = exact[0]!;
               }
             }
           }
@@ -1545,6 +1566,7 @@ export default function App() {
         </span>
         {languageControl}
         {themeControl}
+        <button className="button" onClick={() => setModal("history")}>{t("changeHistory")}</button>
         <button
           className="icon-button"
           onClick={openGuide}
@@ -1696,7 +1718,6 @@ export default function App() {
   };
   const openSourceFile = (file: string) => {
     setMode("code");
-    setInspectorTab("source");
     const first = allElements.find((element) => element.source.file === file);
     setSelectedId(first?.id || null);
     void act(async () => {
@@ -2630,7 +2651,7 @@ export default function App() {
             className="icon-button"
             title={t("viewSource")}
             aria-label={t("viewSource")}
-            onClick={() => setInspectorTab("source")}
+            onClick={() => setMode("code")}
           >
             <Icon name="code" size={16} />
           </button>
@@ -2648,7 +2669,6 @@ export default function App() {
               "events",
               "data",
               "a11y",
-              "source",
             ] as Key[]
           ).map((tab) => (
             <button
@@ -2688,16 +2708,10 @@ export default function App() {
                 </Badge>
               )}
             </div>
-            <button
-              className="source-location"
-              onClick={() => setInspectorTab("source")}
-            >
+            {inspectorTab === "props" && <button className="source-location" onClick={() => setMode("code")}>
               <Icon name="file" size={13} />
-              <span>
-                {selected.source.file}:{selected.source.line}
-              </span>
-              <span>↗</span>
-            </button>
+              <span>{selected.source.file}:{selected.source.line}</span><span>↗</span>
+            </button>}
             <div className={`edit-status ${selected.editability.toLowerCase()}`}>
               <strong>{stateLabel(selected.editability)}</strong>
               <p>{stateDescription(selected.editability)}</p>
@@ -3178,30 +3192,6 @@ export default function App() {
                 >
                   {t("props")} · aria-label
                 </button>
-              </section>
-            )}
-            {inspectorTab === "source" && (
-              <section className="inspector-section">
-                <h4>{t("sourceLocation")}</h4>
-                <code className="wrap-code">
-                  {selected.source.file}:{selected.source.line}:
-                  {selected.source.column}
-                </code>
-                <button
-                  className="button full"
-                  onClick={() =>
-                    void navigator.clipboard
-                      .writeText(
-                        `${report?.projectRoot}/${selected.source.file}:${selected.source.line}`,
-                      )
-                      .then(() => flash(t("copied")))
-                  }
-                >
-                  {t("copy")}
-                </button>
-                <p className="small muted">{t("sourceWarning")}</p>
-                <pre className="source-code">{source}</pre>
-                <p className="small muted">{t("partialImpact")}</p>
               </section>
             )}
             {(["props", "layout"] as Key[]).includes(inspectorTab) && (
@@ -4030,6 +4020,9 @@ export default function App() {
               >
                 <Icon name="file" />
               </button>
+              <button className="rail-button" title={t("changeHistory")} aria-label={t("changeHistory")} onClick={() => setModal("history")}>
+                <Icon name="file" />
+              </button>
               <button
                 className="rail-button rail-bottom"
                 title={t("help")}
@@ -4148,7 +4141,7 @@ export default function App() {
                             report.elements.find((e) => e.tag === "button")
                               ?.id || null,
                           );
-                          setInspectorTab("source");
+                          setMode("code");
                         }}
                       >
                         {t("viewSource")}
@@ -5148,6 +5141,19 @@ export default function App() {
               {guideStep === guideSteps.length - 1 ? t("finish") : t("next")}
             </button>
           </div>
+        </Modal>
+      )}
+      {modal === "history" && (
+        <Modal closeLabel={t("close")} title={t("changeHistory")} onClose={() => setModal(null)}>
+          <p className="small muted">{t("historyHint")}</p>
+          <ol className="history-list">
+            {releaseHistory.map((entry) => <li key={entry.commit}>
+              <time dateTime={entry.publishedAt}>{new Intl.DateTimeFormat(language === "id" ? "id-ID" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.publishedAt))}</time>
+              {"kind" in entry && entry.kind === "prepared" && <span>{t("historyPrepared")} · </span>}
+              <code>{entry.commit}</code>
+              <p>{entry[language]}</p>
+            </li>)}
+          </ol>
         </Modal>
       )}
       {modal === "about" && (

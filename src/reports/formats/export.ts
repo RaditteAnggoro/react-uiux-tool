@@ -54,6 +54,7 @@ function fidelityWarnings(document: ReportDocumentV1, format: ExportFormat): str
     if (hasRichFormatting) warnings.push("PDF: underline, strikethrough, lists, borders, rotation or text wrapping may not be rendered");
   }
   if (format === "xlsx" || format === "docx" || format === "csv") {
+    if (types.has("image") && format !== "csv") warnings.push(`${format.toUpperCase()}: image elements are not exported`);
     if (tableCount > 1) {
       warnings.push(`${format.toUpperCase()}: only the first table is exported (${tableCount} tables found)`);
     }
@@ -112,8 +113,9 @@ export function exportReport(
     };
   }
   if (format === "pdf") {
-    const diagnostics = { unsupportedCharacters: 0 };
+    const diagnostics = { unsupportedCharacters: 0, unsupportedImages: 0 };
     const bytes = exportPdf(doc, data, diagnostics);
+    if (diagnostics.unsupportedImages) warnings.push(`PDF: ${diagnostics.unsupportedImages} image(s) could not be rendered; use an 8-bit non-interlaced PNG or JPEG`);
     if (diagnostics.unsupportedCharacters) warnings.push(`PDF: ${diagnostics.unsupportedCharacters} unsupported character(s) are replaced with "?" (Latin-1 subset)`);
     return {
       filename: `${base}.pdf`,

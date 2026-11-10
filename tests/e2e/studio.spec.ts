@@ -88,6 +88,73 @@ test("basic button reuses a consistent existing project class", async ({ page })
   await stopPreview(page);
 });
 
+test("delete targets the selected project button and keeps sibling handlers", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-delete-button-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/SharedButton.jsx"), 'export default function SharedButton({label,onClick}){return <button onClick={onClick}>{label}</button>}');
+  const sourcePath = path.join(root, "src/App.tsx");
+  await writeFile(sourcePath, 'import SharedButton from "./SharedButton";export default function App(){const handle=()=>{};return <main><SharedButton label="Detail" onClick={handle}/><SharedButton label="New button" onClick={handle}/></main>}');
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: /App\.tsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "App" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await expect(frame.getByRole("button", { name: "New button" })).toBeVisible();
+  await frame.getByRole("button", { name: "New button" }).click();
+  await expect(page.locator(".inspector-panel")).toContainText("New button");
+  page.once("dialog", (dialog) => dialog.accept());
+  await frame.getByRole("button", { name: "New button" }).press("Delete");
+  await expect.poll(() => readFile(sourcePath, "utf8")).not.toContain('label="New button"');
+  const result = await readFile(sourcePath, "utf8");
+  expect(result).toContain('label="Detail" onClick={handle}');
+  expect(result).toContain('const handle=()=>{}');
+  await stopPreview(page);
+});
+
+test("change history opens in both languages without claiming deployment time", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Change history" }).click();
+  await expect(page.getByRole("dialog", { name: "Change history" })).toContainText("Actual deployment or installation times are not tracked");
+  await expect(page.getByRole("dialog")).toContainText("4588de1");
+  await expect(page.getByRole("dialog")).toContainText("Improve report image import");
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+  await page.getByLabel("Language").selectOption("id");
+  await page.getByRole("button", { name: "Riwayat perubahan" }).click();
+  await expect(page.getByRole("dialog", { name: "Riwayat perubahan" })).toContainText("Waktu deploy atau instalasi sebenarnya belum dicatat");
+});
+
+test("ambiguous repeated component labels do not delete a guessed instance", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-ambiguous-button-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  await writeFile(path.join(root, "src/SharedButton.jsx"), 'export default function SharedButton({label}){return <button>{label}</button>}');
+  const sourcePath = path.join(root, "src/App.tsx");
+  const original = 'import SharedButton from "./SharedButton";export default function App(){return <main><SharedButton label="Same"/><SharedButton label="Same"/></main>}';
+  await writeFile(sourcePath, original);
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  await page.getByRole("dialog", { name: "Approve local preview" }).getByRole("button", { name: "Approve & start" }).click();
+  const explorer = page.locator(".source-explorer");
+  await explorer.getByRole("treeitem", { name: "src" }).click();
+  await explorer.getByRole("treeitem", { name: /App\.tsx/ }).click();
+  await explorer.locator(".component-row", { hasText: "App" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.getByRole("button", { name: "Same" }).first().click();
+  await expect(page.getByRole("alert")).toContainText("could not be determined");
+  expect(await readFile(sourcePath, "utf8")).toBe(original);
+  await stopPreview(page);
+});
+
 test("basic paragraph starts with editable visible text", async ({ page }) => {
   await page.goto("/");
   const root = await openFixtureProject(page);
@@ -285,7 +352,8 @@ test("code search handles Ctrl+F and navigates source matches", async ({ page })
   await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).click();
-  await page.getByRole("tab", { name: "Code" }).click();
+  await page.locator(".source-location").click();
+  await expect(page.getByRole("tab", { name: "Code" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Control+f");
   const search = page.getByRole("search").getByLabel("Find in code");
   await expect(search).toBeFocused();
@@ -493,7 +561,7 @@ test("component palette scrolls with the footer open and inspector tabs fit", as
   await expect(primitive).toBeVisible();
   const tabs = page.locator(".inspector-tabs");
   expect(await tabs.evaluate((element) => element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight)).toBe(true);
-  await expect(tabs.getByRole("tab", { name: "Source" })).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: "Source" })).toHaveCount(0);
 });
 
 test("narrow workspace exposes panels and source tree supports arrow keys", async ({ page }) => {

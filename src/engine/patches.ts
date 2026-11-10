@@ -1034,12 +1034,10 @@ export async function createPatch(
   } else {
     const parent = node.parent;
     if (
-      !staticChildren(parent) ||
+      !ts.isJsxElement(parent) ||
       (!staticChildren(node) && !ts.isJsxSelfClosingElement(node))
     )
       fail("Only static nested JSX nodes can be removed.");
-    if (element.events.length)
-      fail("Removing a component with event handlers requires source review.");
     after = applySpan(before, node.getStart(sf), node.end, "");
   }
   if (Buffer.byteLength(after) > 1024 * 1024)

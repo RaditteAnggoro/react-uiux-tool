@@ -386,13 +386,8 @@ test("static reorder, insertion, removal, text escaping and nesting constraints"
       req(r.elements.find((e) => e.tag === "aside")!, "remove"),
     );
     assert.doesNotMatch(removed.after, /Remove me/);
-    await assert.rejects(
-      createPatch(
-        f.root,
-        req(r.elements.find((e) => e.tag === "button")!, "remove"),
-      ),
-      /event handlers/,
-    );
+    const removedButton = await createPatch(f.root, req(r.elements.find((e) => e.tag === "button")!, "remove"));
+    assert.doesNotMatch(removedButton.after, /Keep event/);
     const ul = r.elements.find((e) => e.tag === "ul")!;
     await assert.rejects(
       createPatch(f.root, req(ul, "insert", "wrong", "div")),
@@ -402,6 +397,21 @@ test("static reorder, insertion, removal, text escaping and nesting constraints"
       createPatch(f.root, req(main, "insert", "bad", "script")),
       /registered/,
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("removing a static button with an event retains the handler and other controls", async () => {
+  const source = 'export default function App(){const handle=()=>{};return <main>{condition && <p>Keep dynamic</p>}<button onClick={handle}>Existing</button><button onClick={handle}>New button</button></main>}';
+  const f = await fixture(source);
+  try {
+    const report = await analyzeProject(f.root);
+    const button = report.elements.find((element) => element.tag === "button" && element.text === "New button")!;
+    const patch = await createPatch(f.root, req(button, "remove"));
+    assert.equal(patch.after, source.replace('<button onClick={handle}>New button</button>', ''));
+    const checkpoint = await applyPatch(f.root, patch, true);
+    await undoPatch(f.root, checkpoint);
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), source);
   } finally {
     await f.cleanup();
   }

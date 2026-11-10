@@ -37,6 +37,32 @@ test("PDF warns when rich formatting cannot be rendered", () => {
   assert.ok(result.warnings.some((warning) => /underline.*rotation/.test(warning)));
 });
 
+test("PDF embeds an imported transparent PNG with fit, border and background", () => {
+  const document = buildTemplate("invoice");
+  const image = document.bands.flatMap((band) => band.elements).find((element) => element.type === "image")!;
+  image.props.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  image.props.fit = "cover";
+  image.props.background = "#112233";
+  image.props.borderColor = "#445566";
+  image.props.borderWidth = 1;
+  const result = exportReport(document, "pdf");
+  const pdf = Buffer.from(result.bytes).toString("latin1");
+  assert.match(pdf, /\/Subtype \/Image/);
+  assert.match(pdf, /\/SMask \d+ 0 R/);
+  assert.match(pdf, /\/Im1 Do/);
+  assert.match(pdf, /re W n/);
+  assert.match(pdf, /0\.067 0\.133 0\.200 rg/);
+  assert.ok(!result.warnings.some((warning) => /image\(s\) could not/.test(warning)));
+});
+
+test("PDF reports unsupported images rather than silently dropping them", () => {
+  const document = buildTemplate("invoice");
+  const image = document.bands.flatMap((band) => band.elements).find((element) => element.type === "image")!;
+  image.props.src = "data:image/webp;base64,QUJDRA==";
+  const result = exportReport(document, "pdf");
+  assert.ok(result.warnings.some((warning) => /image\(s\) could not be rendered/.test(warning)));
+});
+
 test("CSV export writes table headers and rows with injection protection", () => {
   const csv = exportCsv(buildTemplate("invoice"), data);
   assert.match(csv, /Deskripsi,Qty,Harga,Jumlah/);

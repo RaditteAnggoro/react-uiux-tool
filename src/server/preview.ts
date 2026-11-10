@@ -100,7 +100,8 @@ export function bridgeSource(parentOrigin: string): string {
       if(!elementId)return {elementId:null,instanceIndex:-1};
       const matches=Array.from(document.querySelectorAll('[data-uiux-id]')).filter(candidate=>candidate.getAttribute('data-uiux-id')===elementId);
       const rect=el.getBoundingClientRect();
-      return {elementId,instanceIndex:matches.indexOf(el),rect:{left:rect.left,top:rect.top,width:rect.width,height:rect.height}};
+      const identity={}; for(const name of ['id','name','aria-label']){const value=el.getAttribute(name);if(value!==null)identity[name]=value.slice(0,500);}
+      return {elementId,instanceIndex:matches.indexOf(el),renderedText:(el.textContent||'').trim().slice(0,500),identity,rect:{left:rect.left,top:rect.top,width:rect.width,height:rect.height}};
     };
     const findPosition = value => {
       const matches=Array.from(document.querySelectorAll('[data-uiux-id]')).filter(el=>el.getAttribute('data-uiux-id')===value?.elementId);

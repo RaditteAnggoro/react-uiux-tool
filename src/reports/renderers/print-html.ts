@@ -284,7 +284,7 @@ function renderElement(
       const alt = escapeHtml(props.alt ?? "");
       const fit = props.fit === "cover" ? "cover" : "contain";
       if (src && SAFE_IMAGE.test(src)) {
-        return `<div class="el el-image" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)}"><img alt="${alt}" src="${src}" style="width:100%;height:100%;object-fit:${fit}" /></div>`;
+        return `<div class="el el-image" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><img alt="${alt}" src="${src}" style="width:100%;height:100%;object-fit:${fit}" /></div>`;
       }
       return `<div class="el el-image el-image-empty" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)}" role="img" aria-label="${alt}"></div>`;
     }

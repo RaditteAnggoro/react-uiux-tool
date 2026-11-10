@@ -92,7 +92,13 @@ function scanJson(
   if (value === null) return;
   const kind = typeof value;
   if (kind === "string") {
-    if ((value as string).length > limits.maxStringLength) {
+    const text = value as string;
+    const imagePayload = text.slice(text.indexOf(",") + 1);
+    const padding = imagePayload.endsWith("==") ? 2 : imagePayload.endsWith("=") ? 1 : 0;
+    const embeddedImage = /^\$\.bands\[\d+\]\.elements\[\d+\]\.props\.src$/.test(path) &&
+      /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(text) &&
+      imagePayload.length % 4 === 0 && imagePayload.length / 4 * 3 - padding <= 2 * 1024 * 1024;
+    if (text.length > limits.maxStringLength && !embeddedImage) {
       collector.error(
         "STRING_LIMIT",
         path,
