@@ -682,3 +682,6 @@ In YRF Design, select a band and choose **Image**; select the image and use **Im
 ### Native table columns and rows
 
 Select a native table to edit its columns in Properties: set field key, heading, relative width, alignment and numeric format. Add or remove static rows when the binding path is empty, or enter a dataset path to use sample data. Change header and border colors, border width and row height. Save, reopen and check Preview and PDF warnings for clipped values. Percent values are entered in percentage points (13.5 displays as 13.50%).
+
+
+To create a total, select a native Field and enter a dataset and field such as `lines.amount` in **Create a total**. Choose **Use total formula**, then Preview with sample data. For a group footer, `group.amount` uses the current group. Verify the output and rounding against independently calculated values.

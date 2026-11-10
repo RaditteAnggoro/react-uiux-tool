@@ -856,6 +856,23 @@ test("table column configuration and dataset binding survive save and reopen", a
   } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
+test("total builder creates a validated formula and previews the calculated total", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-total-builder-"));
+  try {
+    await createInvoice(page, folder);
+    await page.locator(".rs-data").fill('{"lines":[{"amount":"10.10"},{"amount":"2.20"}]}');
+    await page.getByRole("button", { name: "Field", exact: true }).click();
+    const input = page.getByLabel("Dataset and field for total");
+    await input.fill("lines.amount + 1");
+    await expect(page.getByRole("button", { name: "Use total formula" })).toBeDisabled();
+    await input.fill("lines.amount");
+    await page.getByRole("button", { name: "Use total formula" }).click();
+    await expect(page.getByLabel("Expression")).toHaveValue("FORMAT_NUMBER(SUM(lines.amount), 2)");
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.frameLocator("iframe").locator("body")).toContainText("12.30");
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("narrow viewport can reopen the reports and properties panels", async ({ page }) => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-narrow-"));
   try {

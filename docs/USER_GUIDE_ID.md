@@ -689,3 +689,6 @@ Di Design YRF, pilih band lalu **Gambar**; pilih objek gambar dan gunakan **Impo
 ### Native table columns and rows
 
 Pilih tabel native untuk mengatur kolom pada Properties: field data, judul, lebar relatif, perataan dan format angka. Tambah atau hapus baris statis saat path binding kosong, atau isi path dataset untuk menggunakan sample data. Atur warna header dan garis, tebal garis, dan tinggi baris. Simpan, buka kembali, lalu periksa Preview dan warning PDF untuk nilai terpotong. Nilai persen memakai angka persen (13,5 ditulis 13.5 dan tampil 13,50%).
+
+
+Untuk membuat total, pilih Field native dan isi dataset serta field seperti `lines.amount` pada **Buat total**. Pilih **Gunakan rumus total**, lalu Preview dengan sample data. Untuk group footer, `group.amount` memakai grup saat ini. Periksa hasil dan pembulatan dengan perhitungan independen.

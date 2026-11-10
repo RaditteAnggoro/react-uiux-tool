@@ -138,6 +138,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ run: () => void } | null>(null);
   const [sampleJson, setSampleJson] = useState("");
+  const [totalPath, setTotalPath] = useState("");
   const [sampleError, setSampleError] = useState("");
   const [mode, setMode] = useState<"native" | "yrf">("native");
   const [yrfInitialPath, setYrfInitialPath] = useState<string>("");
@@ -1893,6 +1894,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   />
                 </label>
               )}
+              {selected.type === "field" && <section className="rs-total-builder"><h3>{tr("totalBuilder")}</h3><p className="rs-hint">{tr("totalHint")}</p><label className="rs-field"><span>{tr("totalPath")}</span><input value={totalPath} onChange={(event) => setTotalPath(event.target.value)} placeholder="lines.amount" /></label><button className="rs-ghost" type="button" disabled={!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(totalPath)} onClick={() => patchElementProps({ expression: `FORMAT_NUMBER(SUM(${totalPath}), 2)` })}>{tr("totalApply")}</button>{totalPath && !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(totalPath) && <p className="rs-hint rs-error">{tr("totalInvalid")}</p>}</section>}
               <div className="rs-grid2">
                 <label className="rs-field">
                   <span>{tr("x")}</span>
