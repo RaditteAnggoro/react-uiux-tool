@@ -19,6 +19,13 @@ async function setReportFolder(page: import("@playwright/test").Page, folder: st
   }
 }
 
+async function selectYrfTreeObject(page: import("@playwright/test").Page, text: string, additive = false) {
+  const object = page.locator(".yrf-tree button").filter({ hasText: text });
+  const band = page.locator(".yrf-band-tree").filter({ has: page.locator("button").filter({ hasText: text }) });
+  if (!(await band.evaluate((element) => (element as HTMLDetailsElement).open))) await band.locator("summary").click();
+  await object.click(additive ? { modifiers: ["Shift"] } : {});
+}
+
 test("Report Studio creates, edits, saves and previews a native report", async ({
   page,
 }) => {
@@ -56,6 +63,54 @@ test("Report Studio creates, edits, saves and previews a native report", async (
     await expect(frame.locator("page")).toContainText("INVOICE");
   } finally {
     await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("report guide and structure groups work in native and YRF workspaces", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-report-help-"));
+  const file = path.join(folder, "sample.yrf");
+  await copyFile(path.resolve("fixtures/reports/synthetic/yrf/minimal.yrf"), file);
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: "Report guide" }).click();
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toContainText("Sample data");
+    await expect(page.getByRole("dialog", { name: "Report guide" }).locator('a[href$=".md"]')).toHaveCount(0);
+    await page.getByRole("navigation", { name: "Guide topics" }).getByRole("button", { name: /Images and styling/ }).click();
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toContainText("choose an image file");
+    await page.getByRole("dialog").getByRole("button", { name: "Next" }).click();
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toContainText("Import data");
+    await page.setViewportSize({ width: 390, height: 740 });
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toContainText("Import data");
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await setReportFolder(page, folder);
+    await page.getByRole("button", { name: "Create report" }).click();
+    const band = page.locator(".rs-tree > li > button").first();
+    await expect(band).toBeVisible();
+    const wasOpen = (await band.getAttribute("aria-expanded")) === "true";
+    await band.click();
+    await expect(band).toHaveAttribute("aria-expanded", String(!wasOpen));
+    await band.click();
+    await expect(band).toHaveAttribute("aria-expanded", String(wasOpen));
+    await page.getByRole("button", { name: "YRF (.yrf)" }).click();
+    await page.getByLabel("YRF file path").fill(file);
+    await page.getByRole("button", { name: "Open .yrf" }).click();
+    await expect(page.locator(".yrf-band-tree").first()).toBeVisible();
+    await expect.poll(() => page.locator(".yrf-band-tree[open]").count()).toBe(1);
+    const index = await page.locator(".yrf-band-tree[open]").first().evaluate((element) => [...element.parentElement!.parentElement!.children].indexOf(element.parentElement!));
+    const first = page.locator(".yrf-band-tree").nth(index);
+    await first.locator("summary").click();
+    await expect(first).not.toHaveAttribute("open", "");
+    await first.locator("summary").click();
+    await expect(first).toHaveAttribute("open", "");
+    await page.getByRole("button", { name: "Report guide" }).click();
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toContainText("Save copy");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Report guide" })).toHaveCount(0);
+  } finally {
+    await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
@@ -213,7 +268,7 @@ test("report list opens native and yrf files without typing a path", async ({ pa
 });
 
 
-test("the open project opens the same studio and returns to the project", async ({ page }) => {
+test("project sidebar keeps report and history actions on the home screen", async ({ page }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-project-report-"));
   await cp(path.resolve("fixtures/demo"), root, { recursive: true });
   try {
@@ -231,13 +286,8 @@ test("the open project opens the same studio and returns to the project", async 
     await expect(page.locator(".icon-rail")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".rail-exit")).toHaveCount(1);
 
-    await page.getByRole("button", { name: "Report Studio" }).click();
-    const back = page.getByRole("button", { name: "Back to project" });
-    await expect(back).toBeVisible();
-    await expect(page.getByText(/Not selected — choose a report folder/)).toBeVisible();
-
-    await back.click();
-    await expect(page.locator(".icon-rail")).toBeVisible();
+    await expect(page.locator(".icon-rail").getByRole("button", { name: "Report Studio" })).toHaveCount(0);
+    await expect(page.locator(".icon-rail").getByRole("button", { name: "Change history" })).toHaveCount(0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -774,6 +824,38 @@ test("palette adds field, table and form and the result persists after reopen", 
   }
 });
 
+test("table column configuration and dataset binding survive save and reopen", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-table-columns-"));
+  try {
+    await createInvoice(page, folder);
+    await page.getByRole("button", { name: "Table", exact: true }).click();
+    const panel = page.locator(".rs-table-columns");
+    await panel.getByLabel("Data field 1").fill("description");
+    await panel.getByLabel("Column heading 1").fill("Description");
+    await panel.getByLabel("Column width 1").fill("80");
+    await panel.getByLabel("Number format 2").selectOption("currency");
+    await panel.getByRole("button", { name: "Add column" }).click();
+    await panel.getByLabel("Column heading 3").fill("Total");
+    await panel.getByRole("button", { name: "Remove column 3" }).click();
+    await panel.getByRole("button", { name: "Add row", exact: true }).click();
+    await panel.getByLabel("Static rows (when no binding path) 1 description").fill("Synthetic item");
+    await panel.getByLabel("Binding path", { exact: true }).fill("lines");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
+    const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
+    const table = saved.bands.flatMap((band: any) => band.elements).find((element: any) => element.type === "table" && element.props.columns?.[0]?.label === "Description");
+    expect(table.bindings.path).toBe("lines");
+    expect(table.props.columns).toHaveLength(2);
+    expect(table.props.columns[0]).toMatchObject({ key: "description", label: "Description", width: 80 });
+    expect(table.props.columns[1].format).toBe("currency");
+    expect(table.props.staticRows[0].description).toBe("Synthetic item");
+    await page.reload();
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: /NATIVE.*invoice\.report\.json/ }).click();
+    await expect(page.locator(".rs-table-row.header", { hasText: "Description" })).toBeVisible();
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("narrow viewport can reopen the reports and properties panels", async ({ page }) => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-narrow-"));
   try {
@@ -888,11 +970,9 @@ test("parameters and band repeat persist after save", async ({ page }) => {
     await createInvoice(page, folder);
     await page.getByRole("button", { name: "Add parameter" }).click();
     await expect(page.getByText(/parameter-1 · string/)).toBeVisible();
-    await page
-      .locator(".rs-tree > li")
-      .filter({ hasText: "pageHeader" })
-      .locator("input[type=checkbox]")
-      .uncheck();
+    const header = page.locator(".rs-tree > li").filter({ hasText: "pageHeader" });
+    if (await header.locator("button").first().getAttribute("aria-expanded") !== "true") await header.locator("button").first().click();
+    await header.locator("input[type=checkbox]").uncheck();
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
     const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
@@ -1184,7 +1264,7 @@ test("YRF textbox using text and dataField is editable and saves a copy", async 
     await page.getByLabel("YRF file path").fill(file);
     await page.getByRole("button", { name: "Open .yrf" }).click();
     await expect(page.locator(".yrf-object.on")).toHaveCount(1);
-    await page.locator(".yrf-tree button").filter({ hasText: "textbox · tb" }).click();
+    await selectYrfTreeObject(page, "textbox · tb");
     await expect(page.getByLabel("Caption")).toBeEnabled();
     await page.getByLabel("Caption").fill("Customer");
     await page.getByLabel("Data field").fill("invoice.customer");
@@ -1217,11 +1297,39 @@ test("YRF palette adds and drags objects into a report and saves a copy", async 
     await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
     const saved = await page.getByText(/Copy saved/).textContent();
     const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
-    const objects = copy.layout.pages.flatMap((entry: any) => entry.bands.flatMap((item: any) => item.objects));
+    const objects = [...copy.layout.pages.flatMap((entry: any) => entry.bands.flatMap((item: any) => item.objects)), ...(copy.layout.reportHeader?.objects ?? []), ...(copy.layout.reportFooter?.objects ?? [])];
     expect(objects.some((object: any) => object.caption === "New report text")).toBe(true);
     expect(objects.some((object: any) => object.dataField === "invoice.customer")).toBe(true);
     expect(await readFile(file, "utf8")).toBe(original);
   } finally { await rm(folder, { recursive: true, force: true }); }
+});
+
+test("YRF image and static table and form layouts save to a copy", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-yrf-image-"));
+  const file = path.join(folder, "sample.yrf");
+  await copyFile(path.resolve("fixtures/reports/synthetic/yrf/minimal.yrf"), file);
+  const original = await readFile(file, "utf8");
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: "YRF (.yrf)" }).click();
+    await page.getByLabel("YRF file path").fill(file);
+    await page.getByRole("button", { name: "Open .yrf" }).click();
+    await page.locator(".yrf-palette").getByRole("button", { name: "Image" }).click();
+    await page.getByLabel("Import image").setInputFiles({ name: "pixel.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aWQAAAAASUVORK5CYII=", "base64") });
+    await expect(page.locator(".yrf-object.kind-image img")).toBeVisible();
+    await page.locator(".yrf-right").getByLabel("width", { exact: true }).fill("650");
+    await page.locator(".yrf-palette").getByRole("button", { name: "Table layout" }).click();
+    await page.locator(".yrf-palette").getByRole("button", { name: "Form layout" }).dragTo(page.locator(".yrf-band").first());
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
+    const saved = await page.getByText(/Copy saved/).textContent();
+    const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
+    const objects = [...copy.layout.pages.flatMap((entry: any) => entry.bands.flatMap((item: any) => item.objects)), ...(copy.layout.reportHeader?.objects ?? []), ...(copy.layout.reportFooter?.objects ?? [])];
+    expect(objects.some((object: any) => object.type === "image" && object.width === 650 && object.data.startsWith("data:image/png;base64,"))).toBe(true);
+    expect(objects.some((object: any) => object.caption === "Column 1")).toBe(true);
+    expect(objects.some((object: any) => object.caption === "Field")).toBe(true);
+    expect(await readFile(file, "utf8")).toBe(original);
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
 test("YRF endpoint lines move and existing scalar values can be edited", async ({ page }) => {
@@ -1238,7 +1346,7 @@ test("YRF endpoint lines move and existing scalar values can be edited", async (
     await page.getByRole("button", { name: "YRF (.yrf)" }).click();
     await page.getByLabel("YRF file path").fill(file);
     await page.getByRole("button", { name: "Open .yrf" }).click();
-    await page.locator(".yrf-tree button").filter({ hasText: "line · ln" }).click();
+    await selectYrfTreeObject(page, "line · ln");
     await expect(page.getByLabel("left", { exact: true })).toBeEnabled();
     await page.getByLabel("left", { exact: true }).fill("100");
     await page.getByLabel("style", { exact: true }).fill("color:red");
@@ -1265,7 +1373,7 @@ test("YRF can remove an existing object and save a copy", async ({ page }) => {
     await page.getByRole("button", { name: "YRF (.yrf)" }).click();
     await page.getByLabel("YRF file path").fill(file);
     await page.getByRole("button", { name: "Open .yrf" }).click();
-    await page.locator(".yrf-tree button").filter({ hasText: "textbox · tb" }).click();
+    await selectYrfTreeObject(page, "textbox · tb");
     await page.getByRole("button", { name: "Remove object" }).click();
     await expect(page.locator(".yrf-tree button").filter({ hasText: "textbox · tb" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save copy", exact: true }).first().click();
@@ -1379,8 +1487,8 @@ test("YRF multi-select alignment is written to the saved copy", async ({ page })
     await page.getByLabel("YRF file path").fill(file);
     await page.getByRole("button", { name: "Open .yrf" }).click();
 
-    await page.getByRole("button", { name: /^label · hd$/ }).click();
-    await page.getByRole("button", { name: /^label · ph$/ }).click({ modifiers: ["Shift"] });
+    await selectYrfTreeObject(page, "label · hd");
+    await selectYrfTreeObject(page, "label · ph", true);
     await expect(page.getByText("2 objects selected")).toBeVisible();
     await page.getByRole("button", { name: "Align left" }).click();
 

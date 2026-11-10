@@ -47,11 +47,11 @@ test("palette warns without a selected container and copies a button without an 
   const root = await openFixtureProject(page);
   await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
   await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).click();
-  await expect(page.getByRole("alert")).toContainText("Select the form or section");
-  await page.getByRole("alert").getByRole("button").last().click();
+  await expect(page.locator(".selection-warning")).toContainText("Select the form or section");
+  await page.locator(".selection-warning").getByRole("button").click();
   await page.locator(".primitive-grid").getByRole("button", { name: "Button" }).dragTo(page.locator(".component-drop-target"));
-  await expect(page.getByRole("alert")).toContainText("Select the form or section");
-  await page.getByRole("alert").getByRole("button").last().click();
+  await expect(page.locator(".selection-warning")).toContainText("Select the form or section");
+  await page.locator(".selection-warning").getByRole("button").click();
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).click();
   await page.getByRole("tab", { name: "Layout" }).click();
@@ -150,8 +150,12 @@ test("ambiguous repeated component labels do not delete a guessed instance", asy
   await explorer.locator(".component-row", { hasText: "App" }).click();
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Same" }).first().click();
-  await expect(page.getByRole("alert")).toContainText("could not be determined");
+  await expect(page.getByRole("status").filter({ hasText: "could not be determined" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
   expect(await readFile(sourcePath, "utf8")).toBe(original);
+  await explorer.locator(".explorer-name", { hasText: /^main$/ }).first().locator("..").click();
+  await explorer.locator(".explorer-name", { hasText: /^SharedButton$/ }).first().locator("..").click();
+  await expect(page.getByRole("status").filter({ hasText: "could not be determined" })).toHaveCount(0);
   await stopPreview(page);
 });
 

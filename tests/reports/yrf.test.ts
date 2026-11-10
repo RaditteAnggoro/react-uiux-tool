@@ -254,6 +254,17 @@ test("adding an object preserves existing bytes and rejects ambiguous band paths
   assert.throws(() => appendYrfObject(original, "pageSetting", {}));
 });
 
+test("YRF image data can be added or replaced without changing other objects", async () => {
+  const { appendYrfObject, setYrfObjectScalar } = await import("../../src/reports/formats/yrf/patch.js");
+  const original = await fixture();
+  const inserted = appendYrfObject(original, "layout.pages[0].bands[0]", { type: "image", name: "img", left: 0, top: 0, width: 100, height: 100 });
+  const data = `data:image/png;base64,${"A".repeat(6000)}`;
+  const updated = setYrfObjectScalar(inserted.text, inserted.objectPath, "data", data);
+  assert.equal(inspectYrf(updated).inspection?.pages[0]?.bands[0]?.objects[1]?.imageData, data);
+  assert.equal(updated.replace(`,\"data\":${JSON.stringify(data)}`, ""), inserted.text);
+  assert.throws(() => setYrfObjectScalar(updated, inserted.objectPath, "data", "x".repeat(5000)));
+});
+
 test("YRF endpoint line geometry and other object scalars preserve unrelated source", async () => {
   const { applyYrfChanges, setYrfObjectScalar } = await import("../../src/reports/formats/yrf/patch.js");
   const document = JSON.parse(await fixture());

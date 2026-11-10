@@ -9,6 +9,8 @@ import type {
 import { reportEn, reportId, type ReportKey } from "./i18n";
 import "./report-studio.css";
 import YrfInspector from "./YrfInspector";
+import ReportHelp from "./ReportHelp";
+import { tableHeaderTextColor } from "../../../../src/reports/core/table";
 import { csvToRecords } from "../../../../src/reports/core/data";
 
 const MM_TO_PX = 96 / 25.4;
@@ -154,6 +156,11 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [sampleSchema, setSampleSchema] = useState<string>("");
   const [showFormats, setShowFormats] = useState(false);
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedId || !document) return;
+    const band = document.bands.find((item) => item.elements.some((element) => element.id === selectedId));
+    if (band) setExpandedBands(new Set([band.id]));
+  }, [selectedId]);
   const [flow, setFlow] = useState<"landing" | "open" | "create">("landing");
   const [reportSearch, setReportSearch] = useState("");
   const [showLeft, setShowLeft] = useState(
@@ -256,6 +263,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     setWarnings(issues(result.warnings));
     selectIds([]);
     setSelectedBand(result.document.bands[0]?.id ?? null);
+    setExpandedBands(result.document.bands[0] ? new Set([result.document.bands[0].id]) : new Set());
     setTab("design");
   };
 
@@ -1149,6 +1157,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           <strong>{tr("workspace")}</strong>
           <span>{tr("tagline")}</span>
         </div>
+        <ReportHelp language={language} />
         {document && (
           <input
             className="rs-title-input"
@@ -1507,9 +1516,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   <li key={band.id}>
                     <button
                       className={selectedBand === band.id ? "on" : ""}
-                      aria-expanded={
-                        expandedBands.has(band.id) || selectedBand === band.id
-                      }
+                      aria-expanded={expandedBands.has(band.id)}
                       onClick={() => {
                         setSelectedBand(band.id);
                         setExpandedBands((current) => {
@@ -1521,25 +1528,21 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       }}
                     >
                       <span aria-hidden="true">
-                        {expandedBands.has(band.id) || selectedBand === band.id ? "▾" : "▸"}
+                        {expandedBands.has(band.id) ? "▾" : "▸"}
                       </span>{" "}
                       {band.kind} · {band.height}mm
                     </button>
-                    {(band.kind === "pageHeader" || band.kind === "pageFooter") && (
-                      <label className="rs-check">
-                        <input
-                          type="checkbox"
-                          checked={band.repeat !== false}
-                          onChange={(event) => patchBand(band.id, { repeat: event.target.checked })}
-                        />
-                        <span>{tr("repeat")}</span>
-                      </label>
-                    )}
                     <ul
                       hidden={
-                        !expandedBands.has(band.id) && selectedBand !== band.id
+                        !expandedBands.has(band.id)
                       }
                     >
+                      {(band.kind === "pageHeader" || band.kind === "pageFooter") && <li>
+                        <label className="rs-check">
+                          <input type="checkbox" checked={band.repeat !== false} onChange={(event) => patchBand(band.id, { repeat: event.target.checked })} />
+                          <span>{tr("repeat")}</span>
+                        </label>
+                      </li>}
                       {band.elements.map((element) => (
                         <li key={element.id}>
                           <button
@@ -2088,6 +2091,34 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   </select>
                 </label>
               )}
+              {selected.type === "table" && (() => {
+                const columns = Array.isArray(selected.props.columns) ? selected.props.columns as Array<Record<string, unknown>> : [];
+                const setColumn = (index: number, patch: Record<string, unknown>) => patchElementProps({ columns: columns.map((column, i) => i === index ? { ...column, ...patch } : column) });
+                return <section className="rs-table-columns"><h3>{tr("tableColumns")}</h3>
+                  <label className="rs-field"><span>{tr("bindingPath")}</span><input value={String(selected.bindings?.path ?? "")} onChange={(event) => patchElement({ bindings: { ...selected.bindings, path: event.target.value } })} /></label>
+                  <label className="rs-field"><span>{tr("rowHeight")}</span><input type="number" min="2" value={Number(selected.props.rowHeight ?? 7)} onChange={(event) => patchElementProps({ rowHeight: Math.max(2, Number(event.target.value) || 2) })} /></label>
+                  <label className="rs-field"><span>{tr("tableHeaderColor")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(selected.props.tableHeaderColor ?? "")) ? String(selected.props.tableHeaderColor) : "#f1f4f8"} onChange={(event) => patchElementProps({ tableHeaderColor: event.target.value })} /></label>
+                  <label className="rs-field"><span>{tr("tableBorderColor")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(selected.props.tableBorderColor ?? "")) ? String(selected.props.tableBorderColor) : "#bfc9d6"} onChange={(event) => patchElementProps({ tableBorderColor: event.target.value })} /></label>
+                  <label className="rs-field"><span>{tr("tableBorderWidth")}</span><input type="number" min="0" max="3" step="0.1" value={Number(selected.props.tableBorderWidth ?? 0.2)} onChange={(event) => patchElementProps({ tableBorderWidth: Math.max(0, Math.min(3, Number(event.target.value) || 0)) })} /></label>
+                  {columns.map((column, index) => <fieldset key={index} className="rs-column-settings"><legend>{tr("tableColumns")} {index + 1}</legend>
+                    <label className="rs-field"><span>{tr("columnKey")}</span><input aria-label={`${tr("columnKey")} ${index + 1}`} value={String(column.key ?? "")} onChange={(event) => setColumn(index, { key: event.target.value })} /></label>
+                    <label className="rs-field"><span>{tr("columnLabel")}</span><input aria-label={`${tr("columnLabel")} ${index + 1}`} value={String(column.label ?? "")} onChange={(event) => setColumn(index, { label: event.target.value })} /></label>
+                    <label className="rs-field"><span>{tr("columnWidth")}</span><input aria-label={`${tr("columnWidth")} ${index + 1}`} type="number" min="1" value={Number(column.width ?? 1)} onChange={(event) => setColumn(index, { width: Math.max(1, Number(event.target.value) || 1) })} /></label>
+                    <label className="rs-field"><span>{tr("columnAlign")}</span><select aria-label={`${tr("columnAlign")} ${index + 1}`} value={String(column.align ?? "left")} onChange={(event) => setColumn(index, { align: event.target.value })}><option value="left">{tr("left")}</option><option value="center">{tr("center")}</option><option value="right">{tr("right")}</option></select></label>
+                    <label className="rs-field"><span>{tr("columnFormat")}</span><select aria-label={`${tr("columnFormat")} ${index + 1}`} value={String(column.format ?? (column.currency === true ? "currency" : "text"))} onChange={(event) => setColumn(index, { format: event.target.value, currency: false })}><option value="text">{tr("textFormat")}</option><option value="decimal">{tr("decimalFormat")}</option><option value="currency">{tr("currencyFormat")}</option><option value="percent">{tr("percentFormat")}</option></select></label>
+                    <label className="rs-field"><span>{tr("columnDecimals")}</span><input aria-label={`${tr("columnDecimals")} ${index + 1}`} type="number" min="0" max="6" value={Number(column.decimals ?? 2)} onChange={(event) => setColumn(index, { decimals: Math.max(0, Math.min(6, Number(event.target.value) || 0)) })} /></label>
+                    <button type="button" className="rs-danger" onClick={() => patchElementProps({ columns: columns.filter((_, i) => i !== index) })}>{tr("removeColumn")} {index + 1}</button>
+                  </fieldset>)}
+                  <button type="button" className="rs-ghost" onClick={() => { const used = new Set(columns.map((column) => String(column.key ?? ""))); let next = 1; while (used.has(`column${next}`)) next++; patchElementProps({ columns: [...columns, { key: `column${next}`, label: `Column ${next}`, width: 40, align: "left" }] }); }}>{tr("addColumn")}</button>
+                  <h3>{tr("staticRows")}</h3>
+                  {(Array.isArray(selected.props.staticRows) ? selected.props.staticRows as Array<Record<string, unknown>> : []).map((row, rowIndex, rows) => <fieldset className="rs-column-settings" key={rowIndex}><legend>{tr("addRow")} {rowIndex + 1}</legend>
+                    {columns.map((column, columnIndex) => <label className="rs-field" key={columnIndex}><span>{String(column.label || column.key || columnIndex + 1)}</span><input aria-label={`${tr("staticRows")} ${rowIndex + 1} ${String(column.key ?? columnIndex)}`} value={String(row[String(column.key ?? "")] ?? "")} onChange={(event) => patchElementProps({ staticRows: rows.map((item, i) => i === rowIndex ? { ...item, [String(column.key ?? "")]: event.target.value } : item) })} /></label>)}
+                    <button type="button" className="rs-danger" onClick={() => patchElementProps({ staticRows: rows.filter((_, i) => i !== rowIndex) })}>{tr("removeRow")} {rowIndex + 1}</button>
+                  </fieldset>)}
+                  <button type="button" className="rs-ghost" onClick={() => patchElementProps({ staticRows: [...(Array.isArray(selected.props.staticRows) ? selected.props.staticRows : []), {}] })}>{tr("addRow")}</button>
+
+                </section>;
+              })()}
               {selected.type === "image" && (
                 <>
                   <label className="rs-field">
@@ -2551,18 +2582,18 @@ function BandView({
             const dataset = path.split(".")[0] ?? "";
             const rows = Array.isArray((data ?? {})[dataset])
               ? ((data ?? {})[dataset] as Array<Record<string, unknown>>)
-              : [];
+              : !path && Array.isArray(element.props.staticRows) ? element.props.staticRows as Array<Record<string, unknown>> : [];
             return (
               <div className="rs-table-stub">
-                <div className="rs-table-row header">
-                  {columns.map((column) => (
-                    <span key={String(column.key)}>{String(column.label ?? "")}</span>
+                <div className="rs-table-row header" style={{ color: tableHeaderTextColor(element.props.tableHeaderColor), background: String(element.props.tableHeaderColor ?? "#f1f5f9"), borderColor: String(element.props.tableBorderColor ?? "#bfc9d6") }}>
+                  {columns.map((column, index) => (
+                    <span key={index} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left" }}>{String(column.label ?? "")}</span>
                   ))}
                 </div>
                 {rows.slice(0, 3).map((row, index) => (
                   <div className="rs-table-row" key={index}>
-                    {columns.map((column) => (
-                      <span key={String(column.key)}>
+                    {columns.map((column, columnIndex) => (
+                      <span key={columnIndex} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left" }}>
                         {String(row?.[String(column.key)] ?? "")}
                       </span>
                     ))}

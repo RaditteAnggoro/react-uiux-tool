@@ -113,10 +113,11 @@ export function exportReport(
     };
   }
   if (format === "pdf") {
-    const diagnostics = { unsupportedCharacters: 0, unsupportedImages: 0 };
+    const diagnostics = { unsupportedCharacters: 0, unsupportedImages: 0, clippedCells: 0 };
     const bytes = exportPdf(doc, data, diagnostics);
     if (diagnostics.unsupportedImages) warnings.push(`PDF: ${diagnostics.unsupportedImages} image(s) could not be rendered; use an 8-bit non-interlaced PNG or JPEG`);
     if (diagnostics.unsupportedCharacters) warnings.push(`PDF: ${diagnostics.unsupportedCharacters} unsupported character(s) are replaced with "?" (Latin-1 subset)`);
+    if (diagnostics.clippedCells) warnings.push(`PDF: ${diagnostics.clippedCells} table cell(s) may be clipped; widen the column or shorten the value`);
     return {
       filename: `${base}.pdf`,
       mime: "application/pdf",

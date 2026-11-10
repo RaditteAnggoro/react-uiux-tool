@@ -1,3 +1,4 @@
+import { tableCellText, tableHeaderTextColor } from "../core/table.js";
 import type { ReportBand, ReportDocumentV1, ReportElement } from "../core/types.js";
 import { evaluateExpression } from "../core/expressions.js";
 import { toDecimalString } from "../core/decimal.js";
@@ -22,18 +23,6 @@ export function escapeHtml(value: unknown): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function formatNumber(value: number, locale: string): string {
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "decimal",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return value.toFixed(2);
-  }
 }
 
 function formatDate(value: unknown, locale: string): string {
@@ -81,8 +70,7 @@ function fieldValue(
   if (raw === undefined || raw === null || raw === "") return escapeHtml(props.emptyText ?? "—");
   const format = String(props.format ?? "");
   if (format === "currency" || format === "decimal") {
-    const numeric = typeof raw === "number" ? raw : Number(raw);
-    if (Number.isFinite(numeric)) return escapeHtml(formatNumber(numeric, document.locale));
+    return escapeHtml(tableCellText(raw, { format, decimals: props.decimals }, document.locale));
   }
   if (format === "date") return escapeHtml(formatDate(raw, document.locale));
   return escapeHtml(raw);
@@ -356,10 +344,14 @@ function renderTable(
   _totalPages: number,
 ): string {
   const props = element.props;
+  const safeColor = (value: unknown, fallback: string) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const headerColor = safeColor(props.tableHeaderColor, "#f1f4f8");
+  const borderColor = safeColor(props.tableBorderColor, "#bfc9d6");
+  const borderWidth = Math.max(0, Math.min(3, Number.isFinite(Number(props.tableBorderWidth)) ? Number(props.tableBorderWidth) : 0.2));
   const header = columns
     .map((column) => {
       const align = column.align === "right" ? "right" : column.align === "center" ? "center" : "left";
-      return `<th style="width:${Number(column.width) || 0}mm;text-align:${align}">${escapeHtml(column.label ?? column.key ?? "")}</th>`;
+      return `<th style="width:${Number(column.width) || 0}mm;text-align:${align};background:${headerColor};color:${tableHeaderTextColor(headerColor)};border:${borderWidth}mm solid ${borderColor}">${escapeHtml(column.label ?? column.key ?? "")}</th>`;
     })
     .join("");
   const body = rows.length
@@ -370,18 +362,8 @@ function renderTable(
               const key = String(column.key ?? "");
               const align = column.align === "right" ? "right" : column.align === "center" ? "center" : "left";
               const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[key] : undefined;
-              let cell: string;
-              if (raw === undefined || raw === null || raw === "") {
-                cell = escapeHtml(props.emptyText ?? "—");
-              } else if (column.currency === true) {
-                const numeric = typeof raw === "number" ? raw : Number(raw);
-                cell = Number.isFinite(numeric)
-                  ? escapeHtml(formatNumber(numeric, document.locale))
-                  : escapeHtml(raw);
-              } else {
-                cell = escapeHtml(raw);
-              }
-              return `<td style="text-align:${align}">${cell}</td>`;
+              const cell = escapeHtml(raw === undefined || raw === null || raw === "" ? (props.emptyText ?? "—") : tableCellText(raw, column, document.locale));
+              return `<td style="text-align:${align};border:${borderWidth}mm solid ${borderColor}">${cell}</td>`;
             })
             .join("");
           return `<tr>${cells}</tr>`;

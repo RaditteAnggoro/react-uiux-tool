@@ -59,9 +59,10 @@ Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support clai
 | Print-oriented HTML rendering | Tested subset | Escapes text, blocks unsafe image URLs, deterministic output; HTML export is available |
 | PDF, HTML, CSV, XLSX, DOCX export | Tested subset | PDF follows paginated layout and supports JPEG and 8-bit non-interlaced PNG images with fit and transparency; unsupported images, charts and crosstabs produce warnings. XLSX/DOCX are OOXML zip containers and do not export images. |
 | PDF unsupported characters | Tested subset | Warnings count replacement characters in text actually rendered, including bound fields and table rows; PDF still uses limited fonts. |
-| Report browsing and project entry | Tested subset | Home and project rail open the same studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths skipped; Back returns to the project |
+| Report browsing and entry | Tested subset | Home opens Report Studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths are skipped. The project rail does not contain a report shortcut. |
+| Native table editing and PDF cells | Tested subset | Configure columns, static rows or dataset binding, numeric format, header and border; PDF draws individual cells and warns on estimated text clipping. Complex merged cells and vendor parity are not covered. |
 | Native Code tab | Tested subset | JSON draft is validated through `/api/reports/validate`; invalid text is rejected without touching the draft |
-| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry (including line endpoints) can be edited; palette adds text, field, box and line, and existing objects can be removed. Changes save to a copy with hash checks; creation and edits are **not vendor-validated** |
+| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry (including line endpoints) can be edited; palette adds text, field, box, line and embedded PNG/JPEG/WebP images; static table/form layouts add individual objects, not repeating tables; existing objects can be removed. Changes save to a copy with hash checks; creation and edits are **not vendor-validated** |
 
 React Style includes a basic formatting property selector for supported inline JSX
 styles; report presets and automatic list creation are not shared with React or `.yrf`.

@@ -55,6 +55,7 @@ function tableRows(
     typeof tableOf(band)?.bindings?.path === "string"
       ? (tableOf(band)!.bindings!.path as string)
       : "";
+  if (!path && Array.isArray(tableOf(band)?.props.staticRows)) return tableOf(band)!.props.staticRows as unknown[];
   return datasetRows(data, path);
 }
 

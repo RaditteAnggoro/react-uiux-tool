@@ -14,6 +14,7 @@ export interface YrfObjectRef {
   style: string | null;
   textField: "caption" | "text" | null;
   dataField: string | null;
+  imageData: string | null;
   editableCaption: boolean;
   editableGeometry: boolean;
   lineEndpoints: { x1: number; y1: number; x2: number; y2: number } | null;
@@ -108,6 +109,7 @@ function inspectObject(
     style: stringValue(object.style),
     textField,
     dataField: kind === "textbox" ? stringValue(object.dataField) : null,
+    imageData: kind === "image" && typeof object.data === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(object.data) ? object.data : null,
     editableCaption: textField !== null,
     editableGeometry: !!lineEndpoints || ["left", "top", "width", "height"].every((key) => typeof object[key] === "number" && Number.isFinite(object[key])),
     lineEndpoints,

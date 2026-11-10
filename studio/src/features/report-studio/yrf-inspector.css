@@ -466,11 +466,17 @@
 .yrf-band-tree > summary {
   cursor: pointer;
   list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
+.yrf-band-tree > summary::-webkit-details-marker { display: none; }
 .yrf-band-tree > summary::before {
   content: "▸";
   display: inline-block;
   margin-right: 4px;
+  color: var(--accent);
+  font-size: 15px;
 }
 .yrf-band-tree[open] > summary::before {
   content: "▾";
@@ -545,3 +551,4 @@
   background: var(--surface2);
   color: var(--text);
 }
+.yrf-object.kind-image img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }

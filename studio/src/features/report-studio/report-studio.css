@@ -20,6 +20,34 @@
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
+ .rs-help-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 7px 12px; font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.rs-help-button svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.rs-help-button:hover { border-color: var(--accent); color: var(--accent); }
+.rs-help-backdrop { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; background: #101828aa; padding: 16px; }
+.rs-help-dialog { width: min(820px, 100%); max-height: min(720px, 90vh); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 70px #0006; }
+.rs-help-header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 28px 20px; border-bottom: 1px solid var(--border); }
+.rs-help-header h2 { margin: 4px 0; font-size: 23px; line-height: 1.2; }
+.rs-help-header p, .rs-help-content > p { margin: 0; color: var(--muted); line-height: 1.5; }
+.rs-help-eyebrow, .rs-help-count { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.rs-help-close { flex: none; align-self: flex-start; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 23px; line-height: 1; cursor: pointer; }
+.rs-help-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1; min-height: 0; overflow: auto; }
+.rs-help-nav { display: flex; flex-direction: column; gap: 4px; padding: 20px 12px; border-right: 1px solid var(--border); }
+.rs-help-nav button { display: flex; align-items: center; gap: 10px; text-align: left; border: 0; border-radius: 8px; background: transparent; color: var(--text); padding: 10px; font: inherit; cursor: pointer; }
+.rs-help-nav button span { color: var(--muted); font-size: 11px; }
+.rs-help-nav button.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 700; }
+.rs-help-content { padding: 25px 28px; }
+.rs-help-content h3 { font-size: 20px; margin: 6px 0; }
+.rs-help-content ol { padding-left: 22px; margin: 22px 0 0; }
+.rs-help-content li { margin: 0 0 16px; padding-left: 4px; line-height: 1.55; }
+.rs-help-content li::marker { color: var(--accent); font-weight: 700; }
+.rs-help-note { padding: 12px 14px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); line-height: 1.5; }
+.rs-help-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 28px; border-top: 1px solid var(--border); color: var(--muted); }
+.rs-help-footer div { display: flex; gap: 8px; }
+.rs-help-footer button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.rs-help-footer button:disabled { opacity: .5; cursor: default; }
+.rs-help-footer .rs-help-next { background: var(--accent); border-color: var(--accent); color: white; }
+.rs-help-dialog button:focus-visible, .rs-help-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 600px) { .rs-help-layout { display: block; } .rs-help-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; } .rs-help-nav button { flex: none; } .rs-help-header, .rs-help-content { padding: 18px; } .rs-help-footer { padding: 12px 18px; } }
 .rs-brand {
   display: flex;
   flex-direction: column;
@@ -944,3 +972,6 @@
 .rs-tree button[aria-expanded="true"] {
   font-weight: 600;
 }
+.rs-column-settings { min-width: 0; margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.rs-column-settings legend { color: var(--muted); padding: 0 4px; }
+.rs-table-columns > button { margin-top: 8px; }

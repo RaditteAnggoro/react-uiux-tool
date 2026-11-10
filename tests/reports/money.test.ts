@@ -12,6 +12,7 @@ import {
   toDecimalString,
   toNumber,
 } from "../../src/reports/index.js";
+import { tableCellText } from "../../src/reports/core/table.js";
 
 test("decimal money arithmetic is exact", () => {
   const sum = add(parseDecimal("0.1", 2), parseDecimal("0.2", 2));
@@ -20,6 +21,22 @@ test("decimal money arithmetic is exact", () => {
   assert.equal(toDecimalString(divide(parseDecimal("10"), parseDecimal("3"), 4)), "3.3333");
   assert.equal(toDecimalString(roundDecimal(parseDecimal("1.005", 4), 2)), "1.01");
   assert.equal(compare(parseDecimal("2.50"), parseDecimal("2.5")), 0);
+});
+
+test("formatted group totals preserve large decimal amounts and rounding", () => {
+  const result = evaluateExpression("FORMAT_NUMBER(SUM(lines.amount), 2)", {
+    datasets: { lines: [{ amount: "9007199254740993.50" }, { amount: "0.56" }] },
+    locale: "id-ID",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value, "9.007.199.254.740.994,06");
+});
+
+test("financial table formatting handles zero, negatives, rounding and percentage points", () => {
+  assert.equal(tableCellText("0", { format: "currency", decimals: 2 }, "id-ID"), "0,00");
+  assert.equal(tableCellText("-1.255", { format: "decimal", decimals: 2 }, "id-ID"), "-1,26");
+  assert.equal(tableCellText("13.5", { format: "percent", decimals: 2 }, "id-ID"), "13,50%");
+  assert.equal(tableCellText("001234", { format: "text" }, "id-ID"), "001234");
 });
 
 test("decimal formatting follows the requested locale", () => {

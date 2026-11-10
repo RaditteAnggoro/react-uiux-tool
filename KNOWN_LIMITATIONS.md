@@ -166,7 +166,7 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
 - Basic formatting palette supports style presets, bold/italic/underline/strike, lists,
   justify, line height, letter spacing, borders, wrap and rotation, plus multi-select,
   six alignment modes, group/ungroup and group move. PDF simplifies these rich styles and
-  emits a warning. Font effects, table column editor, real group resize and picture
+  emits a warning. Font effects, merged table cells, real group resize and picture
   effects are not implemented.
 - Canvas supports pointer move, eight resize handles, 1 mm snapping (toggle + Alt bypass),
   palette click and drag-to-band, Alt+Arrow keyboard resize, numeric X/Y/W/H and undo/redo.
@@ -191,3 +191,7 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
   known geometry remain without drag controls. Existing string, number, and boolean object properties are
   editable in Design, and structured values are editable through Code. Vendor rendering,
   data-binding semantics, newly added objects, and print results remain unverified.
+
+- YRF image import embeds PNG/JPEG/WebP data up to 2 MiB per image within the 5 MiB report limit. Vendor rendering and image size modes are not verified. Table and form palette layouts create independent static objects; they do not create repeatable tables, merged cells, calculations, or automatic multi-page layouts. The supplied multi-page financial report examples require additional work and have not been reproduced or validated.
+
+- Native table columns support editing keys, headings, proportional widths, alignment, numeric formats, and static rows or a dataset binding. PDF draws table cells with configurable header and border styling; long text is clipped with an estimated-width warning, not automatically wrapped. Complex cell styles, merged cells and YRF/vendor parity remain unverified.

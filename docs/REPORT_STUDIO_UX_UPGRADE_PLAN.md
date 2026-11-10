@@ -551,3 +551,23 @@ References are examples, not dependencies or compatibility guarantees. No vendor
   lists are not implemented for React, and `.yrf` still has no insertion palette.
 - Report Align and Group require the same band; a visible explanation replaces the
   previously incorrect cross-band alignment. Existing groups can still be ungrouped.
+
+## Reference financial reports: remaining work
+
+The supplied pre-analysis and approval memo PDFs contain multi-page A4 reports with repeated headers and footers, dense financial tables, multi-level column headings, highlighted totals, narrative sections, images/signatures and variable-length content. The files are reference material only; customer data must not be copied into templates or tests.
+
+- **Available starting point:** native reports have images, fields and tables; YRF has experimental image import and static table/form layouts made from individual objects. These are not an implementation of the reference reports.
+- **Next — table designer:** editable rows and columns, cell borders, fills, alignment, numeric formats, merged/multi-level headers, column sizing and overflow handling. Acceptance: build a synthetic credit summary without editing source, save and reopen with values and layout intact.
+- **Next — dynamic data:** configurable dataset bindings, repeating rows, grouping, subtotals and totals with explicit rounding and formatting. Acceptance: compare calculated amounts against independently checked synthetic fixtures, including empty and multi-page data.
+- **Next — pagination and output:** split long tables and narratives, repeat table/report headers and footers, keep totals together, and compare PDF/HTML output at page boundaries. Acceptance: synthetic multi-page reference layouts verified by rendered images and extracted values.
+- **YRF interoperability:** use actual vendor samples or documented field definitions and the licensed runtime to verify image rendering, data binding, pagination, and changes saved as copies. Local self-inspection does not prove WaiReport output. Do not claim the two formats have feature parity until exercised.
+- **Template and guide:** once these capabilities are working, offer anonymized pre-analysis and approval memo templates and document end-to-end creation, data mapping, preview, export and review. Never embed the supplied customer information.
+
+## P0 execution — 10 November 2026
+
+- **Contract and rendering:** define editable table column keys, labels, widths, alignment and financial formatting; render real cells in PDF and HTML, keeping existing report documents compatible. Verify with synthetic data and PDF/HTML assertions.
+- **Editor and bindings:** expose column controls and data paths in native Properties; preserve the YRF editor's existing copy-only write behaviour. Verify add/change/remove, save/reopen and source preservation through browser tests.
+- **Financial values:** use explicit decimal/rounding behaviour and independently calculated cases for values and group totals; do not claim equivalence with production financial calculations or vendor output without evidence.
+- **Final:** typecheck, unit tests, build, focused browser checks and documentation; report remaining YRF/vendor limitations before committing.
+
+**P0 progress, 10 November:** native column editing, static rows, dataset path, number formats and PDF cell drawing are implemented for the tested subset. P0 remains **partial**: table row/cell styling beyond header and border, a guided subtotal/total builder, vendor-native YRF table/data mapping, and validation in WaiReport are outstanding. Large values must be supplied as decimal strings for exact arithmetic; visually clipped PDF cell values generate an estimated-width warning. Neither the supplied financial reports nor their production totals have been reproduced or certified.

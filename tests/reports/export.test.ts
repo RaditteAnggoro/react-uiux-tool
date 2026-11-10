@@ -27,6 +27,39 @@ const data = {
   ],
 };
 
+test("financial table uses separate PDF cells and exact formatted values", () => {
+  const document = buildTemplate("invoice");
+  document.locale = "id-ID";
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.box.width = 30;
+  table.props.columns = [
+    { key: "name", label: "Item", width: 50 },
+    { key: "amount", label: "Amount", width: 100, align: "right", format: "decimal", decimals: 2 },
+  ];
+  table.props.tableHeaderColor = "#112233";
+  const sample = { lines: [{ name: "A", amount: "9007199254740993.555" }] };
+  const pdf = exportReport(document, "pdf", sample);
+  const content = Buffer.from(pdf.bytes).toString("latin1");
+  assert.match(content, /\(9\.007\.199\.254\.740\.993,56\)/);
+  assert.match(content, /0\.067 0\.133 0\.200 rg/);
+  assert.match(content, / re S Q/);
+  assert.match(renderReportHtml(document, { data: sample }), /9\.007\.199\.254\.740\.993,56/);
+  assert.ok(pdf.warnings.some((warning) => /table cell\(s\) may be clipped/.test(warning)));
+});
+
+test("static table rows render without a dataset and bound data takes precedence", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.staticRows = [{ description: "STATIC_ROW", amount: "-1.255" }];
+  table.bindings = { path: "" };
+  assert.match(renderReportHtml(document, { data: {} }), /STATIC_ROW/);
+  assert.match(Buffer.from(exportReport(document, "pdf", {}).bytes).toString("latin1"), /STATIC_ROW/);
+  table.bindings = { path: "lines" };
+  const output = renderReportHtml(document, { data: { lines: [{ description: "BOUND_ROW" }] } });
+  assert.match(output, /BOUND_ROW/);
+  assert.doesNotMatch(output, /STATIC_ROW/);
+});
+
 test("PDF warns when rich formatting cannot be rendered", () => {
   const document = buildTemplate("invoice");
   const title = document.bands.flatMap((band) => band.elements).find((element) => element.type === "text")!;

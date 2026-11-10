@@ -521,6 +521,7 @@ export default function App() {
     [designTarget, setDesignTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
+    [selectionWarning, setSelectionWarning] = useState(""),
     [toast, setToast] = useState(""),
     [pendingInsert, setPendingInsert] = useState(""),
     [draggingPalette, setDraggingPalette] = useState(false),
@@ -589,6 +590,7 @@ export default function App() {
   }, [screen, mode]);
   const [copiedElement, setCopiedElement] = useState<JsxElement | null>(null);
   useEffect(() => { setCopiedElement(null); }, [report?.projectRoot]);
+  useEffect(() => { if (screen !== "studio") setSelectionWarning(""); }, [screen]);
   const [textValue, setTextValue] = useState(""),
     [propName, setPropName] = useState("className"),
     [propValue, setPropValue] = useState(""),
@@ -957,7 +959,9 @@ export default function App() {
               if (["div", "section", "form", "fieldset"].includes(sourceElement.tag) && event.data.type === "uiux:select") {
                 setSelectedId(null);
                 setSelectedIds([]);
-                setError(t("ambiguousCanvasTarget"));
+                setSelectedRects({});
+                previewSelections.current.clear();
+                setSelectionWarning(t("ambiguousCanvasTarget"));
                 return;
               }
               if (usages.length > 1) {
@@ -978,8 +982,9 @@ export default function App() {
                 const exact = matching.length === 1 && identityMatches.length === 1 && matching[0] !== identityMatches[0]
                   ? [] : matching.length === 1 ? matching : identityMatches.length === 1 ? identityMatches : [];
                 if (exact.length !== 1) {
-                  if (event.data.type === "uiux:select") { setSelectedId(null); setSelectedIds([]); }
-                  setError(t("ambiguousCanvasTarget"));
+                  setSelectedId(null); setSelectedIds([]); setSelectedRects({});
+                  previewSelections.current.clear();
+                  setSelectionWarning(t("ambiguousCanvasTarget"));
                   return;
                 }
                 target = exact[0]!;
@@ -989,12 +994,13 @@ export default function App() {
           if (event.data.type === "uiux:drop") {
             const selectedTarget = report?.elements.find((element) => element.id === selectedId);
             if (!selectedTarget?.operations.includes("insert")) {
-              setError(t("simpleDropError"));
+              setSelectionWarning(t("simpleDropError"));
               return;
             }
             target = selectedTarget;
           }
           if (event.data.type === "uiux:select") {
+            setSelectionWarning("");
             const rect = event.data.rect;
             const nextRect =
               rect &&
@@ -1076,7 +1082,7 @@ export default function App() {
           }
           if (event.data.type === "uiux:drop") {
             if (!target.operations.includes("insert")) {
-              setError(t("simpleDropError"));
+              setSelectionWarning(t("simpleDropError"));
               return;
             }
             const component = report?.components.find(
@@ -1995,7 +2001,8 @@ export default function App() {
     setDraggingPalette(false);
     const target = selected;
     if (!target?.operations.includes("insert")) {
-      setError(t(previewState === "error" ? "previewFailedDrop" : "simpleDropError"));
+      if (previewState === "error") setError(t("previewFailedDrop"));
+      else setSelectionWarning(t("simpleDropError"));
       return;
     }
     const componentId = event.dataTransfer.getData("uiux/component");
@@ -2050,6 +2057,7 @@ export default function App() {
           className={`explorer-row ${selectedIds.includes(element.id) ? "selected" : ""}`}
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={(event) => {
+            setSelectionWarning("");
             if (event.ctrlKey || event.metaKey) {
               const next = selectedIds.includes(element.id)
                 ? selectedIds.filter((id) => id !== element.id)
@@ -4010,20 +4018,6 @@ export default function App() {
                 </button>
               ))}
               <button
-                className="rail-button"
-                title={t("reportStudio")}
-                aria-label={t("reportStudio")}
-                onClick={() => {
-                  setReportReturn("studio");
-                  setScreen("report");
-                }}
-              >
-                <Icon name="file" />
-              </button>
-              <button className="rail-button" title={t("changeHistory")} aria-label={t("changeHistory")} onClick={() => setModal("history")}>
-                <Icon name="file" />
-              </button>
-              <button
                 className="rail-button rail-bottom"
                 title={t("help")}
                 aria-label={t("help")}
@@ -4237,7 +4231,8 @@ export default function App() {
                             onDrop={(event) => {
                               event.preventDefault();
                               if (!selected?.operations.includes("insert")) {
-                                setError(t(previewState === "error" ? "previewFailedDrop" : "simpleDropError"));
+                                if (previewState === "error") setError(t("previewFailedDrop"));
+                                else setSelectionWarning(t("simpleDropError"));
                                 return;
                               }
                               const tag = event.dataTransfer.getData("uiux/tag");
@@ -4316,7 +4311,7 @@ export default function App() {
                                         selected,
                                         component,
                                       );
-                                    else setError(t("simpleDropError"));
+                                    else setSelectionWarning(t("simpleDropError"));
                                   }}
                                   title={`${component.source.file} · ${t("dragWritesDirectly")}`}
                                 >
@@ -4363,7 +4358,7 @@ export default function App() {
                                 onClick={() => {
                                   if (selected?.operations.includes("insert"))
                                     stageDroppedElement(selected, item.tag);
-                                  else setError(t("simpleDropError"));
+                                  else setSelectionWarning(t("simpleDropError"));
                                 }}
                                 title={`${t(item.label)} · ${t("dragWritesDirectly")}`}
                               >
@@ -5335,6 +5330,10 @@ export default function App() {
           </button>
         </div>
       )}
+      {selectionWarning && <div className="error-banner selection-warning" role="status">
+        <span aria-hidden="true">△</span><div><strong>{t("warnings")}</strong><p>{selectionWarning}</p></div>
+        <button className="icon-button" onClick={() => setSelectionWarning("")} aria-label={t("close")}><Icon name="close" size={16} /></button>
+      </div>}
       {toast && (
         <div className="toast" role="status">
           <Icon name="check" size={17} />

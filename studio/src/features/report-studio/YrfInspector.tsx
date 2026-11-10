@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { inspectYrf, type YrfInspection, type YrfObjectRef } from "../../../../src/reports/formats/yrf/inspect";
 import { appendYrfObject, applyYrfChanges, parseYrfPath, removeYrfObject, setYrfObjectScalar, valueAtPath, type YrfChange } from "../../../../src/reports/formats/yrf/patch";
 import "./yrf-inspector.css";
+import ReportHelp from "./ReportHelp";
 
 interface YrfInspectorProps {
   token: string;
@@ -129,6 +130,13 @@ const dict = {
     addTextbox: "Field",
     addShape: "Box",
     addLine: "Line",
+    addImage: "Image",
+    addTable: "Table layout",
+    addForm: "Form layout",
+    importImage: "Import image",
+    imageHint: "PNG, JPEG or WebP, up to 2 MiB. Stored in the YRF copy; check the result in WaiReport.",
+    imageError: "Choose a PNG, JPEG or WebP image up to 2 MiB that fits within the report size limit.",
+    layoutHint: "Table and form layouts add individual fields and lines. They do not configure repeating data.",
     paletteHint: "Drag onto a band or click to add to the selected band.",
     objectProperties: "Object properties",
     stylesGroup: "Styles",
@@ -212,6 +220,13 @@ const dict = {
     addTextbox: "Field",
     addShape: "Kotak",
     addLine: "Garis",
+    addImage: "Gambar",
+    addTable: "Layout tabel",
+    addForm: "Layout form",
+    importImage: "Import gambar",
+    imageHint: "PNG, JPEG atau WebP, maksimal 2 MiB. Gambar disimpan dalam salinan YRF; periksa hasilnya di WaiReport.",
+    imageError: "Pilih gambar PNG, JPEG atau WebP maksimal 2 MiB yang tidak melebihi batas ukuran report.",
+    layoutHint: "Layout tabel dan form menambahkan field dan garis terpisah. Data berulang belum dikonfigurasi.",
     paletteHint: "Tarik ke band atau klik untuk menambah ke band terpilih.",
     objectProperties: "Properti objek",
     stylesGroup: "Gaya",
@@ -292,6 +307,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const [report, setReport] = useState<OpenResult | null>(null);
   const [selected, setSelected] = useState<YrfObjectRef | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!selected) {
@@ -321,6 +337,9 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const [geometryChanges, setGeometryChanges] = useState<Record<string, Box>>({});
   const [draftChanges, setDraftChanges] = useState<Record<string, ChangeInput>>({});
   const [structuralDraft, setStructuralDraft] = useState<string | null>(null);
+  const imageTarget = useRef({ file: "", path: "" });
+  imageTarget.current = { file: report?.file ?? "", path: selected?.path ?? "" };
+  const imageUpdate = useRef<(value: string) => void>(() => {});
   const [leaveAction, setLeaveAction] = useState<{ run: () => void } | null>(null);
   const gestureRef = useRef<{
     mode: "move" | "resize";
@@ -376,6 +395,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       setReport(result);
       setFilePath(result.file);
       const first = result.inspection.pages.flatMap((page) => page.bands.flatMap((band) => band.objects)).find((object) => object.editableCaption);
+      const firstBand = result.inspection.pages.flatMap((page) => page.bands).find((band) => band.objects.some((object) => object.path === first?.path));
+      setExpandedBands(firstBand ? new Set([firstBand.path]) : new Set());
       setSelected(first ?? null);
       setCaption(first?.caption ?? "");
       setDataField(first?.dataField ?? "");
@@ -557,7 +578,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     try {
       const object = valueAtPath(JSON.parse((structuralDraft ?? report.source).replace(/^\uFEFF/, "")), parseYrfPath(selected.path));
       if (!object || typeof object !== "object" || Array.isArray(object)) return [];
-      const skip = new Set(["type", "caption", "text", "dataField", "left", "top", "width", "height"]);
+      const skip = new Set(["type", "caption", "text", "dataField", "left", "top", "width", "height", ...(selected.kind === "image" ? ["data"] : [])]);
       return Object.entries(object).filter(([key, value]) => !skip.has(key) && /^[A-Za-z_$][\w$-]*$/.test(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")) as Array<[string, string | number | boolean]>;
     } catch { return []; }
   }, [selected, report, structuralDraft]);
@@ -600,7 +621,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     return saveCopy();
   };
 
-  const addObject = (kind: "label" | "textbox" | "shape" | "line", bandPath?: string, position?: { x: number; y: number }) => {
+  const addObject = (kind: "label" | "textbox" | "shape" | "line" | "image" | "table" | "form", bandPath?: string, position?: { x: number; y: number }) => {
     if (!report?.source) return;
     try {
       const base = structuralDraft ?? report.source;
@@ -610,15 +631,25 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const target = bandPath ?? selected?.path.replace(/\.objects\[\d+\]$/, "") ?? report.inspection.pages[0]?.bands[0]?.path;
       if (!target) throw new Error("No report band is available");
       const names = new Set(report.inspection.pages.flatMap((page) => page.bands.flatMap((band) => band.objects.map((object) => object.name))).concat(report.inspection.sideBands.flatMap((band) => band.objects.map((object) => object.name))));
-      let index = 1;
-      while (names.has(`${kind}${index}`)) index += 1;
       const left = Math.max(0, Math.round(position?.x ?? 80)), top = Math.max(0, Math.round(position?.y ?? 40));
-      const object: Record<string, unknown> = {
-        type: kind, name: `${kind}${index}`,
-        ...(kind === "line" ? { x1: left, y1: top, x2: left + 500, y2: top } : { left, top, width: 500, height: 100 }),
-        ...(kind === "label" ? { caption: "Text" } : kind === "textbox" ? { text: "", dataField: "" } : {}),
-      };
-      const result = appendYrfObject(source, target, object);
+      const layout = kind === "table" ? [
+        { type: "label", left, top, width: 250, height: 80, caption: "Column 1" },
+        { type: "label", left: left + 250, top, width: 250, height: 80, caption: "Column 2" },
+        { type: "textbox", left, top: top + 80, width: 250, height: 80, text: "", dataField: "" },
+        { type: "textbox", left: left + 250, top: top + 80, width: 250, height: 80, text: "", dataField: "" },
+        { type: "line", x1: left, y1: top + 80, x2: left + 500, y2: top + 80 },
+      ] : kind === "form" ? [
+        { type: "label", left, top, width: 200, height: 80, caption: "Field" },
+        { type: "textbox", left: left + 210, top, width: 290, height: 80, text: "", dataField: "" },
+      ] : [{ type: kind, ...(kind === "line" ? { x1: left, y1: top, x2: left + 500, y2: top } : { left, top, width: 500, height: kind === "image" ? 300 : 100 }), ...(kind === "label" ? { caption: "Text" } : kind === "textbox" ? { text: "", dataField: "" } : kind === "image" ? { data: "" } : {}) }];
+      let result = { text: source, objectPath: "" };
+      for (const object of layout) {
+        let index = 1;
+        while (names.has(`${object.type}${index}`)) index += 1;
+        const name = `${object.type}${index}`;
+        names.add(name);
+        result = appendYrfObject(result.text, target, { ...object, name });
+      }
       const inspected = inspectYrf(result.text, report.hash);
       if (!inspected.inspection) throw new Error(inspected.error ?? "Invalid report");
       setStructuralDraft(result.text);
@@ -649,6 +680,20 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       }
       setDraftChanges({}); setGeometryChanges({}); setPending([]); setError("");
     } catch (caught) { setError((caught as Error).message); }
+  };
+  imageUpdate.current = (value) => setObjectProperty("data", value);
+  const importImage = (file?: File) => {
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 2 * 1024 * 1024) { setError(tr.imageError); return; }
+    const target = { ...imageTarget.current };
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (target.file !== imageTarget.current.file || target.path !== imageTarget.current.path) return;
+      if (typeof reader.result !== "string" || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(reader.result)) { setError(tr.imageError); return; }
+      imageUpdate.current(reader.result);
+    };
+    reader.onerror = () => setError(tr.imageError);
+    reader.readAsDataURL(file);
   };
 
   const removeObject = () => {
@@ -891,6 +936,10 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         ...inspection.sideBands.filter((band) => band.path.endsWith("reportFooter")),
       ]
     : [];
+  useEffect(() => {
+    const band = bands.find((item) => item.objects.some((object) => object.path === selected?.path));
+    if (band) setExpandedBands((current) => current.has(band.path) ? current : new Set([...current, band.path]));
+  }, [selected?.path, report?.file]);
 
   return (
     <div className="yrf">
@@ -902,6 +951,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           <span aria-hidden="true">↪</span> {tr.exit}
         </button>
         <strong>{tr.title}</strong>
+        <ReportHelp language={language} yrf />
         <button className="yrf-ghost" disabled={busy} onClick={() => void chooseFolder()}>
           {tr.chooseFolder}
         </button>
@@ -1075,11 +1125,12 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           <aside className="yrf-left">
             <h3>{tr.palette}</h3>
             <p className="yrf-hint">{tr.paletteHint}</p>
-            {([ [tr.textGroup, [["label", tr.addLabel, "T"], ["textbox", tr.addTextbox, "▤"]]], [tr.shapeGroup, [["shape", tr.addShape, "□"], ["line", tr.addLine, "╱"]]] ] as const).map(([group, items]) => (
+            {([ [tr.textGroup, [["label", tr.addLabel, "T"], ["textbox", tr.addTextbox, "▤"], ["table", tr.addTable, "▦"], ["form", tr.addForm, "☷"]]], [tr.shapeGroup, [["shape", tr.addShape, "□"], ["line", tr.addLine, "╱"], ["image", tr.addImage, "▧"]]] ] as const).map(([group, items]) => (
               <details className="yrf-palette-group" key={group} open><summary>{group}</summary><div className="yrf-palette">
                 {items.map(([kind, label, icon]) => <button key={kind} draggable onClick={() => addObject(kind)} onDragStart={(event) => { event.dataTransfer.setData("application/x-yrf-object", kind); event.dataTransfer.effectAllowed = "copy"; }}><span className="yrf-palette-icon" aria-hidden="true">{icon}</span>{label}</button>)}
               </div></details>
             ))}
+            <p className="yrf-hint">{tr.layoutHint}</p>
             <details className="yrf-palette-group" open>
               <summary>{tr.stylesGroup}</summary>
               <div className="yrf-style-chips">
@@ -1119,7 +1170,15 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
             <ul className="yrf-tree">
               {bands.map((band) => (
                 <li key={band.path}>
-                  <details open><summary className="yrf-band-label">{band.type} · {band.objects.length}</summary>
+                  <details className="yrf-band-tree" open={expandedBands.has(band.path)} onToggle={(event) => {
+                    const isOpen = event.currentTarget.open;
+                    setExpandedBands((current) => {
+                      if (current.has(band.path) === isOpen) return current;
+                      const next = new Set(current);
+                      if (isOpen) next.add(band.path); else next.delete(band.path);
+                      return next;
+                    });
+                  }}><summary className="yrf-band-label">{band.type} · {band.objects.length}</summary>
                   <ul>
                     {band.objects.length === 0 && <li className="yrf-hint">{tr.noObjects}</li>}
                     {band.objects.map((object) => (
@@ -1180,7 +1239,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                       onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-yrf-object")) event.preventDefault(); }}
                       onDrop={(event) => {
                         const kind = event.dataTransfer.getData("application/x-yrf-object");
-                        if (kind !== "label" && kind !== "textbox" && kind !== "shape" && kind !== "line") return;
+                        if (kind !== "label" && kind !== "textbox" && kind !== "shape" && kind !== "line" && kind !== "image" && kind !== "table" && kind !== "form") return;
                         event.preventDefault();
                         const rect = event.currentTarget.getBoundingClientRect();
                         addObject(kind, band.path, { x: (event.clientX - rect.left) / scale, y: (event.clientY - rect.top) / scale });
@@ -1219,7 +1278,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                             onDoubleClick={() => { selectObject(object); if (object.editableCaption) requestAnimationFrame(() => captionRef.current?.focus()); }}
                             title={`${object.kind} ${object.name}`}
                           >
-                            {(object.caption !== null || object.path === selected?.path) && <span>{object.path === selected?.path ? caption : String(draftChanges[`${object.path}.${object.textField ?? "caption"}`]?.value ?? object.caption ?? "")}</span>}
+                            {object.kind === "image" && object.imageData ? <img src={object.imageData} alt="" draggable={false} /> : (object.caption !== null || (object.path === selected?.path && object.editableCaption)) && <span>{object.path === selected?.path ? caption : String(draftChanges[`${object.path}.${object.textField ?? "caption"}`]?.value ?? object.caption ?? "")}</span>}
                           </button>
                         );
                       })}
@@ -1266,6 +1325,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                 <p className="yrf-meta">
                   {selected.kind} · {selected.name}
                 </p>
+                {selected.kind === "image" && <label className="yrf-field"><span>{tr.importImage}</span><input aria-label={tr.importImage} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { importImage(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /><small className="yrf-hint">{tr.imageHint}</small></label>}
                 {!selected.supported && (
                   <p className="yrf-hint">
                     {tr.unsupported}: {selected.kind}

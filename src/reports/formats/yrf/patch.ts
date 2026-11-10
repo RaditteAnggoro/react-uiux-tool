@@ -242,13 +242,24 @@ export function removeYrfObject(text: string, objectPath: string): string {
 /** Change an existing immediate scalar on one report object, preserving other bytes. */
 export function setYrfObjectScalar(text: string, objectPath: string, field: string, value: string | number | boolean): string {
   if (!/^layout\.(?:(?:pages\[\d+\]\.bands\[\d+\])|reportHeader|reportFooter)\.objects\[\d+\]$/.test(objectPath) || !/^[A-Za-z_$][\w$-]*$/.test(field) || field === "type") throw new Error("Invalid object property");
-  if ((typeof value === "number" && !Number.isFinite(value)) || (typeof value === "string" && value.length > 4000)) throw new Error("Invalid property value");
+  if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Invalid property value");
   const document = JSON.parse(text.replace(/^\uFEFF/, ""));
   const object = valueAtPath(document, parseYrfPath(objectPath));
   if (!object || typeof object !== "object" || Array.isArray(object)) throw new Error("Object not found");
+  const imageData = field === "data" && (object as Record<string, unknown>).type === "image" && typeof value === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 2_796_230;
+  if (typeof value === "string" && value.length > 4000 && !imageData) throw new Error("Invalid property value");
   const booleanSpans: BooleanSpan[] = [];
-  const scalarSpans = collectScalarSpans(text, undefined, booleanSpans);
+  const containers: ContainerSpan[] = [];
+  const scalarSpans = collectScalarSpans(text, containers, booleanSpans);
   const matches = [...scalarSpans, ...booleanSpans].filter((span) => span.path === `${objectPath}.${field}`);
+  if (matches.length === 0 && imageData && !("data" in object)) {
+    const objectSpans = containers.filter((span) => span.path === objectPath && span.kind === "object");
+    if (objectSpans.length !== 1) throw new Error("Ambiguous object");
+    const end = objectSpans[0]!.end - 1;
+    const next = text.slice(0, end) + (Object.keys(object).length ? "," : "") + JSON.stringify(field) + ":" + JSON.stringify(value) + text.slice(end);
+    JSON.parse(next.replace(/^\uFEFF/, ""));
+    return next;
+  }
   if (matches.length !== 1 || typeof matches[0]!.value !== typeof value) throw new Error("Property is missing, duplicated, or has the wrong type");
   const span = matches[0]!;
   const next = text.slice(0, span.start) + JSON.stringify(value) + text.slice(span.end);

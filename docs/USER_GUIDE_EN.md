@@ -53,7 +53,7 @@ node dist/cli.js --help
 
 ## 2. First launch and screen map
 
-Open **Change history** from the home header or project sidebar to see recorded
+Open **Change history** from the home header to see recorded
 commit dates, times and changes. Entries are Git commit times except where marked
 as preparation time; actual deployment or installation times are not tracked.
 Release notes are maintained in the application.
@@ -381,7 +381,7 @@ Think of Report Studio as a worktable: the **folder** stores your work, a **temp
 
 ### Start from Home or a project
 
-1. Choose **Report Studio** on Home, or open a React project and choose **Reports** in the left rail.
+1. Choose **Report Studio** on Home.
 2. Choose **Choose report folder** and select a destination. If the picker cannot open, paste the full path as a fallback. Check the displayed folder before creating a file.
 3. Choose a template and **Create report**, or select an existing report from the list. Use the back button to return to the project when you entered from it.
 
@@ -610,7 +610,7 @@ when you save the report to a copy.
 
 ## Report Studio
 
-Open **Report Studio** from Home or the **Reports** button in a project workspace.
+Open **Report Studio** from Home. Use **Report guide** in either the native or YRF workspace for a short walkthrough. Expand or collapse Structure bands with their arrows; selecting an object opens its band.
 
 1. Choose **Open existing report** to pick a report folder and scan it locally, or
    **Create new report** to pick a folder and template. The project root is never used
@@ -674,3 +674,11 @@ or collapse them to reduce scrolling. Select an object on the page or in the lef
 structure to view its properties. **Remove object** removes it from the draft;
 **Exit** prompts when changes are unsaved. For `.yrf`, Design is approximate and
 Save copy creates a separate file; verify it in WaiReport before business use.
+
+### YRF: image and static layouts
+
+In YRF Design, select a band and choose **Image**; select the image and use **Import image** (PNG, JPEG or WebP, up to 2 MiB). Resize on the canvas or in Geometry, then **Save copy**. **Table layout** and **Form layout** insert separate editable objects; they are static starting layouts, not automatic repeating tables. Verify the saved copy in WaiReport.
+
+### Native table columns and rows
+
+Select a native table to edit its columns in Properties: set field key, heading, relative width, alignment and numeric format. Add or remove static rows when the binding path is empty, or enter a dataset path to use sample data. Change header and border colors, border width and row height. Save, reopen and check Preview and PDF warnings for clipped values. Percent values are entered in percentage points (13.5 displays as 13.50%).

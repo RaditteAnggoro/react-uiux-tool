@@ -53,7 +53,7 @@ node dist/cli.js --help
 
 ## 2. Pertama kali membuka dan mengenal layar
 
-Buka **Riwayat perubahan** dari header beranda atau sidebar project untuk melihat
+Buka **Riwayat perubahan** dari header beranda untuk melihat
 tanggal, jam, dan isi perubahan yang tercatat. Waktu adalah waktu commit Git kecuali
 yang ditandai sebagai waktu persiapan; waktu deploy atau instalasi sebenarnya belum
 dicatat. Catatan rilis dikelola di aplikasi.
@@ -383,7 +383,7 @@ Bayangkan Report Studio seperti meja kerja untuk menyusun halaman. **Folder** ad
 
 ### Mulai dari Home atau dari project
 
-1. Dari Home pilih **Report Studio**, atau buka project React lalu pilih **Reports** di rail kiri.
+1. Dari Home pilih **Report Studio**.
 2. Pilih **Choose report folder** dan pilih folder tujuan. Bila picker tidak terbuka, tempel path lengkap sebagai cadangan. Periksa lokasi folder yang tampil sebelum membuat file.
 3. Pilih template dan **Create report**, atau pilih laporan yang ada dari daftar. Kembali ke project melalui tombol kembali jika masuk dari project.
 
@@ -616,7 +616,7 @@ kamu menyimpan laporan ke salinan.
 
 ## Report Studio
 
-Buka **Report Studio** dari Home atau tombol **Reports** di workspace project.
+Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native maupun YRF untuk petunjuk singkat. Buka atau tutup band Structure dengan panah; memilih objek akan membuka band-nya.
 
 1. Pilih **Open existing report** untuk memilih folder laporan dan memindainya secara
    lokal, atau **Create new report** untuk memilih folder dan template. Root project tidak
@@ -681,3 +681,11 @@ melihat propertinya, atau pilih dari struktur di kiri. **Remove object** menghap
 objek terpilih dari draft; **Exit** meminta keputusan jika ada perubahan belum disimpan.
 Untuk `.yrf`, Design adalah perkiraan dan Save copy membuat salinan; pastikan hasilnya
 terbuka dan tercetak dengan benar di WaiReport sebelum digunakan.
+
+### YRF: image and static layouts
+
+Di Design YRF, pilih band lalu **Gambar**; pilih objek gambar dan gunakan **Import gambar** (PNG, JPEG atau WebP, maksimal 2 MiB). Ubah ukuran di canvas atau Geometri, lalu **Save copy**. **Layout tabel** dan **Layout form** menambah objek terpisah sebagai susunan statis, bukan tabel berulang otomatis. Periksa salinan di WaiReport.
+
+### Native table columns and rows
+
+Pilih tabel native untuk mengatur kolom pada Properties: field data, judul, lebar relatif, perataan dan format angka. Tambah atau hapus baris statis saat path binding kosong, atau isi path dataset untuk menggunakan sample data. Atur warna header dan garis, tebal garis, dan tinggi baris. Simpan, buka kembali, lalu periksa Preview dan warning PDF untuk nilai terpotong. Nilai persen memakai angka persen (13,5 ditulis 13.5 dan tampil 13,50%).

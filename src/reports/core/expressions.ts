@@ -2,7 +2,6 @@ import {
   add,
   compare,
   divide,
-  formatDecimal,
   multiply,
   negate,
   normalize,
@@ -10,8 +9,10 @@ import {
   roundDecimal,
   subtract,
   sumDecimals,
+  toDecimalString,
   type Decimal,
 } from "./decimal.js";
+import { tableCellText } from "./table.js";
 
 export type ExpressionValue = Decimal | string | boolean | null;
 
@@ -436,11 +437,8 @@ function evaluateCall(name: string, args: Ast[], context: EvalContext): Expressi
       }
       const [value, digits] = values();
       const scale = digits ? Math.max(0, Math.min(6, Number(normalize(digits as Decimal, 0).units.toString()))) : 2;
-      return formatDecimal(requireDecimal(value ?? null, "FORMAT_NUMBER"), {
-        locale: context.locale ?? "id-ID",
-        minimumFractionDigits: scale,
-        maximumFractionDigits: scale,
-      });
+      const decimal = requireDecimal(value ?? null, "FORMAT_NUMBER");
+      return tableCellText(toDecimalString(decimal), { format: "decimal", decimals: scale }, context.locale ?? "id-ID");
     }
     case "FORMAT_DATE": {
       if (args.length < 1 || args.length > 2) {

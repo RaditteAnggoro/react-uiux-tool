@@ -2627,6 +2627,8 @@ kbd {
 .error-banner > .icon-button {
   margin-top: -5px;
 }
+.selection-warning { border-color: #b78020; }
+.selection-warning > span, .selection-warning strong { color: #b78020; }
 .toast {
   position: fixed;
   left: 50%;

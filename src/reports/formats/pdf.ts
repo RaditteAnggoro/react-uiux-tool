@@ -1,3 +1,5 @@
+import { tableCellText, tableColumnWidths, tableHeaderTextColor } from "../core/table.js";
+import { resolvePath } from "../core/data.js";
 import type { ReportDocumentV1, ReportElement } from "../core/types.js";
 import { paginateReport, type PlacedBand } from "../core/pagination.js";
 import { evaluateExpression } from "../core/expressions.js";
@@ -5,7 +7,7 @@ import { toDecimalString } from "../core/decimal.js";
 import { decodePdfImage, type PdfImageData } from "./pdf-image.js";
 
 const MM = 72 / 25.4;
-type PdfContent = string[] & { unsupportedCharacters: number };
+type PdfContent = string[] & { unsupportedCharacters: number; clippedCells: number };
 
 function escapePdfText(value: string): string {
   return String(value ?? "")
@@ -42,13 +44,7 @@ function fieldText(
     const value = result.value;
     if (value === null) return "";
     if (typeof value === "object") {
-      const numeric = Number(toDecimalString(value));
-      if (!Number.isFinite(numeric)) return toDecimalString(value);
-      try {
-        return new Intl.NumberFormat(document.locale, { minimumFractionDigits: 2 }).format(numeric);
-      } catch {
-        return numeric.toFixed(2);
-      }
+      return tableCellText(toDecimalString(value), { format: "decimal", decimals: 2 }, document.locale);
     }
     return String(value);
   }
@@ -57,20 +53,13 @@ function fieldText(
   const root = data[dataset ?? ""];
   const value = Array.isArray(root)
     ? root[0] && typeof root[0] === "object"
-      ? (root[0] as Record<string, unknown>)[rest.join(".")]
+      ? resolvePath(root[0], rest.join("."))
       : ""
     : root && typeof root === "object"
-      ? (root as Record<string, unknown>)[rest.join(".")]
+      ? resolvePath(root, rest.join("."))
       : "";
   if (element.props.format === "currency" || element.props.format === "decimal") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
-      try {
-        return new Intl.NumberFormat(document.locale, { minimumFractionDigits: 2 }).format(numeric);
-      } catch {
-        return numeric.toFixed(2);
-      }
-    }
+    return tableCellText(value, { format: element.props.format, decimals: element.props.decimals }, document.locale);
   }
   return value === undefined || value === null ? "" : String(value);
 }
@@ -145,32 +134,43 @@ function drawBand(
         : [];
       const rows = placed.rows ?? [];
       const rowHeight = Number(element.props.rowHeight ?? 7);
-      let rowY = y;
-      textLine(
-        content,
-        x,
-        rowY,
-        columns.map((column) => String(column.label ?? column.key ?? "")).join("  |  "),
-        7,
-        true,
-      );
-      rowY -= rowHeight;
-      for (const row of rows) {
-        const cells = columns.map((column) => {
-          const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[String(column.key ?? "")] : "";
-          if (column.currency === true) {
-            const numeric = Number(raw);
-            if (Number.isFinite(numeric)) {
-              try {
-                return new Intl.NumberFormat(document.locale, { minimumFractionDigits: 2 }).format(numeric);
-              } catch {
-                return numeric.toFixed(2);
-              }
-            }
-          }
-          return raw === undefined || raw === null ? "" : String(raw);
+      const headerHeight = Number(element.props.headerHeight ?? 6);
+      const widths = tableColumnWidths(columns, element.box.width);
+      const rgb = (value: unknown, fallback: string) => {
+        const hex = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+        return [1, 3, 5].map((index) => (parseInt(hex.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ");
+      };
+      const headerColor = rgb(element.props.tableHeaderColor, "#f1f4f8");
+      const borderColor = rgb(element.props.tableBorderColor, "#bfc9d6");
+      const headerTextColor = rgb(tableHeaderTextColor(element.props.tableHeaderColor), "#000000");
+      const requestedBorder = Number(element.props.tableBorderWidth ?? 0.2);
+      const borderWidth = Number.isFinite(requestedBorder) ? Math.max(0, Math.min(3, requestedBorder)) : 0.2;
+      const drawRow = (top: number, height: number, values: string[], header: boolean) => {
+        let left = x;
+        widths.forEach((width, index) => {
+          const bottom = top - height;
+          if (header) content.push(`q ${headerColor} rg ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re f Q`);
+          if (borderWidth > 0) content.push(`q ${borderColor} RG ${(borderWidth * MM).toFixed(2)} w ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re S Q`);
+          const text = values[index] ?? "";
+          const size = 7;
+          const textWidth = text.length * size * 0.52 / MM;
+          if (textWidth > Math.max(0, width - 2)) content.clippedCells++;
+          const align = columns[index]?.align;
+          const textX = align === "right" ? Math.max(left + 1, left + width - textWidth - 1) : align === "center" ? Math.max(left + 1, left + (width - textWidth) / 2) : left + 1;
+          content.push(`q ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re W n`);
+          if (header) content.push(`${headerTextColor} rg`);
+          textLine(content, textX, top - Math.min(height - 0.5, 3.5), text, size, header);
+          content.push("Q");
+          left += width;
         });
-        textLine(content, x, rowY, cells.join("  |  "), 7);
+      };
+      drawRow(y, headerHeight, columns.map((column) => String(column.label ?? column.key ?? "")), true);
+      let rowY = y - headerHeight;
+      for (const row of rows) {
+        drawRow(rowY, rowHeight, columns.map((column) => {
+          const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[String(column.key ?? "")] : "";
+          return tableCellText(raw, column, document.locale);
+        }), false);
         rowY -= rowHeight;
       }
     }
@@ -178,7 +178,7 @@ function drawBand(
 }
 
 /** Dependency-free PDF 1.4 writer that follows the same pagination as the HTML print renderer. */
-export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number; unsupportedImages?: number }): Uint8Array {
+export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number; unsupportedImages?: number; clippedCells?: number }): Uint8Array {
   const layouts = paginateReport(document, { data });
   const images = new Map<string, { name: string; data: PdfImageData }>();
   let unsupportedImages = 0;
@@ -192,13 +192,13 @@ export function exportPdf(document: ReportDocumentV1, data: Record<string, unkno
   const totalPages = layouts.length;
   const bodyTop = document.page.height - document.page.margins.top;
   const pages: PdfContent[] = layouts.map((layout, index) => {
-    const content = Object.assign([] as string[], { unsupportedCharacters: 0 });
+    const content = Object.assign([] as string[], { unsupportedCharacters: 0, clippedCells: 0 });
     for (const placed of layout.bands) {
       drawBand(document, placed, data, index + 1, totalPages, bodyTop, content, images);
     }
     return content;
   });
-  if (diagnostics) { diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0); diagnostics.unsupportedImages = unsupportedImages; }
+  if (diagnostics) { diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0); diagnostics.unsupportedImages = unsupportedImages; diagnostics.clippedCells = pages.reduce((sum, page) => sum + page.clippedCells, 0); }
 
   const width = (document.page.width * MM).toFixed(2);
   const height = (document.page.height * MM).toFixed(2);
