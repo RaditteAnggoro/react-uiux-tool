@@ -55,7 +55,7 @@ Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support clai
 | Target / format | Status | Exercised evidence / boundary |
 | --- | --- | --- |
 | Native `.report.json` create/open/edit/save | Tested subset | Schema validation, deterministic serialize/parse round trip, atomic save with SHA-256 conflict check; unit + API + Playwright coverage |
-| Professional templates (blank, invoice, grouped statement, receipt) | Tested | All four validate and render; three style families |
+| Professional templates (blank, invoice, grouped statement, receipt, pre-analysis, approval memo) | Tested | Sixteen catalog templates validate; pre-analysis and approval memo add two-level/matrix headers, merged cells, multiple row rules, flowing narrative, page break and signature areas; synthetic data renders with independently checked totals |
 | Print-oriented HTML rendering | Tested subset | Escapes text, blocks unsafe image URLs, deterministic output; HTML export is available |
 | PDF, HTML, CSV, XLSX, DOCX export | Tested subset | PDF follows paginated layout and supports JPEG and 8-bit non-interlaced PNG images with fit and transparency; unsupported images, charts and crosstabs produce warnings. XLSX/DOCX are OOXML zip containers and do not export images. |
 | PDF unsupported characters | Tested subset | Warnings count replacement characters in text actually rendered, including bound fields and table rows; PDF still uses limited fonts. |
@@ -68,3 +68,13 @@ React Style includes a basic formatting property selector for supported inline J
 styles; report presets and automatic list creation are not shared with React or `.yrf`.
 Report multi-selection Align/Group requires the same band. PDF rich formatting emits
 an export warning when the currently detected unsupported properties are used.
+
+Native A4 canvas has zoom, visual grid and rulers; the YRF canvas uses a separate raw-unit ruler and zoom. Design aids do not alter report output. Native rectangle fill/border rendering is exercised in HTML and PDF; YRF color output remains vendor-unverified.
+
+Native tested subset: multi-page rows and repeated/optional headings, multi-level headers, body merges in HTML, multiple conditional row rules, dedicated flowing simple narrative, and basic conditional colors for text/fields. Vendor-rendered YRF parity remains unverified.
+
+Advanced-table and pagination increment: the native inspector supports header matrices, body merges and multiple row rules; `pageBreakBefore` starts a new page, and sections can be renamed and reordered. HTML and PDF use page-relative merge coordinates and keep a merge together when it fits. PDF still simplifies some styling; PDF/XLSX/DOCX warn about advanced-table fidelity. Coverage is limited to synthetic fixtures; no WaiReport comparison exists.
+
+Native images support horizontal and vertical positioning within the frame for contain/cover in Design, HTML and PDF. A freeform crop rectangle is not supported; YRF image rendering remains unverified against WaiReport.
+
+Native report parameter definitions can be edited, with defaults and sample overrides resolved for field bindings and expressions in HTML/PDF. Missing required values and incorrect types generate warnings, not blocks; parameter support across other formats is not verified.

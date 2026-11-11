@@ -74,7 +74,8 @@ flowchart LR
 | PDF, HTML, CSV, XLSX, DOCX | Export native reports to these formats. | They are output files, not interchangeable editable report designs; fidelity varies. |
 
 See the [step-by-step Report Studio guide](docs/USER_GUIDE_EN.md#14-report-studio-create-and-edit-reports),
-[format capabilities](docs/REPORT_STUDIO_FILE_FORMATS.md), and [known limitations](KNOWN_LIMITATIONS.md).
+[format capabilities](docs/REPORT_STUDIO_FILE_FORMATS.md), [known limitations](KNOWN_LIMITATIONS.md),
+and the [release and recovery checklist](docs/REPORT_STUDIO_RELEASE_CHECKLIST.md).
 
 ## What it does
 

@@ -1,11 +1,19 @@
+import { narrativeLines, narrativeLineHeight } from "./narrative.js";
 import type { ReportBand, ReportDocumentV1 } from "./types.js";
 import { datasetRows } from "./data.js";
+import { tableHeaderGroups } from "./table.js";
 
 export interface PlacedBand {
   band: ReportBand;
   y: number;
+  /** Actual occupied height for the placement, including split table rows. */
+  height: number;
+  showTableHeader?: boolean;
+  textFragment?: string;
   /** Rows rendered by a table band in this placement. */
   rows?: unknown[];
+  /** Index of the first row in this table segment. */
+  rowOffset?: number;
   /** Rows visible to expressions such as SUM(group.amount). */
   scopeRows?: unknown[];
 }
@@ -41,9 +49,12 @@ function rowHeight(band: ReportBand): number {
 
 function tableHeaderHeight(band: ReportBand): number {
   const table = tableOf(band);
-  if (!table || table.props.headerRepeat === false) return 0;
+  if (!table) return 0;
   const value = Number(table.props.headerHeight ?? 6);
-  return Number.isFinite(value) && value >= 0 ? value : 6;
+  const height = Number.isFinite(value) && value >= 0 ? value : 6;
+  if (Array.isArray(table.props.headerRows) && table.props.headerRows.length > 0) return height * table.props.headerRows.length;
+  const columns = Array.isArray(table.props.columns) ? table.props.columns as Array<Record<string, unknown>> : [];
+  return height * (tableHeaderGroups(columns).some((group) => group.label) ? 2 : 1);
 }
 
 function tableRows(
@@ -145,9 +156,9 @@ export function paginateReport(
     let footerY = capacity - footerHeight;
     pages.push({
       bands: [
-        ...headers.map((band) => { const placed = { band, y: headerY }; headerY += band.height; return placed; }),
+        ...headers.map((band) => { const placed = { band, y: headerY, height: band.height }; headerY += band.height; return placed; }),
         ...current.map((placed) => ({ ...placed, y: placed.y + headerHeight })),
-        ...footers.map((band) => { const placed = { band, y: footerY }; footerY += band.height; return placed; }),
+        ...footers.map((band) => { const placed = { band, y: footerY, height: band.height }; footerY += band.height; return placed; }),
       ],
     });
     current = [];
@@ -156,17 +167,36 @@ export function paginateReport(
 
   const placeFixed = (segment: Segment) => {
     if (y + segment.band.height > bodyCapacity && y > 0) flush();
-    current.push({ band: segment.band, y, scopeRows: segment.scopeRows });
+    current.push({ band: segment.band, y, height: segment.band.height, scopeRows: segment.scopeRows });
     y += segment.band.height;
   };
 
   for (const segment of buildSegments(document, flow, options.data)) {
+    if (segment.band.pageBreakBefore === true && y > 0) flush();
+    const narrative = segment.band.elements.length === 1 ? segment.band.elements[0] : undefined;
+    if (narrative?.type === "text" && narrative.props.flowText === true && typeof narrative.props.text === "string") {
+      const fontSize = Number(narrative.props.fontSize ?? 9);
+      const lineHeight = narrativeLineHeight(fontSize);
+      const lines = narrativeLines(narrative.props.text, narrative.box.width, fontSize);
+      let offset = 0;
+      while (offset < lines.length) {
+        const top = Math.max(0, narrative.box.y);
+        const fit = Math.floor((bodyCapacity - y - top) / lineHeight);
+        if (fit < 1 && y > 0) { flush(); continue; }
+        const count = Math.max(1, Math.min(lines.length - offset, fit));
+        const height = top + count * lineHeight;
+        current.push({ band: segment.band, y, height, textFragment: lines.slice(offset, offset + count).join("\n"), scopeRows: segment.scopeRows });
+        y += height;
+        offset += count;
+        if (offset < lines.length) flush();
+      }
+      continue;
+    }
     if (!segment.rows) {
       placeFixed(segment);
       continue;
     }
     const heightPerRow = rowHeight(segment.band);
-    const headerHeight = tableHeaderHeight(segment.band);
     const rows = segment.rows;
     if (rows.length === 0) {
       placeFixed(segment);
@@ -174,10 +204,26 @@ export function paginateReport(
     }
     let offset = 0;
     while (offset < rows.length) {
-      const available = bodyCapacity - y - headerHeight;
+      const showTableHeader = offset === 0 || tableOf(segment.band)?.props.headerRepeat !== false;
+      const headerHeight = showTableHeader ? tableHeaderHeight(segment.band) : 0;
+      const tableOffset = Math.max(0, tableOf(segment.band)?.box.y ?? 0);
+      const available = bodyCapacity - y - headerHeight - tableOffset;
       const fit = Math.max(1, Math.floor(available / heightPerRow));
-      const count = Math.min(fit, rows.length - offset);
-      const height = headerHeight + count * heightPerRow;
+      let count = Math.min(fit, rows.length - offset);
+      const merges = tableOf(segment.band)?.props.merges;
+      let moveMergeToNextPage = false;
+      if (Array.isArray(merges)) {
+        for (const candidate of merges) {
+          if (!candidate || typeof candidate !== "object") continue;
+          const entry = candidate as Record<string, unknown>;
+          const start = Number(entry.row), span = Number(entry.rowSpan ?? 1);
+          if (!Number.isInteger(start) || !Number.isInteger(span) || start < offset || span < 2) continue;
+          if (start < offset + count && start + span > offset + count && start > offset) count = start - offset;
+          else if (start === offset && span > count && y > 0 && tableOffset + headerHeight + span * heightPerRow <= bodyCapacity) moveMergeToNextPage = true;
+        }
+      }
+      if (moveMergeToNextPage) { flush(); continue; }
+      const height = tableOffset + headerHeight + count * heightPerRow;
       if (y + height > bodyCapacity && y > 0) {
         flush();
         continue;
@@ -185,7 +231,10 @@ export function paginateReport(
       current.push({
         band: segment.band,
         y,
+        height,
+        showTableHeader,
         rows: rows.slice(offset, offset + count),
+        rowOffset: offset,
         scopeRows: segment.scopeRows,
       });
       y += height;

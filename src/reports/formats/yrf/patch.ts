@@ -252,7 +252,8 @@ export function setYrfObjectScalar(text: string, objectPath: string, field: stri
   const containers: ContainerSpan[] = [];
   const scalarSpans = collectScalarSpans(text, containers, booleanSpans);
   const matches = [...scalarSpans, ...booleanSpans].filter((span) => span.path === `${objectPath}.${field}`);
-  if (matches.length === 0 && imageData && !("data" in object)) {
+  const newStyle = field === "style" && typeof value === "string" && ["label", "textbox", "line", "shape", "image"].includes(String((object as Record<string, unknown>).type));
+  if (matches.length === 0 && (imageData || newStyle) && !(field in object)) {
     const objectSpans = containers.filter((span) => span.path === objectPath && span.kind === "object");
     if (objectSpans.length !== 1) throw new Error("Ambiguous object");
     const end = objectSpans[0]!.end - 1;

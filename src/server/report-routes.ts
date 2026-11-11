@@ -22,6 +22,7 @@ import type { StyleFamilyId } from "../reports/index.js";
 import { inspectYrf, YRF_MAX_BYTES } from "../reports/formats/yrf/inspect.js";
 import { applyYrfChanges, type YrfChange } from "../reports/formats/yrf/patch.js";
 import { createYrfFromNative } from "../reports/formats/yrf/create.js";
+import { parameterWarnings } from "../reports/core/parameters.js";
 import type { ReportDocumentV1 } from "../reports/index.js";
 
 const MAX_REPORT_BODY = DEFAULT_LIMITS.maxBytes;
@@ -624,13 +625,9 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           json(res, 422, { code: "INVALID_DOCUMENT", errors: validation.errors });
           return;
         }
-        const html = renderReportHtml(data.document as ReportDocumentV1, {
-          data:
-            data.data && typeof data.data === "object" && !Array.isArray(data.data)
-              ? (data.data as Record<string, unknown>)
-              : undefined,
-        });
-        json(res, 200, { html, warnings: validation.warnings });
+        const sampleData = data.data && typeof data.data === "object" && !Array.isArray(data.data) ? data.data as Record<string, unknown> : {};
+        const html = renderReportHtml(data.document as ReportDocumentV1, { data: sampleData });
+        json(res, 200, { html, warnings: [...validation.warnings, ...parameterWarnings(data.document as ReportDocumentV1, sampleData)] });
         return;
       }
       case "export": {

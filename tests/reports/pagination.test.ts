@@ -38,6 +38,113 @@ test("a long table paginates deterministically and repeats the page header", () 
   );
 });
 
+test("split table rows and headings match the allocated HTML/PDF page positions", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const data = { invoice: {}, lines: rows(120) };
+  const pages = paginateReport(document, { data });
+  const placements = pages.flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines"));
+  assert.equal(placements.flatMap((entry) => entry.rows ?? []).length, 120);
+  for (const page of pages) {
+    const ordered = [...page.bands].sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ordered.length; i++) assert.ok(ordered[i]!.y >= ordered[i - 1]!.y + ordered[i - 1]!.height - 0.001, "bands do not overlap");
+  }
+  const html = renderReportHtml(document, { data });
+  assert.equal((html.match(/Baris \d+/g) ?? []).length, 120);
+  for (const entry of placements) assert.ok(html.includes(`top:${document.page.margins.top + entry.y}mm;height:${entry.height}mm`));
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.equal((pdf.match(/\(Baris \d+\)/g) ?? []).length, 120);
+  assert.equal((pdf.match(/\(Deskripsi\)/g) ?? []).length, placements.length);
+});
+
+test("large synthetic report maintains row order over at least 23 pages", () => {
+  const document = buildTemplate("invoice");
+  const input = rows(1000);
+  const pages = paginateReport(document, { data: { lines: input } });
+  assert.ok(pages.length >= 23);
+  const output = pages.flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines").flatMap((entry) => entry.rows ?? []));
+  assert.deepEqual(output, input);
+  assert.ok(pages.every((page) => page.bands.some((entry) => entry.band.kind === "pageHeader") && page.bands.some((entry) => entry.band.kind === "pageFooter")));
+});
+
+test("table header can be shown only on first placement without losing rows", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.headerRepeat = false;
+  const data = { lines: rows(100) };
+  const placements = paginateReport(document, { data }).flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines"));
+  assert.ok(placements.length > 1);
+  assert.equal(placements[0]?.showTableHeader, true);
+  assert.ok(placements.slice(1).every((entry) => entry.showTableHeader === false));
+  assert.equal(placements.flatMap((entry) => entry.rows ?? []).length, 100);
+  const html = renderReportHtml(document, { data });
+  assert.equal((html.match(/>Deskripsi<\/th>/g) ?? []).length, 1);
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.equal((pdf.match(/\(Deskripsi\)/g) ?? []).length, 1);
+});
+
+test("grouped headings reserve two rows and repeat in HTML and PDF", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  const columns = table.props.columns as Array<Record<string, unknown>>;
+  columns[1]!.headerGroup = "Vehicle";
+  columns[2]!.headerGroup = "Vehicle";
+  const data = { lines: rows(90) };
+  const placements = paginateReport(document, { data }).flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines"));
+  assert.ok(placements.length > 1);
+  assert.equal(placements.flatMap((entry) => entry.rows ?? []).length, 90);
+  for (const entry of placements) assert.equal(entry.height, 12 + (entry.rows?.length ?? 0) * 7);
+  const html = renderReportHtml(document, { data });
+  assert.equal((html.match(/colspan="2"[^>]*>Vehicle<\/th>/g) ?? []).length, placements.length);
+  assert.equal((html.match(/rowspan="2"/g) ?? []).length, 2 * placements.length);
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.equal((pdf.match(/\(Vehicle\)/g) ?? []).length, placements.length);
+});
+
+test("table merges refer to the original row and do not repeat on each page", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.merges = [{ row: 0, col: 0, colSpan: 2, rowSpan: 2 }];
+  const data = { lines: rows(90) };
+  const html = renderReportHtml(document, { data });
+  assert.equal((html.match(/<td colspan="2" rowspan="2"/g) ?? []).length, 1);
+  assert.equal((html.match(/>Baris 3<\/td>/g) ?? []).length, 1);
+  assert.equal((html.match(/>Baris 90<\/td>/g) ?? []).length, 1);
+});
+
+test("a row merge that fits on a fresh page is kept together", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  const data = { lines: rows(90) };
+  const before = paginateReport(document, { data }).flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines"));
+  const boundary = before[0]!.rows!.length;
+  table.props.merges = [{ row: boundary - 1, col: 0, colSpan: 1, rowSpan: 2 }];
+  const after = paginateReport(document, { data }).flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-lines"));
+  assert.equal(after[0]!.rows!.length, boundary - 1);
+  assert.equal(after[1]!.rowOffset, boundary - 1);
+  assert.ok(after[1]!.rows!.length >= 2);
+  assert.match(renderReportHtml(document, { data }), /rowspan="2"/);
+});
+
+test("dedicated narrative flows across pages without dropping or duplicating words", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const words = Array.from({ length: 800 }, (_, index) => `ITEM${index.toString().padStart(4, "0")}`);
+  document.bands.splice(1, 0, { id: "band-narrative-test", kind: "detail", height: 20, elements: [{ id: "narrative-test", type: "text", box: { x: 0, y: 0, width: 120, height: 20 }, props: { text: words.join(" "), fontSize: 9, flowText: true } }] });
+  const pages = paginateReport(document, { data: {} });
+  const fragments = pages.flatMap((page) => page.bands.filter((entry) => entry.band.id === "band-narrative-test"));
+  assert.ok(fragments.length > 1);
+  assert.deepEqual(fragments.flatMap((entry) => entry.textFragment!.split(/\s+/)), words);
+  const html = renderReportHtml(document, { data: {} });
+  const pdf = Buffer.from(exportReport(document, "pdf", {}).bytes).toString("latin1");
+  for (const word of words) {
+    assert.equal(html.split(word).length - 1, 1, `HTML ${word}`);
+    assert.equal(pdf.split(word).length - 1, 1, `PDF ${word}`);
+  }
+});
+
 test("content that fits produces a single page", () => {
   const document = buildTemplate("receipt");
   const pages = paginateReport(document, { data: {} });
@@ -102,6 +209,36 @@ test("conditional styles apply and hidden elements disappear", () => {
   hiddenTotal.conditions = [{ when: "1 == 1", hide: true }];
   const hiddenHtml = renderReportHtml(hidden, { data: { aging: [] } });
   assert.ok(!hiddenHtml.includes("el-aging-total"));
+});
+
+test("conditional field color and hiding agree between HTML and PDF", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const title = document.bands.flatMap((band) => band.elements).find((element) => element.type === "text")!;
+  title.props.text = "CONDITION_PROBE";
+  title.conditions = [{ when: "invoice.total > 100", color: "#123456", background: "#aabbcc" }];
+  const data = { invoice: { total: 150 } };
+  assert.match(renderReportHtml(document, { data }), /color:#123456;background:#aabbcc/);
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.match(pdf, /0\.071 0\.204 0\.337 rg/);
+  assert.match(pdf, /0\.667 0\.733 0\.800 rg/);
+  title.conditions = [{ when: "invoice.total > 100", hide: true }];
+  assert.doesNotMatch(renderReportHtml(document, { data }), /CONDITION_PROBE/);
+  assert.doesNotMatch(Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1"), /CONDITION_PROBE/);
+});
+
+test("table row conditional colors use the current row in HTML and PDF", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.rowCondition = { when: "row.amount < 0", color: "#123456", background: "#aabbcc" };
+  const data = { lines: [{ description: "NEGATIVE", amount: -1 }, { description: "POSITIVE", amount: 1 }] };
+  const html = renderReportHtml(document, { data });
+  assert.match(html, /color:#123456;background:#aabbcc[^>]*>NEGATIVE/);
+  assert.doesNotMatch(html, /color:#123456;background:#aabbcc[^>]*>POSITIVE/);
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.match(pdf, /0\.071 0\.204 0\.337 rg/);
+  assert.match(pdf, /0\.667 0\.733 0\.800 rg/);
 });
 
 test("grouped bands keep their original document order", () => {

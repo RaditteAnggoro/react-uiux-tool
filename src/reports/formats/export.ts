@@ -5,6 +5,7 @@ import { exportCsv } from "./csv.js";
 import { exportPdf } from "./pdf.js";
 import { exportXlsx } from "./xlsx.js";
 import { exportDocx } from "./docx.js";
+import { parameterWarnings } from "../core/parameters.js";
 
 export type ExportFormat = "html" | "csv" | "pdf" | "xlsx" | "docx";
 
@@ -39,19 +40,35 @@ function fidelityWarnings(document: ReportDocumentV1, format: ExportFormat): str
   const types = new Set(
     document.bands.flatMap((band) => band.elements.map((element) => element.type)),
   );
+  const advancedTables = document.bands
+    .flatMap((band) => band.elements)
+    .filter(
+      (element) =>
+        element.type === "table" &&
+        (Array.isArray(element.props.headerRows) ||
+          Array.isArray(element.props.merges) ||
+          Array.isArray(element.props.rowRules)),
+    ).length;
   const tableCount = document.bands
     .flatMap((band) => band.elements)
     .filter((element) => element.type === "table").length;
   const warnings: string[] = [];
+  if (advancedTables && ["pdf", "xlsx", "docx"].includes(format)) warnings.push(`${format.toUpperCase()}: advanced table headers, merged cells or row styling may be simplified`);
   if (format === "pdf") {
     if (types.has("chart")) warnings.push("PDF: chart elements are not rendered yet");
     if (types.has("crosstab")) warnings.push("PDF: crosstab cells are not rendered yet");
-    const hasRichFormatting = document.bands.some((band) => band.elements.some(({ props }) =>
+    const hasRichFormatting = document.bands.some((band) => band.elements.some(({ props, type }) =>
       props.underline === true || props.strike === true || props.list === "bullet" ||
-      props.list === "number" || Number(props.borderWidth ?? 0) > 0 ||
+      props.list === "number" || (Number(props.borderWidth ?? 0) > 0 && !["rect", "text", "field", "image"].includes(type)) ||
       Number(props.rotation ?? 0) !== 0 || props.wrap === false,
     ));
     if (hasRichFormatting) warnings.push("PDF: underline, strikethrough, lists, borders, rotation or text wrapping may not be rendered");
+    const unsupportedConditionalColor = document.bands.some((band) => band.elements.some((element) => [...(element.conditions ?? []), element.props.rowCondition].some((rule) => {
+      if (!rule || typeof rule !== "object") return false;
+      const entry = rule as Record<string, unknown>;
+      return [entry.color, entry.background].some((value) => typeof value === "string" && !/^#[0-9a-f]{6}$/i.test(value));
+    })));
+    if (unsupportedConditionalColor) warnings.push("PDF: conditional colors must use six-digit hex values");
   }
   if (format === "xlsx" || format === "docx" || format === "csv") {
     if (types.has("image") && format !== "csv") warnings.push(`${format.toUpperCase()}: image elements are not exported`);
@@ -77,6 +94,7 @@ export function exportReport(
   const doc = document as ReportDocumentV1;
   const warnings = [
     ...validation.warnings.map((issue) => `${issue.path} ${issue.message}`.trim()),
+    ...parameterWarnings(doc, data).map((issue) => `${issue.path} ${issue.message}`),
     ...fidelityWarnings(doc, format),
   ];
   const base = slug(doc.title);

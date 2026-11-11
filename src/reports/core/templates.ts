@@ -1073,6 +1073,328 @@ function labelSheet(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
   return document;
 }
 
+
+function preAnalysis(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
+  const tokens = STYLE_FAMILIES[family];
+  const document = baseDocument("tpl-pre-analysis", "Laporan Analisis Kredit", family, locale);
+  document.datasets = [
+    { id: "applicant", schema: { fields: ["name", "applicationNo", "branch", "analyst", "submittedAt"] } },
+    { id: "facilities", schema: { fields: ["facility", "plafon", "outstanding", "tenor", "status"] } },
+  ];
+  document.bands = [
+    {
+      id: "band-title",
+      kind: "reportTitle",
+      height: 26,
+      elements: [
+        text("el-pre-title", { x: 0, y: 0, width: 120, height: 9 }, {
+          text: "LAPORAN ANALISIS KREDIT",
+          font: tokens.fonts.heading,
+          fontSize: 17,
+          fontWeight: 700,
+          color: tokens.colors.primary,
+        }),
+        text("el-pre-subtitle", { x: 0, y: 10, width: 120, height: 6 }, {
+          text: "Ringkasan aplikasi, struktur fasilitas, dan rekomendasi analis",
+          font: tokens.fonts.body,
+          fontSize: 8,
+          color: tokens.colors.muted,
+        }),
+        text("el-pre-confidential", { x: 128, y: 1, width: 50, height: 5 }, {
+          text: "RAHASIA",
+          font: tokens.fonts.body,
+          fontSize: 8,
+          fontWeight: 700,
+          align: "right",
+          color: tokens.colors.negative,
+        }),
+        line("el-pre-rule", { x: 0, y: 24, width: 178, height: 0.4 }, {
+          color: tokens.colors.primary,
+          strokeWidth: 0.4,
+        }),
+      ],
+    },
+    {
+      id: "band-page-header",
+      kind: "pageHeader",
+      height: 22,
+      repeat: true,
+      elements: [
+        field("el-pre-name", { x: 0, y: 0, width: 80, height: 6 }, { label: "Pemohon", fontSize: 8 }, "applicant.name"),
+        field("el-pre-number", { x: 82, y: 0, width: 48, height: 6 }, { label: "No. Aplikasi", fontSize: 8 }, "applicant.applicationNo"),
+        field("el-pre-branch", { x: 132, y: 0, width: 46, height: 6 }, { label: "Cabang", align: "right", fontSize: 8 }, "applicant.branch"),
+        field("el-pre-analyst", { x: 0, y: 8, width: 80, height: 6 }, { label: "Analis", fontSize: 8 }, "applicant.analyst"),
+        field("el-pre-date", { x: 82, y: 8, width: 48, height: 6 }, { label: "Tanggal", format: "date", fontSize: 8 }, "applicant.submittedAt"),
+        line("el-pre-header-rule", { x: 0, y: 20, width: 178, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+      ],
+    },
+    {
+      id: "band-summary-narrative",
+      kind: "detail",
+      height: 24,
+      elements: [
+        text("el-pre-section-1", { x: 0, y: 0, width: 120, height: 6 }, {
+          text: "1. RINGKASAN APLIKASI",
+          font: tokens.fonts.body,
+          fontSize: 9,
+          fontWeight: 700,
+          color: tokens.colors.primary,
+        }),
+        text("el-pre-summary-text", { x: 0, y: 7, width: 178, height: 16 }, {
+          text: "Analisis ini merangkum kebutuhan pembiayaan, kapasitas bayar, dan struktur fasilitas yang diajukan. Seluruh angka menggunakan data latihan sintetis.",
+          font: tokens.fonts.body,
+          fontSize: 8.5,
+          lineHeight: 1.4,
+          color: tokens.colors.text,
+        }),
+      ],
+    },
+    {
+      id: "band-facilities",
+      kind: "detail",
+      height: 46,
+      elements: [
+        tableElement("el-pre-facilities-table", { x: 0, y: 0, width: 178, height: 46 }, {
+          headerRows: [
+            [
+              { label: "Fasilitas", rowSpan: 2, align: "left" },
+              { label: "Nominal", colSpan: 2, align: "center" },
+              { label: "Tenor", colSpan: 2, align: "center" },
+            ],
+            [
+              { label: "Plafon", align: "right" },
+              { label: "Outstanding", align: "right" },
+              { label: "Bulan", align: "center" },
+              { label: "Status", align: "center" },
+            ],
+          ],
+          columns: [
+            { key: "facility", label: "Fasilitas", width: 52, align: "left" },
+            { key: "plafon", label: "Plafon", width: 34, align: "right", currency: true },
+            { key: "outstanding", label: "Outstanding", width: 34, align: "right", currency: true },
+            { key: "tenor", label: "Tenor", width: 18, align: "center" },
+            { key: "status", label: "Status", width: 40, align: "center" },
+          ],
+          headerRepeat: true,
+          rowHeight: 7,
+          rowRules: [
+            { when: "row.status == 'Menunggak'", color: "#B91C1C", background: "#FDE8E8", bold: true },
+            { when: "row.outstanding > row.plafon * 0.9", background: "#FEF3C7" },
+          ],
+          emptyText: "Belum ada fasilitas",
+        }, "facilities"),
+      ],
+    },
+    {
+      id: "band-analysis",
+      kind: "detail",
+      height: 12,
+      elements: [
+        text("el-pre-analysis", { x: 0, y: 0, width: 178, height: 12 }, {
+          text: "2. ANALISIS\nKapasitas bayar dihitung dari arus kas operasional dikurangi kewajiban lain. Rasio terhadap plafon, tenor, serta riwayat kolektibilitas menjadi dasar rekomendasi. Angka pada tabel di atas dan total di bawah berasal dari dataset yang sama, sehingga dapat direkonsiliasi secara independen.",
+          font: tokens.fonts.body,
+          fontSize: 8.5,
+          lineHeight: 1.35,
+          flowText: true,
+          color: tokens.colors.text,
+        }),
+      ],
+    },
+    {
+      id: "band-totals",
+      kind: "summary",
+      height: 18,
+      elements: [
+        field("el-pre-total-plafon", { x: 80, y: 2, width: 46, height: 6 }, {
+          label: "Total plafon",
+          align: "right",
+          fontSize: 8,
+          expression: "FORMAT_NUMBER(SUM(facilities.plafon), 2)",
+        }, ""),
+        field("el-pre-total-outstanding", { x: 130, y: 2, width: 48, height: 6 }, {
+          label: "Total outstanding",
+          align: "right",
+          fontSize: 8,
+          expression: "FORMAT_NUMBER(SUM(facilities.outstanding), 2)",
+        }, ""),
+      ],
+    },
+    {
+      id: "band-signature",
+      kind: "detail",
+      height: 40,
+      elements: [
+        text("el-pre-section-3", { x: 0, y: 0, width: 120, height: 6 }, {
+          text: "3. PERSETUJUAN",
+          font: tokens.fonts.body,
+          fontSize: 9,
+          fontWeight: 700,
+          color: tokens.colors.primary,
+        }),
+        image("el-pre-sign-1", { x: 8, y: 12, width: 44, height: 14 }, { src: "", alt: "Tanda tangan analis", fit: "contain" }),
+        image("el-pre-sign-2", { x: 122, y: 12, width: 44, height: 14 }, { src: "", alt: "Tanda tangan pemutus", fit: "contain" }),
+        line("el-pre-sign-rule-1", { x: 8, y: 28, width: 44, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+        line("el-pre-sign-rule-2", { x: 122, y: 28, width: 44, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+        text("el-pre-sign-role-1", { x: 8, y: 30, width: 44, height: 6 }, { text: "Analis Kredit", fontSize: 8, align: "center", color: tokens.colors.muted }),
+        text("el-pre-sign-role-2", { x: 122, y: 30, width: 44, height: 6 }, { text: "Pemutus Kredit", fontSize: 8, align: "center", color: tokens.colors.muted }),
+      ],
+    },
+    {
+      id: "band-footer",
+      kind: "pageFooter",
+      height: 8,
+      repeat: true,
+      elements: [
+        text("el-pre-footer-text", { x: 0, y: 2, width: 120, height: 5 }, {
+          text: "Dokumen internal — data sintetis",
+          font: tokens.fonts.body,
+          fontSize: 7,
+          color: tokens.colors.muted,
+        }),
+        { id: "el-pre-page", type: "pageNumber", box: { x: 148, y: 2, width: 30, height: 5 }, props: { format: "Page {page} of {total}", fontSize: 7, align: "right", color: tokens.colors.muted } },
+      ],
+    },
+  ];
+  return document;
+}
+
+function approvalMemo(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
+  const tokens = STYLE_FAMILIES[family];
+  const document = baseDocument("tpl-approval-memo", "Memo Persetujuan Kredit", family, locale);
+  document.datasets = [
+    { id: "application", schema: { fields: ["applicant", "applicationNo", "amount", "decision", "preparedAt"] } },
+    { id: "financials", schema: { fields: ["item", "amount"] } },
+  ];
+  document.bands = [
+    {
+      id: "band-title",
+      kind: "reportTitle",
+      height: 24,
+      elements: [
+        text("el-memo-title", { x: 0, y: 0, width: 120, height: 9 }, {
+          text: "MEMO PERSETUJUAN KREDIT",
+          font: tokens.fonts.heading,
+          fontSize: 16,
+          fontWeight: 700,
+          color: tokens.colors.primary,
+        }),
+        text("el-memo-sub", { x: 0, y: 11, width: 120, height: 5 }, {
+          text: "Rekomendasi dan persetujuan pembiayaan",
+          font: tokens.fonts.body,
+          fontSize: 8,
+          color: tokens.colors.muted,
+        }),
+        line("el-memo-rule", { x: 0, y: 22, width: 178, height: 0.4 }, { color: tokens.colors.primary, strokeWidth: 0.4 }),
+      ],
+    },
+    {
+      id: "band-page-header",
+      kind: "pageHeader",
+      height: 20,
+      repeat: true,
+      elements: [
+        field("el-memo-applicant", { x: 0, y: 0, width: 80, height: 6 }, { label: "Pemohon", fontSize: 8 }, "application.applicant"),
+        field("el-memo-number", { x: 82, y: 0, width: 48, height: 6 }, { label: "No. Aplikasi", fontSize: 8 }, "application.applicationNo"),
+        field("el-memo-date", { x: 132, y: 0, width: 46, height: 6 }, { label: "Tanggal", format: "date", align: "right", fontSize: 8 }, "application.preparedAt"),
+        line("el-memo-header-rule", { x: 0, y: 18, width: 178, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+      ],
+    },
+    {
+      id: "band-info",
+      kind: "detail",
+      height: 42,
+      elements: [
+        text("el-memo-info-heading", { x: 0, y: 0, width: 120, height: 6 }, { text: "A. INFORMASI APLIKASI", fontSize: 9, fontWeight: 700, color: tokens.colors.primary }),
+        field("el-memo-amount", { x: 0, y: 8, width: 58, height: 7 }, { label: "Nilai pengajuan", format: "currency", fontSize: 8 }, "application.amount"),
+        field("el-memo-decision", { x: 62, y: 8, width: 58, height: 7 }, { label: "Keputusan", fontSize: 8 }, "application.decision"),
+        text("el-memo-info-note", { x: 0, y: 18, width: 178, height: 20 }, {
+          text: "Aplikasi diajukan untuk kebutuhan modal kerja dengan agunan dan arus kas yang telah diverifikasi. Memo ini menjadi dasar keputusan komite kredit.",
+          fontSize: 8.5,
+          lineHeight: 1.35,
+          color: tokens.colors.text,
+        }),
+      ],
+    },
+    {
+      id: "band-financials",
+      kind: "detail",
+      height: 42,
+      elements: [
+        tableElement("el-memo-table", { x: 0, y: 0, width: 178, height: 42 }, {
+          columns: [
+            { key: "item", label: "Komponen", width: 110, align: "left" },
+            { key: "amount", label: "Nilai", width: 68, align: "right", currency: true },
+          ],
+          headerRepeat: true,
+          rowHeight: 7,
+          rowRules: [
+            { when: "row.amount < 0", color: "#B91C1C", bold: true },
+          ],
+          emptyText: "Tidak ada komponen",
+        }, "financials"),
+      ],
+    },
+    {
+      id: "band-recommendation",
+      kind: "detail",
+      height: 26,
+      elements: [
+        text("el-memo-rec-heading", { x: 0, y: 0, width: 120, height: 6 }, { text: "B. REKOMENDASI", fontSize: 9, fontWeight: 700, color: tokens.colors.primary }),
+        text("el-memo-rec-text", { x: 0, y: 7, width: 178, height: 18 }, {
+          text: "Analis merekomendasikan persetujuan dengan limit sesuai tabel, tenor 24 bulan, dan pemantauan kolektibilitas bulanan. Deviasi di luar kebijakan harus melalui persetujuan tambahan.",
+          fontSize: 8.5,
+          lineHeight: 1.35,
+          flowText: true,
+          color: tokens.colors.text,
+        }),
+      ],
+    },
+    {
+      id: "band-total",
+      kind: "summary",
+      height: 14,
+      elements: [
+        field("el-memo-total", { x: 98, y: 2, width: 80, height: 7 }, {
+          label: "Total komponen",
+          format: "currency",
+          align: "right",
+          fontSize: 9,
+          fontWeight: 700,
+          expression: "FORMAT_NUMBER(SUM(financials.amount), 2)",
+        }, ""),
+      ],
+    },
+    {
+      id: "band-approval",
+      kind: "detail",
+      height: 46,
+      pageBreakBefore: true,
+      elements: [
+        text("el-memo-approval-heading", { x: 0, y: 0, width: 120, height: 6 }, { text: "C. PERSETUJUAN", fontSize: 9, fontWeight: 700, color: tokens.colors.primary }),
+        image("el-memo-sign-1", { x: 6, y: 12, width: 48, height: 16 }, { src: "", alt: "Tanda tangan pemohon", fit: "contain" }),
+        image("el-memo-sign-2", { x: 66, y: 12, width: 48, height: 16 }, { src: "", alt: "Tanda tangan analis", fit: "contain" }),
+        image("el-memo-sign-3", { x: 126, y: 12, width: 48, height: 16 }, { src: "", alt: "Tanda tangan komite", fit: "contain" }),
+        line("el-memo-rule-1", { x: 6, y: 32, width: 48, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+        line("el-memo-rule-2", { x: 66, y: 32, width: 48, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+        line("el-memo-rule-3", { x: 126, y: 32, width: 48, height: 0.3 }, { color: tokens.colors.rule, strokeWidth: 0.3 }),
+        text("el-memo-role-1", { x: 6, y: 34, width: 48, height: 6 }, { text: "Pemohon", fontSize: 8, align: "center", color: tokens.colors.muted }),
+        text("el-memo-role-2", { x: 66, y: 34, width: 48, height: 6 }, { text: "Analis", fontSize: 8, align: "center", color: tokens.colors.muted }),
+        text("el-memo-role-3", { x: 126, y: 34, width: 48, height: 6 }, { text: "Komite Kredit", fontSize: 8, align: "center", color: tokens.colors.muted }),
+      ],
+    },
+    {
+      id: "band-footer",
+      kind: "pageFooter",
+      height: 8,
+      repeat: true,
+      elements: [
+        { id: "el-memo-page", type: "pageNumber", box: { x: 148, y: 2, width: 30, height: 5 }, props: { format: "Page {page} of {total}", fontSize: 7, align: "right", color: tokens.colors.muted } },
+      ],
+    },
+  ];
+  return document;
+}
+
 export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
   {
     id: "blank",
@@ -1200,6 +1522,27 @@ export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
     styleFamily: "minimalMono",
     build: () => receipt("minimalMono"),
   },
+  {
+    id: "preAnalysis",
+    name: { en: "Credit pre-analysis", id: "Pra-analisis kredit" },
+    description: {
+      en: "Application summary, facility table with two-level headers, narrative and signature area.",
+      id: "Ringkasan aplikasi, tabel fasilitas dengan header dua tingkat, narasi dan area tanda tangan.",
+    },
+    styleFamily: "corporateNavy",
+    build: () => preAnalysis("corporateNavy"),
+  },
+  {
+    id: "approvalMemo",
+    name: { en: "Approval memo", id: "Memo persetujuan" },
+    description: {
+      en: "Decision memo with application information, financial table, recommendation and approval signatures.",
+      id: "Memo keputusan dengan informasi aplikasi, tabel keuangan, rekomendasi dan tanda tangan persetujuan.",
+    },
+    styleFamily: "neutralFinance",
+    build: () => approvalMemo("neutralFinance"),
+  },
+
 ];
 
 export function getTemplate(id: string): TemplateDefinition | null {

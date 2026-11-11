@@ -27,6 +27,33 @@ const data = {
   ],
 };
 
+test("parameter defaults and sample overrides resolve consistently in HTML and PDF", () => {
+  const document = buildTemplate("invoice");
+  document.parameters = [{ id: "customer", type: "string", required: false, defaultValue: "Default customer" }];
+  const field = document.bands.flatMap((band) => band.elements).find((element) => element.type === "field")!;
+  field.bindings = { path: "parameters.customer" };
+  delete field.props.expression;
+  for (const [sample, expected] of [[{}, "Default customer"], [{ parameters: { customer: "Override customer" } }, "Override customer"]] as const) {
+    assert.match(renderReportHtml(document, { data: sample }), new RegExp(expected));
+    assert.match(Buffer.from(exportReport(document, "pdf", sample).bytes).toString("latin1"), new RegExp(expected));
+  }
+  field.props.expression = "parameters.customer";
+  assert.match(renderReportHtml(document, { data: {} }), /Default customer/);
+  assert.match(Buffer.from(exportReport(document, "pdf", {}).bytes).toString("latin1"), /Default customer/);
+});
+
+test("export warns for missing or incorrectly typed parameters without showing their values", () => {
+  const document = buildTemplate("invoice");
+  document.parameters = [{ id: "amount", type: "number", required: true }, { id: "day", type: "date", required: false }];
+  const missing = exportReport(document, "pdf");
+  assert.ok(missing.warnings.some((warning) => warning.includes("Required parameter amount")));
+  const invalid = exportReport(document, "pdf", { parameters: { amount: "not a number", day: "2026-02-30" } });
+  assert.equal(invalid.warnings.filter((warning) => warning.includes("must be")).length, 2);
+  assert.ok(invalid.warnings.every((warning) => !warning.includes("not a number")));
+  const valid = exportReport(document, "pdf", { parameters: { amount: "123.45", day: "2026-02-28" } });
+  assert.ok(valid.warnings.every((warning) => !warning.includes("$.parameters")));
+});
+
 test("financial table uses separate PDF cells and exact formatted values", () => {
   const document = buildTemplate("invoice");
   document.locale = "id-ID";
@@ -45,6 +72,22 @@ test("financial table uses separate PDF cells and exact formatted values", () =>
   assert.match(content, / re S Q/);
   assert.match(renderReportHtml(document, { data: sample }), /9\.007\.199\.254\.740\.993,56/);
   assert.ok(pdf.warnings.some((warning) => /table cell\(s\) may be clipped/.test(warning)));
+});
+
+test("PDF and HTML preserve body merges without hiding later rows", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.columns = [{ key: "a", label: "A" }, { key: "b", label: "B" }];
+  table.props.merges = [{ row: 0, col: 0, rowSpan: 2, colSpan: 2 }];
+  const sample = { lines: [{ a: "MERGE_ORIGIN", b: "HIDDEN_ONE" }, { a: "HIDDEN_TWO", b: "HIDDEN_THREE" }, { a: "LATER_ROW", b: "LATER_VALUE" }] };
+  const html = renderReportHtml(document, { data: sample });
+  const pdf = Buffer.from(exportReport(document, "pdf", sample).bytes).toString("latin1");
+  assert.match(html, /colspan="2" rowspan="2"/);
+  for (const output of [html, pdf]) {
+    assert.match(output, /MERGE_ORIGIN/);
+    assert.match(output, /LATER_ROW/);
+    assert.doesNotMatch(output, /HIDDEN_ONE|HIDDEN_TWO|HIDDEN_THREE/);
+  }
 });
 
 test("static table rows render without a dataset and bound data takes precedence", () => {
@@ -70,6 +113,30 @@ test("PDF warns when rich formatting cannot be rendered", () => {
   assert.ok(result.warnings.some((warning) => /underline.*rotation/.test(warning)));
 });
 
+test("box fill and border colors render in both PDF and HTML", () => {
+  const document = buildTemplate("invoice");
+  document.bands[0]!.elements.push({ id: "color-box", type: "rect", box: { x: 10, y: 2, width: 20, height: 8 }, props: { background: "#aabbcc", borderColor: "#123456", borderWidth: 0.5 } });
+  const html = renderReportHtml(document);
+  const pdf = Buffer.from(exportReport(document, "pdf").bytes).toString("latin1");
+  assert.match(html, /border:0\.5mm solid #123456;background:#aabbcc/);
+  assert.match(pdf, /0\.667 0\.733 0\.800 rg .* re f Q/);
+  assert.match(pdf, /0\.071 0\.204 0\.337 RG .* re S Q/);
+});
+
+test("table body fill and border match configured PDF and HTML colors", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  table.props.background = "#aabbcc";
+  table.props.tableBorderColor = "#123456";
+  table.props.tableBorderWidth = 0.5;
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  const html = renderReportHtml(document, { data });
+  assert.match(html, /border:0\.5mm solid #123456/);
+  assert.match(html, /background:#aabbcc/);
+  assert.match(pdf, /0\.667 0\.733 0\.800 rg .* re f Q/);
+  assert.match(pdf, /0\.071 0\.204 0\.337 RG .* re S Q/);
+});
+
 test("PDF embeds an imported transparent PNG with fit, border and background", () => {
   const document = buildTemplate("invoice");
   const image = document.bands.flatMap((band) => band.elements).find((element) => element.type === "image")!;
@@ -86,6 +153,23 @@ test("PDF embeds an imported transparent PNG with fit, border and background", (
   assert.match(pdf, /re W n/);
   assert.match(pdf, /0\.067 0\.133 0\.200 rg/);
   assert.ok(!result.warnings.some((warning) => /image\(s\) could not/.test(warning)));
+});
+
+test("image crop position matches HTML and changes the PDF image placement", () => {
+  const document = buildTemplate("invoice");
+  const image = document.bands.flatMap((band) => band.elements).find((element) => element.type === "image")!;
+  image.props.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  image.props.fit = "cover";
+  image.box.width = 50;
+  image.box.height = 20;
+  image.props.positionX = 0;
+  image.props.positionY = 0;
+  const first = Buffer.from(exportReport(document, "pdf").bytes).toString("latin1").match(/re W n ([^\n]+) cm \/Im1 Do/)?.[1];
+  image.props.positionY = 100;
+  const second = Buffer.from(exportReport(document, "pdf").bytes).toString("latin1").match(/re W n ([^\n]+) cm \/Im1 Do/)?.[1];
+  assert.ok(first && second);
+  assert.notEqual(first, second);
+  assert.match(renderReportHtml(document), /object-position:0% 100%/);
 });
 
 test("PDF reports unsupported images rather than silently dropping them", () => {

@@ -540,6 +540,9 @@ test("image import, CSV sample data and style controls update the draft", async 
     await expect(page.locator('.rs-el[data-id="el-logo"] img')).toBeVisible();
     await page.getByLabel("Image fit").selectOption("cover");
     await expect(page.locator('.rs-el[data-id="el-logo"] img')).toHaveCSS("object-fit", "cover");
+    await page.getByLabel("Image position horizontal (%)").fill("20");
+    await page.getByLabel("Image position vertical (%)").fill("80");
+    await expect(page.locator('.rs-el[data-id="el-logo"] img')).toHaveCSS("object-position", "20% 80%");
     await page.locator(".rs-right").getByLabel("W", { exact: true }).fill("40");
 
     await page.getByRole("button", { name: "Import data (CSV/JSON)" }).click();
@@ -552,6 +555,7 @@ test("image import, CSV sample data and style controls update the draft", async 
       timeout: 10_000,
     });
     await expect(page.frameLocator("iframe").locator('img[alt="dot.png"]')).toHaveCSS("object-fit", "cover");
+    await expect(page.frameLocator("iframe").locator('img[alt="dot.png"]')).toHaveCSS("object-position", "20% 80%");
     await page.getByRole("button", { name: "Design", exact: true }).click();
 
     await page.locator('.rs-el[data-id="el-title"]').click();
@@ -566,6 +570,8 @@ test("image import, CSV sample data and style controls update the draft", async 
     expect(saved).toContain('"background": "#112233"');
     expect(saved).toContain('"src": "data:image/png;base64,');
     expect(saved).toContain('"fit": "cover"');
+    expect(saved).toContain('"positionX": 20');
+    expect(saved).toContain('"positionY": 80');
     const savedLogo = JSON.parse(saved).bands.flatMap((band: { elements: Array<{ id: string; box: { width: number } }> }) => band.elements).find((element: { id: string }) => element.id === "el-logo");
     expect(savedLogo.box.width).toBe(40);
     const downloadPromise = page.waitForEvent("download");
@@ -824,6 +830,53 @@ test("palette adds field, table and form and the result persists after reopen", 
   }
 });
 
+test("box fill and border color appear in the design canvas", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-report-colors-"));
+  try {
+    await createInvoice(page, folder);
+    await page.getByRole("button", { name: "Add box", exact: true }).click();
+    await page.getByLabel("Background", { exact: true }).fill("#aabbcc");
+    await page.getByLabel("Border color", { exact: true }).fill("#123456");
+    const box = page.locator(".rs-el-rect.on");
+    await expect(box).toHaveCSS("background-color", "rgb(170, 187, 204)");
+    await expect(box).toHaveCSS("border-top-color", "rgb(18, 52, 86)");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
+    const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
+    const stored = saved.bands.flatMap((band: any) => band.elements).find((element: any) => element.type === "rect" && element.props.borderColor === "#123456");
+    expect(stored.props.background).toBe("#aabbcc");
+    expect(stored.props.borderWidth).toBeGreaterThan(0);
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A4 workspace zoom, grid and ruler are visual-only", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-report-ruler-"));
+  try {
+    await createInvoice(page, folder);
+    const paper = page.locator(".rs-page");
+    await expect(page.locator(".rs-toolbar")).toContainText("A4 · 210 × 297 mm");
+    const initial = await paper.evaluate((element) => element.getBoundingClientRect().width);
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    expect(await paper.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(initial);
+    await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+    await expect.poll(() => paper.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(initial, 0);
+    await page.getByRole("button", { name: "Grid", exact: true }).click();
+    await expect(paper).toHaveCSS("background-image", /linear-gradient/);
+    await page.getByRole("button", { name: "Ruler", exact: true }).click();
+    await expect(paper.locator(".report-rulers")).toBeAttached();
+    await page.getByRole("button", { name: "Grid", exact: true }).click();
+    await expect(paper).toHaveCSS("background-image", "none");
+    const original = await readFile(path.join(folder, "invoice.report.json"), "utf8");
+    for (let step = 0; step < 5; step++) await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    expect(await paper.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(initial);
+    for (let step = 0; step < 10; step++) await page.getByRole("button", { name: "Zoom out", exact: true }).click();
+    expect(await paper.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(initial);
+    for (let step = 0; step < 5; step++) await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect.poll(() => paper.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(initial, 0);
+    expect(await readFile(path.join(folder, "invoice.report.json"), "utf8")).toBe(original);
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("table column configuration and dataset binding survive save and reopen", async ({ page }) => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-table-columns-"));
   try {
@@ -832,7 +885,13 @@ test("table column configuration and dataset binding survive save and reopen", a
     const panel = page.locator(".rs-table-columns");
     await panel.getByLabel("Data field 1").fill("description");
     await panel.getByLabel("Column heading 1").fill("Description");
+    await panel.getByLabel("Header group (optional) 1").fill("Details");
+    await panel.getByLabel("Header group (optional) 2").fill("Details");
     await panel.getByLabel("Column width 1").fill("80");
+    await panel.getByLabel("Header background").fill("#334455");
+    await panel.getByLabel("Table border color").fill("#123456");
+    await expect(page.locator(".rs-el.on .rs-table-row.header").last()).toHaveCSS("background-color", "rgb(51, 68, 85)");
+    await expect(page.locator(".rs-el.on .rs-table-row.header").last().locator("span").first()).toHaveCSS("border-top-color", "rgb(18, 52, 86)");
     await panel.getByLabel("Number format 2").selectOption("currency");
     await panel.getByRole("button", { name: "Add column" }).click();
     await panel.getByLabel("Column heading 3").fill("Total");
@@ -840,6 +899,8 @@ test("table column configuration and dataset binding survive save and reopen", a
     await panel.getByRole("button", { name: "Add row", exact: true }).click();
     await panel.getByLabel("Static rows (when no binding path) 1 description").fill("Synthetic item");
     await panel.getByLabel("Binding path", { exact: true }).fill("lines");
+    await panel.getByLabel("Conditional table rows Condition expression").fill("row.amount < 0");
+    await panel.getByLabel("Conditional table rows Conditional fill color").fill("#aabbcc");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
     const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
@@ -848,11 +909,53 @@ test("table column configuration and dataset binding survive save and reopen", a
     expect(table.props.columns).toHaveLength(2);
     expect(table.props.columns[0]).toMatchObject({ key: "description", label: "Description", width: 80 });
     expect(table.props.columns[1].format).toBe("currency");
+    expect(table.props.columns[0].headerGroup).toBe("Details");
     expect(table.props.staticRows[0].description).toBe("Synthetic item");
+    expect(table.props.rowCondition).toMatchObject({ when: "row.amount < 0", background: "#aabbcc" });
     await page.reload();
     await page.getByRole("button", { name: /Report Studio/ }).click();
     await page.getByRole("button", { name: /NATIVE.*invoice\.report\.json/ }).click();
     await expect(page.locator(".rs-table-row.header", { hasText: "Description" })).toBeVisible();
+    await page.locator(".rs-data").fill('{"lines":[{"description":"Negative row","amount":-1}]}');
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.frameLocator("iframe").locator('th[colspan="2"]', { hasText: "Details" })).toBeVisible();
+    await expect(page.frameLocator("iframe").locator("td", { hasText: "Negative row" }).first()).toHaveCSS("background-color", "rgb(170, 187, 204)");
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("advanced table headings, merges and multiple rules persist and appear in preview", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-table-advanced-"));
+  try {
+    await createInvoice(page, folder);
+    await page.getByRole("button", { name: "Table", exact: true }).click();
+    const panel = page.locator(".rs-table-columns");
+    await panel.getByLabel("Binding path", { exact: true }).fill("lines");
+    await panel.getByLabel("Data field 1").fill("description");
+    await panel.getByRole("button", { name: "Edit header rows" }).click();
+    await panel.getByLabel("Header 1.1", { exact: true }).fill("Group");
+    await panel.getByLabel("Column span 1.1").fill("2");
+    await panel.getByRole("button", { name: "Remove header cell 1.2" }).click();
+    await panel.getByRole("button", { name: "Add header row" }).click();
+    await panel.getByRole("button", { name: "Add merge", exact: true }).click();
+    await panel.getByLabel("Columns spanned 1").fill("2");
+    await panel.getByLabel("Conditional table rows Condition expression").fill("row.amount < 0");
+    await panel.getByRole("button", { name: "Add row rule" }).click();
+    await panel.getByLabel("Condition expression 2").fill("row.amount > 0");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
+    const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
+    const table = saved.bands.flatMap((band: any) => band.elements).find((element: any) => element.type === "table" && element.props.headerRows);
+    expect(table.props.headerRows).toHaveLength(2);
+    expect(table.props.headerRows[0][0]).toMatchObject({ label: "Group", colSpan: 2 });
+    expect(table.props.merges[0]).toMatchObject({ row: 0, col: 0, colSpan: 2 });
+    expect(table.props.rowRules.map((rule: any) => rule.when)).toEqual(["row.amount < 0", "row.amount > 0"]);
+    await page.reload();
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: /NATIVE.*invoice\.report\.json/ }).click();
+    await page.locator(".rs-data").fill('{"lines":[{"description":"Merged value","amount":1}]}');
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.frameLocator("iframe").locator('th[colspan="2"]', { hasText: "Group" })).toBeVisible();
+    await expect(page.frameLocator("iframe").locator('td[colspan="2"]', { hasText: "Merged value" })).toBeVisible();
   } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
@@ -867,9 +970,58 @@ test("total builder creates a validated formula and previews the calculated tota
     await expect(page.getByRole("button", { name: "Use total formula" })).toBeDisabled();
     await input.fill("lines.amount");
     await page.getByRole("button", { name: "Use total formula" }).click();
-    await expect(page.getByLabel("Expression")).toHaveValue("FORMAT_NUMBER(SUM(lines.amount), 2)");
+    await expect(page.getByLabel("Expression", { exact: true })).toHaveValue("FORMAT_NUMBER(SUM(lines.amount), 2)");
     await page.getByRole("button", { name: "Preview" }).click();
     await expect(page.frameLocator("iframe").locator("body")).toContainText("12.30");
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("multi-page table preview keeps every row visible without overlapping bands", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-paged-table-"));
+  try {
+    await createInvoice(page, folder);
+    await page.locator(".rs-data").fill(JSON.stringify({ lines: Array.from({ length: 90 }, (_, i) => ({ description: `Row ${i + 1}`, quantity: 1, unitPrice: 1, amount: 1 })) }));
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const frame = page.frameLocator("iframe");
+    await expect.poll(() => frame.locator(".report-page").count()).toBeGreaterThan(1);
+    await expect(frame.locator(".el-table tbody tr")).toHaveCount(90);
+    const invalid = await frame.locator(".el-table").evaluateAll((tables) => tables.flatMap((table) => {
+      const box = table.getBoundingClientRect();
+      return [...table.querySelectorAll("tbody tr")].filter((row) => row.getBoundingClientRect().bottom > box.bottom + 1).map(() => "clipped");
+    }));
+    expect(invalid).toEqual([]);
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("conditional colors can be configured and rendered with sample data", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-report-condition-"));
+  try {
+    await createInvoice(page, folder);
+    await page.locator(".rs-data").fill('{"invoice":{"total":150}}');
+    await page.getByRole("button", { name: "Add text", exact: true }).click();
+    await page.locator(".rs-right textarea").first().fill("Condition marker");
+    await page.getByLabel("Condition expression").fill("invoice.total > 100");
+    await page.getByLabel("Conditional fill color").fill("#aabbcc");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.frameLocator("iframe").locator(".el-text", { hasText: "Condition marker" })).toHaveCSS("background-color", "rgb(170, 187, 204)");
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("a narrative section flows over multiple report pages", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-report-narrative-"));
+  try {
+    await createInvoice(page, folder);
+    await page.getByRole("button", { name: "Add flowing text section" }).click();
+    const words = Array.from({ length: 800 }, (_, i) => `WORD${i.toString().padStart(4, "0")}`);
+    await page.locator(".rs-right textarea").first().fill(words.join(" "));
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const frame = page.frameLocator("iframe");
+    await expect.poll(() => frame.locator(".report-page").count()).toBeGreaterThan(1);
+    await expect(frame.locator('.el-text[data-id^="el-narrative-"]').first()).toBeVisible();
+    const fragments = await frame.locator('.el-text[data-id^="el-narrative-"]').allTextContents();
+    expect(fragments.join(" ").trim().split(/\s+/)).toEqual(words);
+    const clipped = await frame.locator('.el-text[data-id^="el-narrative-"]').evaluateAll((elements) => elements.filter((element) => element.scrollHeight > element.clientHeight + 2).length);
+    expect(clipped).toBe(0);
   } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
@@ -986,15 +1138,20 @@ test("parameters and band repeat persist after save", async ({ page }) => {
   try {
     await createInvoice(page, folder);
     await page.getByRole("button", { name: "Add parameter" }).click();
-    await expect(page.getByText(/parameter-1 · string/)).toBeVisible();
+    await page.getByLabel("Parameter name parameter-1").fill("customer");
+    await page.getByRole("checkbox", { name: "Required", exact: true }).check();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.getByText(/Required parameter customer has no value/)).toBeVisible();
+    await page.getByRole("button", { name: "Design", exact: true }).click();
+    await page.getByLabel("Default value customer").fill("Example customer");
     const header = page.locator(".rs-tree > li").filter({ hasText: "pageHeader" });
     if (await header.locator("button").first().getAttribute("aria-expanded") !== "true") await header.locator("button").first().click();
-    await header.locator("input[type=checkbox]").uncheck();
+    await header.getByRole("checkbox", { name: "Repeat" }).uncheck();
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
     const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
     expect(saved.parameters).toHaveLength(1);
-    expect(saved.parameters[0].id).toBe("parameter-1");
+    expect(saved.parameters[0]).toMatchObject({ id: "customer", defaultValue: "Example customer" });
     expect(saved.bands.find((band: { kind: string }) => band.kind === "pageHeader").repeat).toBe(false);
   } finally {
     await rm(folder, { recursive: true, force: true });
@@ -1349,6 +1506,48 @@ test("YRF image and static table and form layouts save to a copy", async ({ page
   } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
+test("YRF zoom, raw ruler and colors apply to a saved copy", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-yrf-view-"));
+  const file = path.join(folder, "sample.yrf");
+  await copyFile(path.resolve("fixtures/reports/synthetic/yrf/minimal.yrf"), file);
+  const original = await readFile(file, "utf8");
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await page.getByRole("button", { name: "YRF (.yrf)" }).click();
+    await page.getByLabel("YRF file path").fill(file);
+    await page.getByRole("button", { name: "Open .yrf" }).click();
+    const paper = page.locator(".yrf-page");
+    const initial = await paper.evaluate((element) => element.getBoundingClientRect().width);
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    expect(await paper.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(initial);
+    await page.getByRole("button", { name: "Grid", exact: true }).click();
+    await expect(paper).toHaveCSS("background-image", /linear-gradient/);
+    await page.getByRole("button", { name: "Ruler", exact: true }).click();
+    await expect(paper.locator(".report-rulers")).toContainText("raw units");
+    await page.locator(".yrf-palette").getByRole("button", { name: "Box", exact: true }).click();
+    await page.getByLabel("Fill color").fill("#aabbcc");
+    await page.getByLabel("Border color").fill("#123456");
+    const box = page.locator(".yrf-object.kind-shape.on");
+    await expect(box).toHaveCSS("background-color", "rgb(170, 187, 204)");
+    await expect(box).toHaveCSS("border-top-color", "rgb(18, 52, 86)");
+    const beforeLeft = Number(await page.getByLabel("left", { exact: true }).inputValue());
+    const bounds = await box.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds!.x + bounds!.width / 2 + 25, bounds!.y + bounds!.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(async () => Number(await page.getByLabel("left", { exact: true }).inputValue())).toBeGreaterThan(beforeLeft);
+    await page.getByRole("button", { name: "Save copy", exact: true }).last().click();
+    const saved = await page.getByText(/Copy saved/).textContent();
+    const copy = JSON.parse(await readFile(saved!.split(":").slice(1).join(":").trim(), "utf8"));
+    const objects = [...copy.layout.pages.flatMap((entry: any) => entry.bands.flatMap((band: any) => band.objects)), ...(copy.layout.reportHeader?.objects ?? []), ...(copy.layout.reportFooter?.objects ?? [])];
+    expect(objects.some((object: any) => object.type === "shape" && object.style?.includes("background-color: #aabbcc") && object.style?.includes("border-color: #123456"))).toBe(true);
+    expect(await readFile(file, "utf8")).toBe(original);
+  } finally { await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("YRF endpoint lines move and existing scalar values can be edited", async ({ page }) => {
   const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-yrf-line-"));
   const file = path.join(folder, "line.yrf");
@@ -1517,6 +1716,55 @@ test("YRF multi-select alignment is written to the saved copy", async ({ page })
     const headerLeft = copy.layout.reportHeader.objects[0].left;
     const pageLeft = copy.layout.pages[0].bands[0].objects[0].left;
     expect(headerLeft).toBe(pageLeft);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+
+test("structure sections can be reordered and persist", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-reorder-"));
+  try {
+    await createInvoice(page, folder);
+    await page.getByRole("button", { name: "Move section down: reportTitle" }).click();
+    await page.locator(".rs-tree > li > button").first().click();
+    await page.getByRole("checkbox", { name: "Page break before" }).first().check();
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
+    const saved = JSON.parse(await readFile(path.join(folder, "invoice.report.json"), "utf8"));
+    expect(saved.bands[0].kind).not.toBe("reportTitle");
+    expect(saved.bands[1].kind).toBe("reportTitle");
+    expect(saved.bands.some((band: { pageBreakBefore?: boolean }) => band.pageBreakBefore === true)).toBe(true);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("pre-analysis template creates, saves, reopens and exports", async ({ page }) => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "uiux-e2e-pretpl-"));
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await setReportFolder(page, folder);
+    await page.getByRole("button", { name: /Create new report/i }).click();
+    await page.getByRole("button", { name: /Credit pre-analysis/ }).click();
+    await page.getByRole("button", { name: "Create report", exact: true }).click();
+    await expect(page.locator(".rs-page")).toBeVisible();
+    await expect(page.getByText("LAPORAN ANALISIS KREDIT").first()).toBeVisible();
+    await page.locator('.rs-el[data-id="el-pre-title"]').click();
+    await page.getByLabel("Content").fill("LAPORAN ANALISIS KREDIT 2026");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Saved", { exact: true }).first()).toBeVisible();
+    const savedPath = path.join(folder, "preAnalysis.report.json");
+    const saved = JSON.parse(await readFile(savedPath, "utf8"));
+    expect(saved.bands.some((band: { id: string }) => band.id === "band-signature")).toBe(true);
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    const download = await downloadPromise;
+    expect(await download.path()).not.toBeNull();
+    await page.getByRole("button", { name: "Back to home" }).click();
+    await page.getByRole("button", { name: /Report Studio/ }).click();
+    await expect(page.getByRole("button", { name: /preAnalysis|Pra-analisis|Credit pre-analysis/ }).first()).toBeVisible();
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

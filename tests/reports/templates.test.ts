@@ -22,7 +22,7 @@ test("every catalog template builds a valid document", () => {
 test("the catalog covers core business, dashboard, thermal and label templates", () => {
   assert.deepEqual(
     TEMPLATE_CATALOG.map((template) => template.id),
-    ["blank", "invoice", "loanSchedule", "statement", "dashboard", "aging", "allocation", "voucher", "collection", "thermalReceipt", "label", "receipt"],
+    ["blank", "invoice", "loanSchedule", "statement", "dashboard", "aging", "allocation", "voucher", "collection", "thermalReceipt", "label", "receipt", "preAnalysis", "approvalMemo"],
   );
   assert.equal(getTemplate("nope"), null);
 });

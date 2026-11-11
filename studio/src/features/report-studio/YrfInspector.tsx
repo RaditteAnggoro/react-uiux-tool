@@ -3,6 +3,7 @@ import { inspectYrf, type YrfInspection, type YrfObjectRef } from "../../../../s
 import { appendYrfObject, applyYrfChanges, parseYrfPath, removeYrfObject, setYrfObjectScalar, valueAtPath, type YrfChange } from "../../../../src/reports/formats/yrf/patch";
 import "./yrf-inspector.css";
 import ReportHelp from "./ReportHelp";
+import CanvasRulers from "./CanvasRulers";
 
 interface YrfInspectorProps {
   token: string;
@@ -151,6 +152,11 @@ const dict = {
     styleDanger: "Danger",
     styleSize: "Font size",
     styleColor: "Text colour",
+    fillColor: "Fill color",
+    borderColor: "Border color",
+    grid: "Grid",
+    ruler: "Ruler",
+    rawUnits: "raw units",
     styleAlign: "Alignment",
     multiSelected: "{count} objects selected",
     alignLeft: "Align left",
@@ -241,6 +247,11 @@ const dict = {
     styleDanger: "Bahaya",
     styleSize: "Ukuran font",
     styleColor: "Warna teks",
+    fillColor: "Warna isi",
+    borderColor: "Warna garis",
+    grid: "Grid",
+    ruler: "Penggaris",
+    rawUnits: "unit mentah",
     styleAlign: "Perataan",
     multiSelected: "{count} objek dipilih",
     alignLeft: "Rata kiri",
@@ -305,6 +316,9 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const tr = dict[language];
   const [filePath, setFilePath] = useState("");
   const [report, setReport] = useState<OpenResult | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showRuler, setShowRuler] = useState(false);
   const [selected, setSelected] = useState<YrfObjectRef | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
@@ -806,7 +820,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const scaleFor = (source: YrfInspection) =>
-    source.paper.width > 0 ? 640 / source.paper.width : 0.25;
+    source.paper.width > 0 ? 640 / source.paper.width * zoom : 0.25 * zoom;
 
   const beginGesture = (
     object: YrfObjectRef,
@@ -899,7 +913,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       window.removeEventListener("mouseup", up);
       window.removeEventListener("keydown", cancel);
     };
-  }, [report, geometryChanges]);
+  }, [report, geometryChanges, zoom]);
 
   const createFile = async () => {
     setBusy(true);
@@ -928,7 +942,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const inspection = report?.inspection;
-  const scale = inspection && inspection.paper.width > 0 ? 640 / inspection.paper.width : 0.25;
+  const scale = inspection ? scaleFor(inspection) : 0.25 * zoom;
+  const rulerStep = inspection ? Math.max(1, Math.round(inspection.paper.width / 1000) * 100) : 100;
   const bands = inspection
     ? [
         ...inspection.sideBands.filter((band) => band.path.endsWith("reportHeader")),
@@ -1200,6 +1215,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
 
           <main className="yrf-canvas-wrap">
             <div className="yrf-note">{tr.selectHint} {tr.readonlyNote}</div>
+            <div className="yrf-view-controls"><button type="button" className="yrf-ghost" aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, Math.round((value - 0.1) * 10) / 10))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" className="yrf-ghost" aria-label="Zoom in" disabled={zoom >= 1.6} onClick={() => setZoom((value) => Math.min(1.6, Math.round((value + 0.1) * 10) / 10))}>+</button><button type="button" className="yrf-ghost" aria-pressed={showGrid} onClick={() => setShowGrid((value) => !value)}>{tr.grid}</button><button type="button" className="yrf-ghost" aria-pressed={showRuler} onClick={() => setShowRuler((value) => !value)}>{tr.ruler}</button></div>
             {selectedPaths.length > 1 && (
               <div className="yrf-align-bar">
                 <span>{tr.multiSelected.replace("{count}", String(selectedPaths.length))}</span>
@@ -1224,8 +1240,11 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
               style={{
                 width: inspection.paper.width * scale,
                 height: inspection.paper.height * scale,
+                backgroundImage: showGrid ? "linear-gradient(to right, #94a3b855 1px, transparent 1px), linear-gradient(to bottom, #94a3b855 1px, transparent 1px)" : undefined,
+                backgroundSize: showGrid ? `${rulerStep * scale}px ${rulerStep * scale}px` : undefined,
               }}
             >
+              {showRuler && <CanvasRulers width={inspection.paper.width} height={inspection.paper.height} scale={scale} step={rulerStep} unit={tr.rawUnits} />}
               {(() => {
                 let cursor = 0;
                 return bands.map((band) => {
@@ -1269,6 +1288,9 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                                 fontStyle: declarations["font-style"],
                                 textDecoration: declarations["text-decoration"],
                                 color: declarations.color,
+                                backgroundColor: declarations["background-color"],
+                                borderColor: declarations["border-color"],
+                                borderStyle: declarations["border-color"] ? "solid" : undefined,
                                 textAlign: declarations["text-align"] as never,
                                 fontSize,
                               };
@@ -1424,6 +1446,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                             }
                             onChange={(event) => updateSelectedStyle({ color: event.target.value })}
                           />
+                          <input aria-label={tr.fillColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["background-color"] ?? "") ? styleMap["background-color"] : "#ffffff"} onChange={(event) => updateSelectedStyle({ "background-color": event.target.value })} />
+                          <input aria-label={tr.borderColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["border-color"] ?? "") ? styleMap["border-color"] : "#cbd5e1"} onChange={(event) => updateSelectedStyle({ "border-color": event.target.value })} />
                           <select
                             aria-label={tr.styleAlign}
                             value={styleMap["text-align"] ?? "left"}

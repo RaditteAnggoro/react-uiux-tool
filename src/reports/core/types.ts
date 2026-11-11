@@ -49,10 +49,12 @@ export interface ReportElement {
 
 export interface ReportBand {
   id: string;
+  label?: string;
   kind: BandKind;
   height: number;
   repeat?: boolean;
   groupBy?: string;
+  pageBreakBefore?: boolean;
   elements: ReportElement[];
 }
 
@@ -208,10 +210,12 @@ export const DOCUMENT_KEYS: readonly string[] = [
 
 export const BAND_KEYS: readonly string[] = [
   "id",
+  "label",
   "kind",
   "height",
   "repeat",
   "groupBy",
+  "pageBreakBefore",
   "elements",
 ];
 

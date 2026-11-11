@@ -10,8 +10,12 @@ import { reportEn, reportId, type ReportKey } from "./i18n";
 import "./report-studio.css";
 import YrfInspector from "./YrfInspector";
 import ReportHelp from "./ReportHelp";
-import { tableHeaderTextColor } from "../../../../src/reports/core/table";
+import CanvasRulers from "./CanvasRulers";
+import TableStructureEditor from "./TableStructureEditor";
+import TableRulesEditor from "./TableRulesEditor";
+import { tableHeaderGroups, tableHeaderMatrix, tableHeaderTextColor } from "../../../../src/reports/core/table";
 import { csvToRecords } from "../../../../src/reports/core/data";
+import { imagePosition } from "../../../../src/reports/core/image-position";
 
 const MM_TO_PX = 96 / 25.4;
 const MIN_ELEMENT_MM = 2;
@@ -123,6 +127,8 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [selectedBand, setSelectedBand] = useState<string | null>(null);
   const [tab, setTab] = useState<"design" | "code" | "preview">("design");
   const [zoom, setZoom] = useState(1);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showRuler, setShowRuler] = useState(false);
   const [templateId, setTemplateId] = useState("invoice");
   const [styleFamily, setStyleFamily] = useState("corporateNavy");
   const [filename, setFilename] = useState("invoice.report.json");
@@ -558,6 +564,32 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       else next[key] = value;
     }
     patchElement({ props: next });
+  };
+
+  const moveBand = (bandId: string, direction: -1 | 1) => {
+    if (!document) return;
+    const index = document.bands.findIndex((band) => band.id === bandId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= document.bands.length) return;
+    const bands = [...document.bands];
+    const [moved] = bands.splice(index, 1);
+    if (!moved) return;
+    bands.splice(target, 0, moved);
+    commit({ ...document, bands });
+  };
+
+  const moveLayer = (bandId: string, elementId: string, direction: -1 | 1) => {
+    if (!document) return;
+    const bands = document.bands.map((band) => {
+      if (band.id !== bandId) return band;
+      const index = band.elements.findIndex((item) => item.id === elementId), target = index + direction;
+      if (index < 0 || target < 0 || target >= band.elements.length) return band;
+      const elements = [...band.elements];
+      const [moved] = elements.splice(index, 1);
+      elements.splice(target, 0, moved!);
+      return { ...band, elements };
+    });
+    commit({ ...document, bands });
   };
 
   const groupSelection = () => {
@@ -1469,12 +1501,12 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             <section>
               <h3>{tr("parameters")}</h3>
               <ul className="rs-params">
-                {document.parameters.map((parameter) => (
-                  <li key={parameter.id}>
-                    <span>
-                      {parameter.id} · {parameter.type}
-                      {parameter.required ? " *" : ""}
-                    </span>
+                {document.parameters.map((parameter, parameterIndex) => (
+                  <li key={parameterIndex}>
+                    <label className="rs-field"><span>{language === "id" ? "Nama parameter" : "Parameter name"}</span><input aria-label={`${language === "id" ? "Nama parameter" : "Parameter name"} ${parameter.id}`} value={parameter.id} onChange={(event) => patchDocument({ parameters: document.parameters.map((item) => item === parameter ? { ...item, id: event.target.value } : item) })} /></label>
+                    <label className="rs-field"><span>{language === "id" ? "Tipe parameter" : "Parameter type"}</span><select aria-label={`${language === "id" ? "Tipe parameter" : "Parameter type"} ${parameter.id}`} value={parameter.type} onChange={(event) => patchDocument({ parameters: document.parameters.map((item) => item === parameter ? { id: item.id, required: item.required, type: event.target.value as typeof item.type } : item) })}><option value="string">Text</option><option value="number">Number</option><option value="boolean">Boolean</option><option value="date">Date</option></select></label>
+                    <label className="rs-check"><input type="checkbox" checked={parameter.required} onChange={(event) => patchDocument({ parameters: document.parameters.map((item) => item === parameter ? { ...item, required: event.target.checked } : item) })} /><span>{language === "id" ? "Wajib" : "Required"}</span></label>
+                    <label className="rs-field"><span>{language === "id" ? "Nilai bawaan" : "Default value"}</span>{parameter.type === "boolean" ? <select aria-label={`${language === "id" ? "Nilai bawaan" : "Default value"} ${parameter.id}`} value={parameter.defaultValue === undefined ? "" : String(parameter.defaultValue)} onChange={(event) => { const value = event.target.value; patchDocument({ parameters: document.parameters.map((item) => item === parameter ? { ...item, defaultValue: value === "" ? undefined : value === "true" } : item) }); }}><option value="">—</option><option value="true">true</option><option value="false">false</option></select> : <input aria-label={`${language === "id" ? "Nilai bawaan" : "Default value"} ${parameter.id}`} type={parameter.type === "date" ? "date" : "text"} value={String(parameter.defaultValue ?? "")} onChange={(event) => { const value = event.target.value; patchDocument({ parameters: document.parameters.map((item) => item === parameter ? { ...item, defaultValue: value === "" ? undefined : value } : item) }); }} />}</label>
                     <button
                       aria-label={`${tr("remove")} ${parameter.id}`}
                       onClick={() =>
@@ -1506,12 +1538,25 @@ export default function ReportStudio({ token, language, onExit, context = "home"
               >
                 {tr("addParameter")}
               </button>
+              <p className="rs-hint">{language === "id" ? 'Gunakan parameters.nama pada binding atau ekspresi. Isi {"parameters":{"nama":"nilai"}} dalam Sample data untuk mengganti nilai bawaan. Nilai wajib atau tipe yang salah menghasilkan warning saat Preview dan ekspor.' : 'Use parameters.name in a binding or expression. Supply {"parameters":{"name":"value"}} in Sample data to override the default. Missing required values or incorrect types produce a warning in Preview and export.'}</p>
             </section>
           )}
 
           {document && (
             <section>
               <h3>{tr("structure")}</h3>
+              <button type="button" className="rs-ghost" onClick={() => {
+                if (!document) return;
+                const suffix = Date.now().toString(36);
+                const bandId = `band-narrative-${suffix}`;
+                const elementId = `el-narrative-${suffix}`;
+                const targetIndex = document.bands.findIndex((band) => band.id === selectedBand);
+                const band: ReportBand = { id: bandId, kind: "detail", height: 30, elements: [{ id: elementId, type: "text", box: { x: 0, y: 0, width: Math.max(10, document.page.width - document.page.margins.left - document.page.margins.right), height: 30 }, props: { text: language === "id" ? "Tulis narasi di sini." : "Write your narrative here.", fontSize: 9, flowText: true } }] };
+                const insertAt = targetIndex >= 0 ? targetIndex + 1 : document.bands.length;
+                commit({ ...document, bands: [...document.bands.slice(0, insertAt), band, ...document.bands.slice(insertAt)] });
+                setSelectedBand(bandId); setExpandedBands((current) => new Set([...current, bandId])); selectIds([elementId]);
+              }}>{tr("addNarrative")}</button>
+              <p className="rs-hint">{tr("narrativeHint")}</p>
               <ul className="rs-tree">
                 {document.bands.map((band) => (
                   <li key={band.id}>
@@ -1531,20 +1576,47 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       <span aria-hidden="true">
                         {expandedBands.has(band.id) ? "▾" : "▸"}
                       </span>{" "}
-                      {band.kind} · {band.height}mm
+                      {band.label || band.kind} · {band.height}mm
                     </button>
+                    <span className="rs-band-controls">
+                      <button
+                        aria-label={`${tr("moveBandUp")}: ${band.kind}`}
+                        disabled={document.bands[0]?.id === band.id}
+                        onClick={() => moveBand(band.id, -1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        aria-label={`${tr("moveBandDown")}: ${band.kind}`}
+                        disabled={document.bands[document.bands.length - 1]?.id === band.id}
+                        onClick={() => moveBand(band.id, 1)}
+                      >
+                        ↓
+                      </button>
+                    </span>
                     <ul
                       hidden={
                         !expandedBands.has(band.id)
                       }
                     >
+                      <li><label className="rs-field"><span>{tr("sectionName")}</span><input aria-label={`${tr("sectionName")}: ${band.id}`} value={band.label ?? ""} onChange={(event) => { const label = event.target.value; if (label.trim()) patchBand(band.id, { label }); else { const { label: _label, ...rest } = band; if (document) commit({ ...document, bands: document.bands.map((item) => item.id === band.id ? rest : item) }); } }} /></label></li>
+                      <li>
+                        <label className="rs-check">
+                          <input
+                            type="checkbox"
+                            checked={band.pageBreakBefore === true}
+                            onChange={(event) => patchBand(band.id, { pageBreakBefore: event.target.checked })}
+                          />
+                          <span>{tr("pageBreakBefore")}</span>
+                        </label>
+                      </li>
                       {(band.kind === "pageHeader" || band.kind === "pageFooter") && <li>
                         <label className="rs-check">
                           <input type="checkbox" checked={band.repeat !== false} onChange={(event) => patchBand(band.id, { repeat: event.target.checked })} />
                           <span>{tr("repeat")}</span>
                         </label>
                       </li>}
-                      {band.elements.map((element) => (
+                      {band.elements.map((element, elementIndex) => (
                         <li key={element.id}>
                           <button
                             className={selectedId === element.id ? "on" : ""}
@@ -1555,6 +1627,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                           >
                             {element.id}
                           </button>
+                          <span className="rs-band-controls"><button type="button" aria-label={`${tr("moveLayerDown")}: ${element.id}`} disabled={elementIndex === 0} onClick={() => moveLayer(band.id, element.id, -1)}>↓</button><button type="button" aria-label={`${tr("moveLayerUp")}: ${element.id}`} disabled={elementIndex === band.elements.length - 1} onClick={() => moveLayer(band.id, element.id, 1)}>↑</button></span>
                         </li>
                       ))}
                     </ul>
@@ -1640,6 +1713,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 >
                   {tr("snap")}
                 </button>
+                <button type="button" className="rs-ghost" aria-label={tr("zoomOut")} disabled={zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, Math.round((value - 0.1) * 10) / 10))}>−</button>
                 <label>
                   {tr("zoom")}
                   <input
@@ -1652,6 +1726,10 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   />
                   <span>{Math.round(zoom * 100)}%</span>
                 </label>
+                <button type="button" className="rs-ghost" aria-label={tr("zoomIn")} disabled={zoom >= 1.6} onClick={() => setZoom((value) => Math.min(1.6, Math.round((value + 0.1) * 10) / 10))}>+</button>
+                <button type="button" className={`rs-ghost ${showGrid ? "on" : ""}`} aria-pressed={showGrid} onClick={() => setShowGrid((value) => !value)}>{tr("showGrid")}</button>
+                <button type="button" className={`rs-ghost ${showRuler ? "on" : ""}`} aria-pressed={showRuler} onClick={() => setShowRuler((value) => !value)}>{tr("showRuler")}</button>
+                {page && <span className="rs-hint">{page.size} · {page.width} × {page.height} {document.units}</span>}
                 <span className="rs-hint">{file}</span>
               </div>
               <div
@@ -1668,8 +1746,11 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       width: page.width * scale,
                       minHeight: page.height * scale,
                       padding: `${page.margins.top * scale}px ${page.margins.right * scale}px ${page.margins.bottom * scale}px ${page.margins.left * scale}px`,
+                      backgroundImage: showGrid ? "linear-gradient(to right, #94a3b855 1px, transparent 1px), linear-gradient(to bottom, #94a3b855 1px, transparent 1px)" : undefined,
+                      backgroundSize: showGrid ? `${10 * scale}px ${10 * scale}px` : undefined,
                     }}
                   >
+                    {showRuler && <CanvasRulers width={page.width} height={page.height} scale={scale} step={10} unit={document.units} />}
                     {document.bands.map((band) => (
                       <BandView
                         key={band.id}
@@ -1894,6 +1975,14 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   />
                 </label>
               )}
+              {selected.type === "field" && canvasData && (() => {
+                const paths = Object.entries(canvasData).flatMap(([name, raw]) => {
+                  const value = Array.isArray(raw) ? raw[0] : raw;
+                  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+                  return Object.keys(value).map((key) => `${name}.${key}`);
+                });
+                return paths.length ? <label className="rs-field"><span>{tr("chooseSampleField")}</span><select value={paths.includes(String(selected.bindings?.path ?? "")) ? String(selected.bindings?.path) : ""} onChange={(event) => { if (event.target.value) patchElement({ bindings: { ...selected.bindings, path: event.target.value } }); }}><option value="">{tr("chooseSampleField")}</option>{paths.map((path) => <option key={path} value={path}>{path}</option>)}</select></label> : null;
+              })()}
               {selected.type === "field" && <section className="rs-total-builder"><h3>{tr("totalBuilder")}</h3><p className="rs-hint">{tr("totalHint")}</p><label className="rs-field"><span>{tr("totalPath")}</span><input value={totalPath} onChange={(event) => setTotalPath(event.target.value)} placeholder="lines.amount" /></label><button className="rs-ghost" type="button" disabled={!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(totalPath)} onClick={() => patchElementProps({ expression: `FORMAT_NUMBER(SUM(${totalPath}), 2)` })}>{tr("totalApply")}</button>{totalPath && !/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(totalPath) && <p className="rs-hint rs-error">{tr("totalInvalid")}</p>}</section>}
               <div className="rs-grid2">
                 <label className="rs-field">
@@ -2001,7 +2090,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                         ? selected.props.borderColor
                         : "#cbd5e1"
                     }
-                    onChange={(event) => patchElementProps({ borderColor: event.target.value })}
+                    onChange={(event) => patchElementProps({ borderColor: event.target.value, borderWidth: Number(selected.props.borderWidth ?? selected.props.strokeWidth ?? 0) || 0.3 })}
                   />
                 </label>
                 <label className="rs-field">
@@ -2099,12 +2188,14 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 return <section className="rs-table-columns"><h3>{tr("tableColumns")}</h3>
                   <label className="rs-field"><span>{tr("bindingPath")}</span><input value={String(selected.bindings?.path ?? "")} onChange={(event) => patchElement({ bindings: { ...selected.bindings, path: event.target.value } })} /></label>
                   <label className="rs-field"><span>{tr("rowHeight")}</span><input type="number" min="2" value={Number(selected.props.rowHeight ?? 7)} onChange={(event) => patchElementProps({ rowHeight: Math.max(2, Number(event.target.value) || 2) })} /></label>
+                  <label className="rs-check"><input type="checkbox" checked={selected.props.headerRepeat !== false} onChange={(event) => patchElementProps({ headerRepeat: event.target.checked })} /><span>{tr("repeatTableHeader")}</span></label>
                   <label className="rs-field"><span>{tr("tableHeaderColor")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(selected.props.tableHeaderColor ?? "")) ? String(selected.props.tableHeaderColor) : "#f1f4f8"} onChange={(event) => patchElementProps({ tableHeaderColor: event.target.value })} /></label>
                   <label className="rs-field"><span>{tr("tableBorderColor")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(selected.props.tableBorderColor ?? "")) ? String(selected.props.tableBorderColor) : "#bfc9d6"} onChange={(event) => patchElementProps({ tableBorderColor: event.target.value })} /></label>
                   <label className="rs-field"><span>{tr("tableBorderWidth")}</span><input type="number" min="0" max="3" step="0.1" value={Number(selected.props.tableBorderWidth ?? 0.2)} onChange={(event) => patchElementProps({ tableBorderWidth: Math.max(0, Math.min(3, Number(event.target.value) || 0)) })} /></label>
                   {columns.map((column, index) => <fieldset key={index} className="rs-column-settings"><legend>{tr("tableColumns")} {index + 1}</legend>
                     <label className="rs-field"><span>{tr("columnKey")}</span><input aria-label={`${tr("columnKey")} ${index + 1}`} value={String(column.key ?? "")} onChange={(event) => setColumn(index, { key: event.target.value })} /></label>
                     <label className="rs-field"><span>{tr("columnLabel")}</span><input aria-label={`${tr("columnLabel")} ${index + 1}`} value={String(column.label ?? "")} onChange={(event) => setColumn(index, { label: event.target.value })} /></label>
+                    <label className="rs-field"><span>{tr("columnGroup")}</span><input aria-label={`${tr("columnGroup")} ${index + 1}`} disabled={Array.isArray(selected.props.headerRows)} value={String(column.headerGroup ?? "")} onChange={(event) => setColumn(index, { headerGroup: event.target.value })} /></label>
                     <label className="rs-field"><span>{tr("columnWidth")}</span><input aria-label={`${tr("columnWidth")} ${index + 1}`} type="number" min="1" value={Number(column.width ?? 1)} onChange={(event) => setColumn(index, { width: Math.max(1, Number(event.target.value) || 1) })} /></label>
                     <label className="rs-field"><span>{tr("columnAlign")}</span><select aria-label={`${tr("columnAlign")} ${index + 1}`} value={String(column.align ?? "left")} onChange={(event) => setColumn(index, { align: event.target.value })}><option value="left">{tr("left")}</option><option value="center">{tr("center")}</option><option value="right">{tr("right")}</option></select></label>
                     <label className="rs-field"><span>{tr("columnFormat")}</span><select aria-label={`${tr("columnFormat")} ${index + 1}`} value={String(column.format ?? (column.currency === true ? "currency" : "text"))} onChange={(event) => setColumn(index, { format: event.target.value, currency: false })}><option value="text">{tr("textFormat")}</option><option value="decimal">{tr("decimalFormat")}</option><option value="currency">{tr("currencyFormat")}</option><option value="percent">{tr("percentFormat")}</option></select></label>
@@ -2112,6 +2203,8 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     <button type="button" className="rs-danger" onClick={() => patchElementProps({ columns: columns.filter((_, i) => i !== index) })}>{tr("removeColumn")} {index + 1}</button>
                   </fieldset>)}
                   <button type="button" className="rs-ghost" onClick={() => { const used = new Set(columns.map((column) => String(column.key ?? ""))); let next = 1; while (used.has(`column${next}`)) next++; patchElementProps({ columns: [...columns, { key: `column${next}`, label: `Column ${next}`, width: 40, align: "left" }] }); }}>{tr("addColumn")}</button>
+                  <TableStructureEditor props={selected.props} columns={columns} language={language} onChange={(patch, remove = []) => { const props = { ...selected.props, ...patch }; for (const key of remove) delete props[key]; patchElement({ props }); }} />
+                  <TableRulesEditor props={selected.props} language={language} onChange={patchElementProps} />
                   <h3>{tr("staticRows")}</h3>
                   {(Array.isArray(selected.props.staticRows) ? selected.props.staticRows as Array<Record<string, unknown>> : []).map((row, rowIndex, rows) => <fieldset className="rs-column-settings" key={rowIndex}><legend>{tr("addRow")} {rowIndex + 1}</legend>
                     {columns.map((column, columnIndex) => <label className="rs-field" key={columnIndex}><span>{String(column.label || column.key || columnIndex + 1)}</span><input aria-label={`${tr("staticRows")} ${rowIndex + 1} ${String(column.key ?? columnIndex)}`} value={String(row[String(column.key ?? "")] ?? "")} onChange={(event) => patchElementProps({ staticRows: rows.map((item, i) => i === rowIndex ? { ...item, [String(column.key ?? "")]: event.target.value } : item) })} /></label>)}
@@ -2119,6 +2212,17 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   </fieldset>)}
                   <button type="button" className="rs-ghost" onClick={() => patchElementProps({ staticRows: [...(Array.isArray(selected.props.staticRows) ? selected.props.staticRows : []), {}] })}>{tr("addRow")}</button>
 
+                </section>;
+              })()}
+              {(selected.type === "text" || selected.type === "field") && (() => {
+                const rules = Array.isArray(selected.conditions) ? selected.conditions : [];
+                const first = rules[0] && typeof rules[0] === "object" && !Array.isArray(rules[0]) ? rules[0] as Record<string, unknown> : {};
+                const update = (patch: Record<string, unknown>) => patchElement({ conditions: [{ ...first, ...patch }, ...rules.slice(1)] });
+                return <section className="rs-conditional"><h3>{tr("conditionalStyle")}</h3><p className="rs-hint">{language === "id" ? "Contoh: invoice.total > 1000000. Berlaku pada Preview dan PDF." : "Example: invoice.total > 1000000. Applies to Preview and PDF."}</p>
+                  <label className="rs-field"><span>{tr("conditionalWhen")}</span><input value={String(first.when ?? "")} onChange={(event) => update({ when: event.target.value })} placeholder="invoice.total > 1000000" /></label>
+                  <label className="rs-field"><span>{tr("conditionalColor")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(first.color ?? "")) ? String(first.color) : "#111827"} onChange={(event) => update({ color: event.target.value })} /></label>
+                  <label className="rs-field"><span>{tr("conditionalFill")}</span><input type="color" value={/^#[0-9a-f]{6}$/i.test(String(first.background ?? "")) ? String(first.background) : "#ffffff"} onChange={(event) => update({ background: event.target.value })} /></label>
+                  {rules.length > 0 && <button type="button" className="rs-ghost danger" onClick={() => patchElement({ conditions: rules.slice(1) })}>{tr("conditionalRemove")}</button>}
                 </section>;
               })()}
               {selected.type === "image" && (
@@ -2140,6 +2244,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       <option value="cover">cover</option>
                     </select>
                   </label>
+                  <div className="rs-grid2">
+                    {([ ["positionX", "imagePositionX"], ["positionY", "imagePositionY"] ] as const).map(([key, label]) => <label className="rs-field" key={key}><span>{tr(label)}</span><input aria-label={tr(label)} type="number" min="0" max="100" value={imagePosition(selected.props[key])} onChange={(event) => patchElementProps({ [key]: imagePosition(event.target.valueAsNumber) })} /></label>)}
+                  </div>
                   <input
                     ref={imageInputRef}
                     type="file"
@@ -2587,15 +2694,21 @@ function BandView({
               : !path && Array.isArray(element.props.staticRows) ? element.props.staticRows as Array<Record<string, unknown>> : [];
             return (
               <div className="rs-table-stub">
+                {(() => {
+                  const matrix = tableHeaderMatrix(element.props.headerRows, columns.length);
+                  return matrix ? <div className="rs-table-matrix" style={{ display: "grid", gridTemplateColumns: columns.map((column) => `${Number(column.width) > 0 ? Number(column.width) : 1}fr`).join(" "), color: tableHeaderTextColor(element.props.tableHeaderColor), background: String(element.props.tableHeaderColor ?? "#f1f5f9") }}>{matrix.map((cell, index) => <span key={index} style={{ gridColumn: `${cell.column + 1} / span ${cell.colSpan}`, gridRow: `${cell.row + 1} / span ${cell.rowSpan}`, textAlign: cell.align as "left" | "right" | "center", border: `${Math.max(0, Number(element.props.tableBorderWidth ?? 0.2)) * scale}px solid ${String(element.props.tableBorderColor ?? "#bfc9d6")}` }}>{cell.label}</span>)}</div> : <>
+                {tableHeaderGroups(columns).some((group) => group.label) && <div className="rs-table-row header" style={{ color: tableHeaderTextColor(element.props.tableHeaderColor), background: String(element.props.tableHeaderColor ?? "#f1f5f9") }}>{tableHeaderGroups(columns).map((group) => <span key={group.start} style={{ flex: columns.slice(group.start, group.start + group.count).reduce((sum, column) => sum + (Number(column.width) > 0 ? Number(column.width) : 1), 0), textAlign: "center" }}>{group.label}</span>)}</div>}
                 <div className="rs-table-row header" style={{ color: tableHeaderTextColor(element.props.tableHeaderColor), background: String(element.props.tableHeaderColor ?? "#f1f5f9"), borderColor: String(element.props.tableBorderColor ?? "#bfc9d6") }}>
                   {columns.map((column, index) => (
-                    <span key={index} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left" }}>{String(column.label ?? "")}</span>
+                    <span key={index} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left", border: `${Math.max(0, Number(element.props.tableBorderWidth ?? 0.2)) * scale}px solid ${String(element.props.tableBorderColor ?? "#bfc9d6")}` }}>{String(column.label ?? "")}</span>
                   ))}
                 </div>
+                </>;
+                })()}
                 {rows.slice(0, 3).map((row, index) => (
                   <div className="rs-table-row" key={index}>
                     {columns.map((column, columnIndex) => (
-                      <span key={columnIndex} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left" }}>
+                      <span key={columnIndex} style={{ flex: Number(column.width) > 0 ? Number(column.width) : 1, textAlign: column.align === "right" ? "right" : column.align === "center" ? "center" : "left", border: `${Math.max(0, Number(element.props.tableBorderWidth ?? 0.2)) * scale}px solid ${String(element.props.tableBorderColor ?? "#bfc9d6")}` }}>
                         {String(row?.[String(column.key)] ?? "")}
                       </span>
                     ))}
@@ -2616,7 +2729,7 @@ function BandView({
                 className="rs-image"
                 src={element.props.src}
                 alt={String(element.props.alt ?? "")}
-                style={{ objectFit: element.props.fit === "cover" ? "cover" : "contain" }}
+                style={{ objectFit: element.props.fit === "cover" ? "cover" : "contain", objectPosition: `${imagePosition(element.props.positionX)}% ${imagePosition(element.props.positionY)}%` }}
               />
             ) : (
               <span className="rs-image-stub">{String(element.props.alt || "LOGO")}</span>

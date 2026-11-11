@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildTemplate,
+  paginateReport,
   renderReportHtml,
 } from "../../src/reports/index.js";
 
@@ -111,4 +112,66 @@ test("text wrapping respects the chosen setting in HTML output", () => {
   assert.ok(tag);
   assert.match(tag, /white-space:pre(?:;|\")/);
   assert.doesNotMatch(tag, /white-space:pre-wrap/);
+});
+
+
+test("advanced tables render header matrix, merged cells and multiple row rules", () => {
+  const document = buildTemplate("preAnalysis");
+  const table = document.bands
+    .flatMap((band) => band.elements)
+    .find((element) => element.type === "table")!;
+  const data = {
+    facilities: [
+      { facility: "KMK", plafon: "1000000", outstanding: "950000", tenor: "24", status: "Menunggak" },
+      { facility: "KI", plafon: "500000", outstanding: "100000", tenor: "12", status: "Lancar" },
+    ],
+  };
+  const html = renderReportHtml(document, { data });
+  assert.match(html, /colspan="2"/);
+  assert.match(html, /rowspan="2"/);
+  assert.match(html, /Fasilitas/);
+  assert.match(html, /font-weight:700/);
+  assert.match(html, /#FEF3C7/);
+  assert.match(html, /#B91C1C/);
+
+  const merged = buildTemplate("approvalMemo");
+  const mergedTable = merged.bands
+    .flatMap((band) => band.elements)
+    .find((element) => element.type === "table")!;
+  mergedTable.props.merges = [{ row: 0, col: 0, colSpan: 2, rowSpan: 2 }];
+  const mergedHtml = renderReportHtml(merged, {
+    data: { financials: [{ item: "Plafon", amount: "1000" }, { item: "Biaya", amount: "100" }] },
+  });
+  assert.match(mergedHtml, /colspan="2"/);
+  assert.match(mergedHtml, /rowspan="2"/);
+});
+
+test("advanced header matrix reserves all rows and renders in PDF with row rules", async () => {
+  const { exportReport, validateReportDocument } = await import("../../src/reports/index.js");
+  const document = buildTemplate("preAnalysis");
+  const table = document.bands.flatMap((band) => band.elements).find((element) => element.type === "table")!;
+  const data = { facilities: [{ facility: "KMK", plafon: "1000", outstanding: "950", tenor: "24", status: "Menunggak" }] };
+  const placement = paginateReport(document, { data }).flatMap((page) => page.bands).find((band) => band.band.id === "band-facilities")!;
+  assert.equal(placement.height, 12 + 7);
+  const result = exportReport(document, "pdf", data);
+  const pdf = Buffer.from(result.bytes).toString("latin1");
+  assert.match(pdf, /\(Nominal\)/);
+  assert.match(pdf, /\(Outstanding\)/);
+  assert.match(pdf, /0\.996 0\.953 0\.780 rg/);
+  assert.ok(result.warnings.some((warning) => /advanced table/.test(warning)));
+  table.props.headerRows = [[{ label: "bad", colSpan: 999 }]];
+  assert.ok(validateReportDocument(document).errors.some((issue) => issue.code === "INVALID_TABLE_HEADER"));
+});
+
+test("pageBreakBefore starts a new page", () => {
+  const document = buildTemplate("approvalMemo");
+  const pages = paginateReport(document, {
+    data: {
+      application: { applicant: "PT Contoh", applicationNo: "A-1", amount: "1000", decision: "Setuju", preparedAt: "2026-01-01" },
+      financials: [{ item: "Plafon", amount: "1000" }],
+    },
+  });
+  assert.ok(pages.length >= 2);
+  const approvalBand = document.bands.find((band) => band.id === "band-approval")!;
+  assert.equal(approvalBand.pageBreakBefore, true);
 });

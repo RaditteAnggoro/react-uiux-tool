@@ -1,4 +1,7 @@
-import { tableCellText, tableHeaderTextColor } from "../core/table.js";
+import { reportCondition } from "../core/conditions.js";
+import { withParameterDefaults } from "../core/parameters.js";
+import { imagePosition } from "../core/image-position.js";
+import { tableCellText, tableColumnWidths, tableHeaderGroups, tableHeaderTextColor } from "../core/table.js";
 import type { ReportBand, ReportDocumentV1, ReportElement } from "../core/types.js";
 import { evaluateExpression } from "../core/expressions.js";
 import { toDecimalString } from "../core/decimal.js";
@@ -135,33 +138,6 @@ function boxStyle(element: ReportElement, extra = ""): string {
   return `position:absolute;left:${x}mm;top:${y}mm;width:${width}mm;height:${height}mm;overflow:hidden;${extras.join(";")}${extra ? `;${extra}` : ""}`;
 }
 
-interface ConditionResult {
-  hidden: boolean;
-  css: string;
-}
-
-function evaluateConditions(element: ReportElement, options: RenderOptions): ConditionResult {
-  const rules = Array.isArray(element.conditions) ? element.conditions : [];
-  const css: string[] = [];
-  let hidden = false;
-  for (const rule of rules) {
-    if (!rule || typeof rule !== "object") continue;
-    const record = rule as Record<string, unknown>;
-    if (typeof record.when !== "string") continue;
-    const result = evaluateExpression(record.when, { datasets: options.data });
-    if (!result.ok || !result.value) continue;
-    if (typeof result.value === "object" && result.value.units === 0n) continue;
-    if (record.hide === true) hidden = true;
-    if (typeof record.color === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(record.color)) {
-      css.push(`color:${record.color}`);
-    }
-    if (typeof record.background === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(record.background)) {
-      css.push(`background:${record.background}`);
-    }
-  }
-  return { hidden, css: css.join(";") };
-}
-
 
 interface CrosstabCell {
   row: string;
@@ -238,11 +214,11 @@ function renderElement(
   page: number,
   totalPages: number,
 ): string {
-  const condition = evaluateConditions(element, options);
+  const condition = reportCondition(element, options.data);
   if (condition.hidden) return "";
   const props = element.props;
   const binding = typeof element.bindings?.path === "string" ? element.bindings.path : "";
-  const conditionCss = condition.css ? `;${condition.css}` : "";
+  const conditionCss = `${condition.color ? `;color:${condition.color}` : ""}${condition.background ? `;background:${condition.background}` : ""}`;
   const style = `${styleFor(document, props)}${conditionCss}`;
   const scopedOptions: RenderOptions = rowScope
     ? { ...options, data: { ...(options.data ?? {}), row: rowScope } }
@@ -272,7 +248,7 @@ function renderElement(
       const alt = escapeHtml(props.alt ?? "");
       const fit = props.fit === "cover" ? "cover" : "contain";
       if (src && SAFE_IMAGE.test(src)) {
-        return `<div class="el el-image" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><img alt="${alt}" src="${src}" style="width:100%;height:100%;object-fit:${fit}" /></div>`;
+        return `<div class="el el-image" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><img alt="${alt}" src="${src}" style="width:100%;height:100%;object-fit:${fit};object-position:${imagePosition(props.positionX)}% ${imagePosition(props.positionY)}%" /></div>`;
       }
       return `<div class="el el-image el-image-empty" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)}" role="img" aria-label="${alt}"></div>`;
     }
@@ -315,10 +291,11 @@ function renderElement(
     }
     case "line":
     case "rect": {
-      const color = typeof props.color === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(props.color) ? props.color : "#CBD5E1";
+      const colorValue = props.borderColor ?? props.color;
+      const color = typeof colorValue === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(colorValue) ? colorValue : "#CBD5E1";
       const fill = element.type === "line"
         ? `background:${color}`
-        : `border:${Number(props.strokeWidth) || 0.4}mm solid ${color};background:${typeof props.background === "string" ? props.background : "transparent"}`;
+        : `border:${Number(props.borderWidth ?? props.strokeWidth) || 0.4}mm solid ${color};background:${typeof props.background === "string" && /^#[0-9A-Fa-f]{3,8}$/.test(props.background) ? props.background : "transparent"}`;
       return `<div class="el el-${element.type}" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, fill)}"></div>`;
     }
     case "pageNumber": {
@@ -342,35 +319,98 @@ function renderTable(
   style: string,
   _page: number,
   _totalPages: number,
+  showHeader = true,
+  data?: Record<string, unknown>,
+  rowOffset = 0,
 ): string {
   const props = element.props;
   const safeColor = (value: unknown, fallback: string) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   const headerColor = safeColor(props.tableHeaderColor, "#f1f4f8");
   const borderColor = safeColor(props.tableBorderColor, "#bfc9d6");
   const borderWidth = Math.max(0, Math.min(3, Number.isFinite(Number(props.tableBorderWidth)) ? Number(props.tableBorderWidth) : 0.2));
-  const header = columns
-    .map((column) => {
+  const rowHeight = Number.isFinite(Number(props.rowHeight)) && Number(props.rowHeight) > 1 ? Number(props.rowHeight) : 7;
+  const headerHeight = Number.isFinite(Number(props.headerHeight)) && Number(props.headerHeight) >= 0 ? Number(props.headerHeight) : 6;
+  const groups = tableHeaderGroups(columns);
+  const grouped = groups.some((group) => group.label);
+  const headerRows = Array.isArray(props.headerRows)
+    ? (props.headerRows as Array<Array<Record<string, unknown>>>)
+    : null;
+  const headerCell = (column: Record<string, unknown>, rowSpan = false) => {
       const align = column.align === "right" ? "right" : column.align === "center" ? "center" : "left";
-      return `<th style="width:${Number(column.width) || 0}mm;text-align:${align};background:${headerColor};color:${tableHeaderTextColor(headerColor)};border:${borderWidth}mm solid ${borderColor}">${escapeHtml(column.label ?? column.key ?? "")}</th>`;
-    })
-    .join("");
+      return `<th${rowSpan ? ' rowspan="2"' : ""} style="text-align:${align};background:${headerColor};color:${tableHeaderTextColor(headerColor)};border:${borderWidth}mm solid ${borderColor}">${escapeHtml(column.label ?? column.key ?? "")}</th>`;
+    };
+  const header = headerRows
+    ? headerRows
+        .map(
+          (row) =>
+            `<tr style="height:${headerHeight}mm">${row
+              .map((cell) => {
+                const span = Math.max(1, Number(cell.colSpan) || 1);
+                const rowSpan = Math.max(1, Number(cell.rowSpan) || 1);
+                const align = cell.align === "right" ? "right" : cell.align === "center" ? "center" : "left";
+                return `<th colspan="${span}" rowspan="${rowSpan}" style="text-align:${align};background:${headerColor};color:${tableHeaderTextColor(headerColor)};border:${borderWidth}mm solid ${borderColor}">${escapeHtml(cell.label ?? "")}</th>`;
+              })
+              .join("")}</tr>`,
+        )
+        .join("")
+    : grouped ? `<tr style="height:${headerHeight}mm">${groups.map((group) => group.label
+    ? `<th colspan="${group.count}" style="text-align:center;background:${headerColor};color:${tableHeaderTextColor(headerColor)};border:${borderWidth}mm solid ${borderColor}">${escapeHtml(group.label)}</th>`
+    : headerCell(columns[group.start]!, true)).join("")}</tr><tr style="height:${headerHeight}mm">${groups.filter((group) => group.label).flatMap((group) => columns.slice(group.start, group.start + group.count).map((column) => headerCell(column))).join("")}</tr>`
+    : `<tr style="height:${headerHeight}mm">${columns.map((column) => headerCell(column)).join("")}</tr>`;
+  const mergeSpecs = Array.isArray(props.merges)
+    ? (props.merges as Array<Record<string, unknown>>)
+    : [];
+  const mergeOrigins = new Map<string, { colSpan: number; rowSpan: number; style: Record<string, unknown> }>();
+  const mergeCovered = new Set<string>();
+  for (const spec of mergeSpecs) {
+    const row = Number(spec.row) - rowOffset;
+    const col = Number(spec.col);
+    if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0 || row >= rows.length || col >= columns.length) continue;
+    const colSpan = Math.max(1, Math.min(columns.length - col, Number(spec.colSpan) || 1));
+    const rowSpan = Math.max(1, Number(spec.rowSpan) || 1);
+    if (row + rowSpan > rows.length) continue;
+    mergeOrigins.set(`${row}:${col}`, {
+      colSpan,
+      rowSpan,
+      style: spec.style && typeof spec.style === "object" ? (spec.style as Record<string, unknown>) : {},
+    });
+    for (let r = row; r < row + rowSpan; r += 1) {
+      for (let c = col; c < col + colSpan; c += 1) {
+        if (r !== row || c !== col) mergeCovered.add(`${r}:${c}`);
+      }
+    }
+  }
+  const rowRules = Array.isArray(props.rowRules)
+    ? (props.rowRules as Array<Record<string, unknown>>)
+    : props.rowCondition
+      ? [props.rowCondition as Record<string, unknown>]
+      : [];
   const body = rows.length
     ? rows
-        .map((row) => {
+        .map((row, rowIndex) => {
+          const rowRecord = row && typeof row === "object" && !Array.isArray(row) ? (row as Record<string, unknown>) : undefined;
+          const rowStyle = reportCondition({ conditions: rowRules }, data, rowRecord);
           const cells = columns
-            .map((column) => {
+            .map((column, colIndex) => {
+              if (mergeCovered.has(`${rowIndex}:${colIndex}`)) return "";
+              const origin = mergeOrigins.get(`${rowIndex}:${colIndex}`);
               const key = String(column.key ?? "");
               const align = column.align === "right" ? "right" : column.align === "center" ? "center" : "left";
               const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[key] : undefined;
               const cell = escapeHtml(raw === undefined || raw === null || raw === "" ? (props.emptyText ?? "—") : tableCellText(raw, column, document.locale));
-              return `<td style="text-align:${align};border:${borderWidth}mm solid ${borderColor}">${cell}</td>`;
+              const extraStyle = origin?.style ?? {};
+              const spans = origin
+                ? `${origin.colSpan > 1 ? ` colspan="${origin.colSpan}"` : ""}${origin.rowSpan > 1 ? ` rowspan="${origin.rowSpan}"` : ""}`
+                : "";
+              return `<td${spans} style="text-align:${align};border:${borderWidth}mm solid ${borderColor}${rowStyle.color ? `;color:${rowStyle.color}` : ""}${rowStyle.background ? `;background:${rowStyle.background}` : ""}${rowStyle.bold ? ";font-weight:700" : ""}${rowStyle.italic ? ";font-style:italic" : ""}${typeof extraStyle.color === "string" ? `;color:${safeColor(extraStyle.color, "#111827")}` : ""}${typeof extraStyle.background === "string" ? `;background:${safeColor(extraStyle.background, "#ffffff")}` : ""}">${cell}</td>`;
             })
             .join("");
-          return `<tr>${cells}</tr>`;
+          return `<tr style="height:${rowHeight}mm">${cells}</tr>`;
         })
         .join("")
     : `<tr><td class="el-empty" colspan="${Math.max(columns.length, 1)}">${escapeHtml(props.emptyText ?? "")}</td></tr>`;
-  return `<div class="el el-table" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const colgroup = tableColumnWidths(columns, 100).map((width) => `<col style="width:${width}%">`).join("");
+  return `<div class="el el-table" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><table><colgroup>${colgroup}</colgroup>${showHeader ? `<thead>${header}</thead>` : ""}<tbody>${body}</tbody></table></div>`;
 }
 
 function renderBand(
@@ -387,16 +427,20 @@ function renderBand(
   const elements = band.elements
     .map((element) => {
       if (element.type === "table") {
+        const condition = reportCondition(element, bandOptions.data);
+        if (condition.hidden) return "";
         const columns = Array.isArray(element.props.columns)
           ? (element.props.columns as Array<Record<string, unknown>>)
           : [];
         const rows = placed.rows ?? [];
-        return renderTable(document, element, columns, rows, styleFor(document, element.props), page, totalPages);
+        const table = { ...element, props: { ...element.props, ...(condition.color ? { color: condition.color } : {}), ...(condition.background ? { background: condition.background } : {}) }, box: placed.rows ? { ...element.box, height: Math.max(0, placed.height - element.box.y) } : element.box };
+        return renderTable(document, table, columns, rows, styleFor(document, table.props), page, totalPages, placed.showTableHeader !== false, bandOptions.data, placed.rowOffset ?? 0);
       }
-      return renderElement(document, element, bandOptions, undefined, page, totalPages);
+      const rendered = placed.textFragment !== undefined && element.type === "text" ? { ...element, props: { ...element.props, text: placed.textFragment, lineHeight: 1.2 }, box: { ...element.box, height: Math.max(0, placed.height - element.box.y) } } : element;
+      return renderElement(document, rendered, bandOptions, undefined, page, totalPages);
     })
     .join("");
-  return `<section class="band band-${escapeHtml(band.kind)}" data-band="${escapeHtml(band.id)}" style="position:relative;height:${band.height}mm;margin-top:${placed.y === 0 ? 0 : 0}mm">${elements}</section>`;
+  return `<section class="band band-${escapeHtml(band.kind)}" data-band="${escapeHtml(band.id)}" style="position:absolute;left:${document.page.margins.left}mm;right:${document.page.margins.right}mm;top:${document.page.margins.top + placed.y}mm;height:${placed.height}mm">${elements}</section>`;
 }
 
 /** Multi-page, deterministic print HTML. One authoritative layout for preview/print. */
@@ -404,6 +448,7 @@ export function renderReportHtml(
   document: ReportDocumentV1,
   options: RenderOptions = {},
 ): string {
+  options = { ...options, data: withParameterDefaults(document, options.data) };
   const pages = paginateReport(document, { data: options.data });
   const totalPages = pages.length;
   const tokens = document.styleTokens as { colors?: Record<string, string> };
@@ -430,10 +475,10 @@ ${bands}
 <style>
 @page { size: ${page.width}mm ${page.height}mm; margin: 0; }
 html, body { margin: 0; padding: 0; background: #EDEFF2; }
-.report-page { position: relative; box-sizing: border-box; width: ${page.width}mm; min-height: ${page.height}mm; background: ${background}; padding: ${page.margins.top}mm ${page.margins.right}mm ${page.margins.bottom}mm ${page.margins.left}mm; margin: 0 auto; page-break-after: always; }
+.report-page { display: block; position: relative; box-sizing: border-box; width: ${page.width}mm; min-height: ${page.height}mm; background: ${background}; padding: ${page.margins.top}mm ${page.margins.right}mm ${page.margins.bottom}mm ${page.margins.left}mm; margin: 0 auto; page-break-after: always; }
 .report-page:last-child { page-break-after: auto; }
 .band { box-sizing: border-box; }
-.el-table table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+.el-table table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 8pt; }
 .el-table th, .el-table td { padding: 1.2mm 1.5mm; border-bottom: 0.2mm solid #D6DCE5; }
 .el-table th { background: #F1F4F8; font-weight: 600; }
 .el-empty { color: #6B7280; text-align: center; }

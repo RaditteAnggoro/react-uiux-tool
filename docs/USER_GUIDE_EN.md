@@ -634,7 +634,10 @@ Open **Report Studio** from Home. Use **Report guide** in either the native or Y
    `.yrf` files also expose a Styles palette and style controls (bold/italic/underline,
    size, colour, alignment) that edit the vendor `style` string and update the approximate
    canvas; select several objects with Shift/Cmd-click to align them, then **Save copy**.
-   The report header has an explicit **Exit** button. Remove/Delete actions are filled red.
+   New templates **Credit pre-analysis** and **Approval memo** add summary pages,
+   two-level table headers, highlighted rows, narrative and signature areas. In Structure
+   use ↑/↓ to reorder sections and **Page break before** to start a new page. The report
+   header has an explicit **Exit** button. Remove/Delete actions are filled red.
 6. `.yrf` opens in the same studio. Design is explicitly approximate, Code is editable and
    validated, and saving always writes a sibling `*.edited.yrf` copy — the original is
    never rewritten. Creation stays experimental and labelled.
@@ -685,3 +688,27 @@ Select a native table to edit its columns in Properties: set field key, heading,
 
 
 To create a total, select a native Field and enter a dataset and field such as `lines.amount` in **Create a total**. Choose **Use total formula**, then Preview with sample data. For a group footer, `group.amount` uses the current group. Verify the output and rounding against independently calculated values.
+
+
+New native reports start on A4 (210 × 297 mm); existing reports keep their saved paper size. Use **Zoom in** and **Zoom out** or the slider to change the screen view. Toggle **Grid** and **Ruler** for alignment; these guides do not print. In YRF the ruler shows unverified raw units. Select an object and choose **Background** and **Border color**; changing border color enables a visible border. Check Preview and exported PDF. YRF fill and border previews are approximate and should be checked in WaiReport.
+
+
+For grouped table headings, give adjacent columns the same **Header group (optional)** value. Use **Repeat table heading on each page** to control continuation pages. Use **Add flowing text section** in Structure for simple narrative that continues across pages; check the result because wrapping uses an approximation. For conditional colors, select text or a field, enter a condition such as `invoice.total > 100` and set the colors in **Conditional style**. Conditions affect Preview/PDF; verify with sample data.
+
+
+To highlight table rows, select a table and set **Conditional table rows**, for example `row.amount < 0`, plus a text or fill color. Use **Add row rule** for another condition. Preview with matching and non-matching rows; the last matching color wins.
+
+### Multi-level table headings and merged cells
+
+1. Select a native table and configure its columns first. In **Advanced table structure**, choose **Edit header rows**.
+2. Change each heading and its column/row spans. Choose **Add header row** for another level. The spans must cover the complete grid; fix any red message before saving. Custom header rows replace the optional column groups.
+3. Under **Merged body cells**, choose **Add merge**. Set the starting row and column (both start at 1) and the number of rows and columns to join. The first cell supplies the displayed value; avoid overlapping ranges.
+4. Enter representative **Sample data**, select **Preview**, and check every page before saving or exporting. HTML keeps a multi-row merge together when it fits on a page. If it cannot fit, cells remain separate. PDF and other exports can simplify these features and show a warning.
+
+In **Structure**, expand a section to rename it and use its layer controls to change the order of elements within that section. Select a data field to choose a field from the available sample data, or enter its binding path manually.
+
+For a native image, choose **Image fit → cover** to fill its frame. Adjust **Image position horizontal (%)** and **Image position vertical (%)** from 0 to 100 to choose which part remains visible; 50 centers the image. The same position is used in Design, Preview and PDF. This is frame positioning, not a freeform crop rectangle.
+
+### Report parameters
+
+In the native report sidebar, choose **Add parameter**, enter a name such as `customer`, select its type, and optionally set a default. Select a field and use `parameters.customer` as its binding path or expression. For expressions, use names made of letters, digits and underscores, starting with a letter or underscore. In **Sample data**, override the default with `{"parameters":{"customer":"Example customer"}}`; Preview and PDF use the override. Preview and export warn when a required value is missing or its type is incorrect; they do not block output. Check the warnings and values before exporting.

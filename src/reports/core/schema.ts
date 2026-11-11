@@ -11,6 +11,7 @@ import {
   RDM_KIND,
   RDM_SCHEMA_VERSION,
 } from "./types.js";
+import { tableHeaderMatrix, validTableMerges } from "./table.js";
 import type {
   BandKind,
   ElementType,
@@ -281,6 +282,12 @@ function validateElement(
   }
   const box = validateBox(element.box, `${path}.box`, collector, page);
   const props = requireObject(element.props, `${path}.props`, collector) ?? {};
+  if (type === "table" && props.headerRows !== undefined && !tableHeaderMatrix(props.headerRows, Array.isArray(props.columns) ? props.columns.length : 0)) {
+    collector.error("INVALID_TABLE_HEADER", `${path}.props.headerRows`, "Header spans must form a complete, non-overlapping grid matching the columns");
+  }
+  if (type === "table" && props.merges !== undefined && !validTableMerges(props.merges, Array.isArray(props.columns) ? props.columns.length : 0)) {
+    collector.error("INVALID_TABLE_MERGES", `${path}.props.merges`, "Merged cells must use valid non-overlapping row and column ranges");
+  }
   for (const key of Object.keys(props)) {
     const entry = props[key];
     if (entry === undefined) {
@@ -362,6 +369,10 @@ function validateBand(
   if (band.groupBy !== undefined) {
     requireString(band.groupBy, `${path}.groupBy`, collector, { max: 200 });
   }
+  if (band.label !== undefined) requireString(band.label, `${path}.label`, collector, { max: 100 });
+  if (band.pageBreakBefore !== undefined && typeof band.pageBreakBefore !== "boolean") {
+    collector.error("INVALID_BOOLEAN", `${path}.pageBreakBefore`, "Expected a boolean");
+  }
   if (!Array.isArray(band.elements)) {
     collector.error(
       "INVALID_ARRAY",
@@ -397,6 +408,8 @@ function validateBand(
   };
   if (band.repeat === true) result.repeat = true;
   if (typeof band.groupBy === "string") result.groupBy = band.groupBy;
+  if (typeof band.label === "string" && band.label.trim()) result.label = band.label;
+  if (band.pageBreakBefore === true) result.pageBreakBefore = true;
   return result;
 }
 

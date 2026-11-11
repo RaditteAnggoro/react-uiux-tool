@@ -640,7 +640,10 @@ Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native
    palette Gaya dan kontrol gaya (tebal/miring/garis bawah, ukuran, warna, perataan) yang
    mengubah string `style` vendor dan memperbarui kanvas perkiraan; pilih beberapa objek
    dengan Shift/Cmd-click untuk meratakannya, lalu **Save copy**. Header laporan punya
-   tombol **Keluar** eksplisit. Aksi hapus berwarna merah.
+   Template baru **Pra-analisis kredit** dan **Memo persetujuan** menambahkan halaman
+   ringkasan, header tabel dua tingkat, baris tersorot, narasi dan area tanda tangan. Di
+   Structure gunakan ↑/↓ untuk mengubah urutan bagian dan **Pindah halaman sebelum** untuk
+   memulai halaman baru. Header laporan punya tombol **Keluar** eksplisit. Aksi hapus berwarna merah.
 6. `.yrf` dibuka di studio yang sama. Design ditandai perkiraan, Code bisa diedit dan
    divalidasi, dan penyimpanan selalu membuat salinan `*.edited.yrf` — file asli tidak
    pernah ditimpa. Pembuatan `.yrf` tetap eksperimental dan berlabel.
@@ -692,3 +695,27 @@ Pilih tabel native untuk mengatur kolom pada Properties: field data, judul, leba
 
 
 Untuk membuat total, pilih Field native dan isi dataset serta field seperti `lines.amount` pada **Buat total**. Pilih **Gunakan rumus total**, lalu Preview dengan sample data. Untuk group footer, `group.amount` memakai grup saat ini. Periksa hasil dan pembulatan dengan perhitungan independen.
+
+
+Report native baru dimulai dengan A4 (210 × 297 mm); report yang sudah ada tetap menggunakan ukuran tersimpannya. Gunakan **Zoom in**, **Zoom out**, atau slider untuk mengubah tampilan layar. Aktifkan **Grid** dan **Penggaris** untuk merapikan; alat bantu tidak ikut dicetak. Pada YRF, penggaris menampilkan unit mentah yang belum terverifikasi. Pilih objek lalu atur **Background** dan **Border color**; mengubah warna garis mengaktifkan garis yang terlihat. Periksa Preview dan PDF. Tampilan warna YRF masih perkiraan dan perlu diperiksa di WaiReport.
+
+
+Untuk judul tabel bertingkat, isi **Grup judul (opsional)** dengan nama yang sama pada kolom yang bersebelahan. Gunakan **Ulangi judul tabel di setiap halaman** untuk halaman lanjutan. Pilih **Tambah bagian narasi** di Struktur untuk teks sederhana yang berlanjut antarhalaman; periksa hasilnya karena pembungkusan teks masih perkiraan. Untuk warna bersyarat, pilih teks atau field, isi kondisi seperti `invoice.total > 100` dan atur warna di **Gaya bersyarat**. Kondisi berlaku di Preview/PDF; periksa dengan sample data.
+
+
+Untuk menandai baris tabel, pilih tabel dan atur **Baris tabel bersyarat**, misalnya `row.amount < 0`, serta warna teks atau isi. Gunakan **Tambah aturan baris** untuk kondisi lain. Periksa baris yang memenuhi dan tidak memenuhi kondisi; warna dari aturan terakhir yang cocok akan digunakan.
+
+### Header bertingkat dan gabung sel tabel native
+
+1. Pilih tabel dan atur kolomnya terlebih dahulu. Pada **Struktur tabel lanjutan**, pilih **Edit baris header**.
+2. Isi judul serta jumlah kolom dan baris yang dicakup. Pilih **Tambah baris header** untuk tingkat berikutnya. Span harus mengisi seluruh grid; perbaiki pesan merah sebelum menyimpan. Header khusus menggantikan grup judul kolom.
+3. Pada **Gabung sel isi**, pilih **Tambah gabungan**. Isi baris dan kolom awal (keduanya dimulai dari 1), serta jumlah baris dan kolom yang digabung. Nilai yang tampil berasal dari sel pertama; rentang gabungan tidak boleh bertumpuk.
+4. Isi **Sample data**, buka **Preview**, dan periksa setiap halaman sebelum menyimpan atau ekspor. HTML menjaga gabungan beberapa baris tetap bersama jika muat di satu halaman. Jika tidak muat, sel ditampilkan terpisah. PDF dan format lain dapat menyederhanakan hasil dan menampilkan warning.
+
+Di **Struktur**, buka bagian untuk mengganti nama dan mengubah urutan layer objek di bagian tersebut. Pilih field data untuk memilih field dari sample data yang tersedia, atau isi binding path secara manual.
+
+Untuk gambar native, pilih **Penyesuaian gambar → cover** agar gambar memenuhi bingkainya. Atur **Posisi gambar horizontal (%)** dan **Posisi gambar vertikal (%)** dari 0 sampai 100 untuk memilih bagian yang terlihat; 50 berarti di tengah. Posisi yang sama digunakan di Design, Preview, dan PDF. Ini mengatur posisi gambar dalam bingkai, belum membuat kotak crop bebas.
+
+### Parameter laporan
+
+Pada sidebar laporan native, pilih **Tambah parameter**, isi nama seperti `customer`, pilih tipe, lalu isi nilai bawaan jika perlu. Pilih sebuah field dan gunakan `parameters.customer` sebagai binding path atau ekspresi. Untuk ekspresi, gunakan huruf, angka, dan underscore; awali nama dengan huruf atau underscore. Di **Sample data**, ganti nilai bawaan dengan `{"parameters":{"customer":"Contoh nasabah"}}`; Preview dan PDF memakai nilai tersebut. Preview dan ekspor menampilkan warning jika nilai wajib kosong atau tipenya salah; proses tidak diblokir. Periksa warning dan nilainya sebelum ekspor.

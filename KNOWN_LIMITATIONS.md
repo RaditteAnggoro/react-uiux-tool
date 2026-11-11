@@ -130,7 +130,7 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
 - Exports support PDF, HTML, CSV, XLSX, and DOCX. XLSX contains the first table
   only; DOCX has limited layout fidelity. Bar, line, and pie charts render as SVG
   in HTML, while PDF omits charts and crosstabs. Barcodes and subreports are not
-  implemented. Crosstabs support sum/count aggregation; conditional styling has no visual editor yet.
+  implemented. Crosstabs support sum/count aggregation; a basic conditional style editor supports one leading rule for text and fields.
 - Pagination drives the HTML renderer and the PDF writer with the same layout:
   repeated headers/footers, grouped sections, table row splitting, page X of Y.
   PDF still draws text, lines, tables, and fields only; charts and crosstab cells
@@ -139,8 +139,21 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
   the canvas inspector does not expose expression editing yet.
 - The design canvas renders bands in a single column; preview and exports use
   bounded pagination with fixture-tested page numbering and grouped totals.
+- Native image cover/contain permits positioning the image within its frame; freeform
+  crop rectangles are not supported. YRF image output remains vendor-unverified.
+- Native report parameter defaults and overrides under `parameters` are resolved in
+  HTML preview and PDF. Missing required values and incorrect types warn in preview and
+  export but do not block output; users must check values. Expression names must use
+  identifier syntax.
 - Canvas fields display binding paths rather than evaluated data; the preview can
   evaluate supported bindings using supplied sample data.
+- The native inspector can configure multi-level table headers, body merges, and multiple
+  row rules. HTML renders these for the tested cases; a merge that does not fit within a
+  page placement is left unmerged so its data is not hidden. PDF renders header matrices
+  and basic merged cells but simplifies other advanced styling; XLSX/DOCX simplify advanced
+  tables. These exports show a fidelity warning. Check every page with your own data.
+- Section reordering and "page break before" are available per band; keeping arbitrary
+  groups together and multi-object band flow remain limited.
 - `.yrf` style edits change the vendor `style` declaration string only; the approximate
   canvas applies a small CSS subset (weight/style/decoration/size/colour/align) and the
   result is still not a vendor-rendered preview. Multi-select alignment stages raw-unit
@@ -166,11 +179,11 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
 - Basic formatting palette supports style presets, bold/italic/underline/strike, lists,
   justify, line height, letter spacing, borders, wrap and rotation, plus multi-select,
   six alignment modes, group/ungroup and group move. PDF simplifies these rich styles and
-  emits a warning. Font effects, merged table cells, real group resize and picture
+  emits a warning. Font effects, arbitrary body-cell merges, real group resize and picture
   effects are not implemented.
 - Canvas supports pointer move, eight resize handles, 1 mm snapping (toggle + Alt bypass),
   palette click and drag-to-band, Alt+Arrow keyboard resize, numeric X/Y/W/H and undo/redo.
-  Locked/hidden elements, a visual grid overlay and touch/pen input are not implemented.
+  Locked/hidden elements and touch/pen input are not implemented. The optional grid and ruler are visual aids, not printed output; YRF rulers use unverified raw units.
   Images can be imported from local PNG/JPEG/WebP files (≤ 2 MiB, no SVG, no network), and
   CSV sample data can be loaded with a schema preview; clipboard paste, cropping, column
   mapping, per-row CSV errors and large-dataset virtualisation are not implemented.
@@ -194,4 +207,6 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
 
 - YRF image import embeds PNG/JPEG/WebP data up to 2 MiB per image within the 5 MiB report limit. Vendor rendering and image size modes are not verified. Table and form palette layouts create independent static objects; they do not create repeatable tables, merged cells, calculations, or automatic multi-page layouts. The supplied multi-page financial report examples require additional work and have not been reproduced or validated.
 
-- Native table columns support editing keys, headings, proportional widths, alignment, numeric formats, and static rows or a dataset binding. PDF draws table cells with configurable header and border styling; long text is clipped with an estimated-width warning, not automatically wrapped. Complex cell styles, merged cells and YRF/vendor parity remain unverified.
+- Native table columns support editing keys, headings, proportional widths, alignment, numeric formats, and static rows or a dataset binding. PDF draws table cells with configurable header and border styling; long text is clipped with an estimated-width warning, not automatically wrapped. Complex cell styles and YRF/vendor parity remain unsupported or unverified.
+
+- Native P1 tables support one level of grouped consecutive column headings, repeated headings and split rows; arbitrary body-cell merging is not implemented. A dedicated flowing narrative section splits simple text across pages with approximate character widths and normalizes whitespace. Other multi-object bands and rich text do not automatically flow. Conditional visual editing covers one leading rule on text/fields; multiple row rules and vendor YRF output are not validated.

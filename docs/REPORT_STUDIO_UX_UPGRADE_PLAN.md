@@ -571,3 +571,71 @@ The supplied pre-analysis and approval memo PDFs contain multi-page A4 reports w
 - **Final:** typecheck, unit tests, build, focused browser checks and documentation; report remaining YRF/vendor limitations before committing.
 
 **P0 progress, 10 November:** native column editing, static rows, dataset path, number formats and PDF cell drawing are implemented for the tested subset. P0 remains **partial**: table row/cell styling beyond header and border, more flexible subtotal/total rules, vendor-native YRF table/data mapping, and validation in WaiReport are outstanding. Large values must be supplied as decimal strings for exact arithmetic; visually clipped PDF cell values generate an estimated-width warning. Neither the supplied financial reports nor their production totals have been reproduced or certified.
+
+**P0 recheck:** native A4 canvas, zoom, optional visual grid/rulers, rectangle and table colors now have browser coverage; rectangle/table colors also have PDF/HTML checks. YRF zoom, ruler (raw units), approximate colors and copy preservation are covered with synthetic fixtures. P0 remains partial: arbitrary per-cell formatting and a vendor-validated YRF table/data workflow are not implemented or verified; sample financial reports and production totals are not certified.
+
+
+## P1 implementation progress
+
+- Native split table placements now drive both HTML and PDF; one-level consecutive header groups and an optional repeated heading are configurable. Synthetic 1,000-row pagination checks preserve order across at least 23 pages.
+- A dedicated flowing-text section splits simple narrative between pages using an approximate text-width estimate; whitespace is normalized. Multi-object bands and rich text do not automatically flow.
+- A first conditional rule can be edited for native text/field; Preview and PDF use the same evaluator. One conditional table-row rule is supported; arbitrary body-cell merges remain pending.
+- Native images, copy-only YRF images and basic positioning existed before this increment. YRF vendor output, image fidelity, table semantics and actual printed results remain unverified; no P1 vendor parity is claimed.
+
+
+## Sisa P1 + P2 inti — 10 November 2026
+
+Implemented for the tested subset:
+
+- **Table renders** accept an explicit `headerRows` matrix (two or more levels with
+  rowspan/colspan), body `merges` (colspan/rowspan) and multiple `rowRules` (last
+  matching colour wins, optional bold/italic). Templates used the matrix and rules;
+  renderer tests assert the output.
+- **Page break**: bands support `pageBreakBefore`; structure exposes a checkbox per band
+  and up/down reordering. Playwright verifies order and flag persist after Save.
+- **Templates**: `preAnalysis` (summary, facility table with two-level headers, row
+  rules, flowing narrative, totals, signatures) and `approvalMemo` (application info,
+  financial table, recommendation, page-break approval signatures). Both validate and
+  render from synthetic data; totals use the shared expression evaluator and were
+  checked against independent sums in unit tests.
+- **Export warning**: PDF/XLSX/DOCX report advanced tables as flattened.
+
+Partial or still open (not claimed):
+
+- Complex multi-object narrative auto-flow: only a single `flowText` text element flows.
+- Template editing supports section names, section ordering and ordering objects within
+  a section. Arbitrary cross-section moves and a full data-source picker remain open.
+- Arbitrary per-cell styling beyond merges is not exposed. Native images support
+  contain/cover and horizontal/vertical crop positioning; a freeform crop rectangle is
+  not available.
+- WaiReport rendering/comparison for `.yrf` remains external and unverified.
+
+### Follow-up verification and editor work
+
+The native inspector now edits header matrices, body merges, and multiple row rules;
+invalid or overlapping ranges are rejected. The sample-data field selector, section
+names and per-section object order can be edited without changing object geometry.
+HTML pagination keeps a vertical merge together when it fits and uses the correct
+row offset on continuation pages. PDF draws matrix headers and basic body merges and emits a fidelity warning
+for advanced tables; some styles remain simplified in PDF and tables in XLSX/DOCX.
+These are tested subsets, not completion of all P0–P2 acceptance criteria: complex
+flow, per-cell styling, freeform image crop, and vendor verification still require work.
+
+### P3 data increment
+
+Native parameters can be named, typed and assigned a default in the sidebar. HTML and
+PDF resolve `parameters.name` from the default or an override in sample data; existing
+files remain readable. Required/type checks warn in Preview and export without blocking;
+richer dataset loop configuration,
+and per-format parameter support remain open and must not be presented as complete.
+
+### P4–P5 verification and release, 11 November 2026
+
+P4 covers native/YRF journeys, synthetic numerical comparisons, large reports,
+keyboard access, error/recovery paths and cross-platform evidence. P5 covers the
+release guide, compatibility and change history, CI review and rollback instructions.
+The [release and recovery checklist](REPORT_STUDIO_RELEASE_CHECKLIST.md) records the
+procedure. A local macOS run cannot establish Windows behaviour; the Windows CI result
+for the pushed commit must be checked separately. No test can establish WaiReport or
+printer equivalence without the corresponding vendor runtime and physical device.
+The P3 dataset loop and format gaps above remain open.

@@ -1,4 +1,7 @@
-import { tableCellText, tableColumnWidths, tableHeaderTextColor } from "../core/table.js";
+import { reportCondition } from "../core/conditions.js";
+import { withParameterDefaults } from "../core/parameters.js";
+import { imagePosition } from "../core/image-position.js";
+import { tableCellText, tableColumnWidths, tableHeaderGroups, tableHeaderMatrix, tableHeaderTextColor } from "../core/table.js";
 import { resolvePath } from "../core/data.js";
 import type { ReportDocumentV1, ReportElement } from "../core/types.js";
 import { paginateReport, type PlacedBand } from "../core/pagination.js";
@@ -75,11 +78,25 @@ function drawBand(
   images: Map<string, { name: string; data: PdfImageData }>,
 ): void {
   const bandY = bodyTop - placed.y;
-  for (const element of placed.band.elements) {
+  for (const source of placed.band.elements) {
+    const original = placed.textFragment !== undefined && source.type === "text" ? { ...source, props: { ...source.props, text: placed.textFragment }, box: { ...source.box, height: Math.max(0, placed.height - source.box.y) } } : source;
+    const condition = reportCondition(original, placed.scopeRows ? { ...data, group: placed.scopeRows } : data);
+    if (condition.hidden) continue;
+    const element = condition.color || condition.background ? { ...original, props: { ...original.props, ...(condition.color ? { color: condition.color } : {}), ...(condition.background ? { background: condition.background } : {}) } } : original;
     const x = document.page.margins.left + element.box.x;
     const y = bandY - element.box.y;
     const size = Number(element.props.fontSize ?? 9);
     const bold = Number(element.props.fontWeight ?? 400) >= 600;
+    if (element.type === "text" || element.type === "field") {
+      const rgb = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+        ? [1, 3, 5].map((index) => (parseInt(value.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ") : null;
+      const fill = rgb(element.props.background);
+      const border = rgb(element.props.borderColor) ?? "0.796 0.835 0.882";
+      const width = Number(element.props.borderWidth ?? 0);
+      const rect = `${(x * MM).toFixed(2)} ${((y - element.box.height) * MM).toFixed(2)} ${(element.box.width * MM).toFixed(2)} ${(element.box.height * MM).toFixed(2)} re`;
+      if (fill) content.push(`q ${fill} rg ${rect} f Q`);
+      if (Number.isFinite(width) && width > 0) content.push(`q ${border} RG ${(width * MM).toFixed(2)} w ${rect} S Q`);
+    }
     if (element.type === "image") {
       const image = typeof element.props.src === "string" ? images.get(element.props.src) : undefined;
       if (image && element.box.width > 0 && element.box.height > 0) {
@@ -91,15 +108,22 @@ function drawBand(
           ? [1, 3, 5].map((offset) => (parseInt(value.slice(offset, offset + 2), 16) / 255).toFixed(3)).join(" ") : null;
         const background = color(element.props.background);
         if (background) content.push(`q ${background} rg ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re f Q`);
-        content.push(`q ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re W n ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${(left + (boxWidth - width) / 2).toFixed(2)} ${(bottom + (boxHeight - height) / 2).toFixed(2)} cm /${image.name} Do Q`);
+        const positionX = imagePosition(element.props.positionX) / 100;
+        const positionY = imagePosition(element.props.positionY) / 100;
+        content.push(`q ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re W n ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${(left + (boxWidth - width) * positionX).toFixed(2)} ${(bottom + (boxHeight - height) * (1 - positionY)).toFixed(2)} cm /${image.name} Do Q`);
         const border = Number(element.props.borderWidth ?? 0), borderColor = color(element.props.borderColor) ?? "0 0 0";
         if (Number.isFinite(border) && border > 0) content.push(`q ${borderColor} RG ${(border * MM).toFixed(2)} w ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re S Q`);
       }
     } else if (element.type === "text") {
+      const textColor = typeof element.props.color === "string" && /^#[0-9a-f]{6}$/i.test(element.props.color) ? [1, 3, 5].map((i) => (parseInt(String(element.props.color).slice(i, i + 2), 16) / 255).toFixed(3)).join(" ") : "0 0 0";
+      content.push(`q ${textColor} rg`);
       String(element.props.text ?? "")
         .split("\n")
-        .forEach((line, index) => textLine(content, x, y - index * (size / MM) * 0.42, line, size, bold));
+        .forEach((line, index) => textLine(content, x, y - (placed.textFragment !== undefined ? size / MM : 0) - index * (size / MM) * 1.2, line, size, bold));
+      content.push("Q");
     } else if (element.type === "field") {
+      const textColor = typeof element.props.color === "string" && /^#[0-9a-f]{6}$/i.test(element.props.color) ? [1, 3, 5].map((i) => (parseInt(String(element.props.color).slice(i, i + 2), 16) / 255).toFixed(3)).join(" ") : "0 0 0";
+      content.push(`q ${textColor} rg`);
       const label = typeof element.props.label === "string" ? element.props.label : "";
       textLine(content, x, y, label.toUpperCase(), Math.max(6, size - 2), false);
       textLine(
@@ -110,13 +134,21 @@ function drawBand(
         size,
         bold,
       );
+      content.push("Q");
     } else if (element.type === "line") {
       content.push(
         `0.6 w ${(x * MM).toFixed(2)} ${(y * MM).toFixed(2)} m ${((x + element.box.width) * MM).toFixed(2)} ${(y * MM).toFixed(2)} l S`,
       );
     } else if (element.type === "rect") {
+      const rgb = (value: unknown, fallback: string) => {
+        const hex = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+        return [1, 3, 5].map((index) => (parseInt(hex.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ");
+      };
+      const rect = `${(x * MM).toFixed(2)} ${((y - element.box.height) * MM).toFixed(2)} ${(element.box.width * MM).toFixed(2)} ${(element.box.height * MM).toFixed(2)} re`;
+      if (typeof element.props.background === "string" && /^#[0-9a-f]{6}$/i.test(element.props.background)) content.push(`q ${rgb(element.props.background, "#ffffff")} rg ${rect} f Q`);
+      const width = Number(element.props.borderWidth ?? element.props.strokeWidth ?? 0.4);
       content.push(
-        `0.6 w ${(x * MM).toFixed(2)} ${(y * MM).toFixed(2)} ${(element.box.width * MM).toFixed(2)} ${(element.box.height * MM).toFixed(2)} re S`,
+        `q ${rgb(element.props.borderColor ?? element.props.color, "#cbd5e1")} RG ${(Math.max(0, Number.isFinite(width) ? width : 0.4) * MM).toFixed(2)} w ${rect} S Q`,
       );
     } else if (element.type === "pageNumber") {
       const template = String(element.props.format ?? "Page {page} of {total}");
@@ -141,36 +173,85 @@ function drawBand(
         return [1, 3, 5].map((index) => (parseInt(hex.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ");
       };
       const headerColor = rgb(element.props.tableHeaderColor, "#f1f4f8");
+      const bodyColor = typeof element.props.background === "string" && /^#[0-9a-f]{6}$/i.test(element.props.background) ? rgb(element.props.background, "#ffffff") : null;
       const borderColor = rgb(element.props.tableBorderColor, "#bfc9d6");
       const headerTextColor = rgb(tableHeaderTextColor(element.props.tableHeaderColor), "#000000");
       const requestedBorder = Number(element.props.tableBorderWidth ?? 0.2);
       const borderWidth = Number.isFinite(requestedBorder) ? Math.max(0, Math.min(3, requestedBorder)) : 0.2;
-      const drawRow = (top: number, height: number, values: string[], header: boolean) => {
+      const drawCell = (left: number, top: number, width: number, height: number, text: string, header: boolean, align: unknown, rowStyle?: { color?: string; background?: string; bold?: boolean }) => {
+        const bottom = top - height;
+        if (header) content.push(`q ${headerColor} rg ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re f Q`);
+        else if (rowStyle?.background || bodyColor) content.push(`q ${rowStyle?.background ? rgb(rowStyle.background, "#ffffff") : bodyColor} rg ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re f Q`);
+        if (borderWidth > 0) content.push(`q ${borderColor} RG ${(borderWidth * MM).toFixed(2)} w ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re S Q`);
+        const size = 7;
+        const textWidth = text.length * size * 0.52 / MM;
+        if (textWidth > Math.max(0, width - 2)) content.clippedCells++;
+        const textX = align === "right" ? Math.max(left + 1, left + width - textWidth - 1) : align === "center" ? Math.max(left + 1, left + (width - textWidth) / 2) : left + 1;
+        content.push(`q ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re W n`);
+        if (header) content.push(`${headerTextColor} rg`);
+        else if (rowStyle?.color) content.push(`${rgb(rowStyle.color, "#000000")} rg`);
+        textLine(content, textX, top - Math.min(height - 0.5, 3.5), text, size, header || rowStyle?.bold === true);
+        content.push("Q");
+      };
+      const drawRow = (top: number, height: number, values: string[], header: boolean, rowStyle?: { color?: string; background?: string; bold?: boolean }) => {
         let left = x;
-        widths.forEach((width, index) => {
-          const bottom = top - height;
-          if (header) content.push(`q ${headerColor} rg ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re f Q`);
-          if (borderWidth > 0) content.push(`q ${borderColor} RG ${(borderWidth * MM).toFixed(2)} w ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re S Q`);
-          const text = values[index] ?? "";
-          const size = 7;
-          const textWidth = text.length * size * 0.52 / MM;
-          if (textWidth > Math.max(0, width - 2)) content.clippedCells++;
-          const align = columns[index]?.align;
-          const textX = align === "right" ? Math.max(left + 1, left + width - textWidth - 1) : align === "center" ? Math.max(left + 1, left + (width - textWidth) / 2) : left + 1;
-          content.push(`q ${(left * MM).toFixed(2)} ${(bottom * MM).toFixed(2)} ${(width * MM).toFixed(2)} ${(height * MM).toFixed(2)} re W n`);
-          if (header) content.push(`${headerTextColor} rg`);
-          textLine(content, textX, top - Math.min(height - 0.5, 3.5), text, size, header);
-          content.push("Q");
+        widths.forEach((width, index) => { drawCell(left, top, width, height, values[index] ?? "", header, columns[index]?.align, rowStyle); left += width; });
+      };
+      const groups = tableHeaderGroups(columns);
+      const grouped = groups.some((group) => group.label);
+      const matrix = tableHeaderMatrix(element.props.headerRows, columns.length);
+      const matrixRows = matrix ? (element.props.headerRows as unknown[]).length : 0;
+      if (placed.showTableHeader !== false) {
+        if (matrix) {
+          for (const cell of matrix) {
+            const left = x + widths.slice(0, cell.column).reduce((sum, part) => sum + part, 0);
+            const width = widths.slice(cell.column, cell.column + cell.colSpan).reduce((sum, part) => sum + part, 0);
+            drawCell(left, y - cell.row * headerHeight, width, cell.rowSpan * headerHeight, cell.label, true, cell.align);
+          }
+        } else if (!grouped) drawRow(y, headerHeight, columns.map((column) => String(column.label ?? column.key ?? "")), true);
+        else {
+          let left = x;
+          for (const group of groups) {
+            const width = widths.slice(group.start, group.start + group.count).reduce((sum, part) => sum + part, 0);
+            if (group.label) {
+              drawCell(left, y, width, headerHeight, group.label, true, "center");
+              let childLeft = left;
+              for (let index = group.start; index < group.start + group.count; index++) {
+                drawCell(childLeft, y - headerHeight, widths[index]!, headerHeight, String(columns[index]!.label ?? columns[index]!.key ?? ""), true, columns[index]!.align);
+                childLeft += widths[index]!;
+              }
+            } else drawCell(left, y, width, headerHeight * 2, String(columns[group.start]!.label ?? columns[group.start]!.key ?? ""), true, columns[group.start]!.align);
+            left += width;
+          }
+        }
+      }
+      let rowY = y - (placed.showTableHeader === false ? 0 : headerHeight * (matrixRows || (grouped ? 2 : 1)));
+      const mergeOrigins = new Map<string, { colSpan: number; rowSpan: number; style: Record<string, unknown> }>();
+      const covered = new Set<string>();
+      for (const candidate of Array.isArray(element.props.merges) ? element.props.merges : []) {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+        const spec = candidate as Record<string, unknown>;
+        const row = Number(spec.row) - (placed.rowOffset ?? 0), col = Number(spec.col);
+        const colSpan = Number(spec.colSpan ?? 1), rowSpan = Number(spec.rowSpan ?? 1);
+        if (![row, col, colSpan, rowSpan].every(Number.isInteger) || row < 0 || col < 0 || rowSpan < 1 || colSpan < 1 || row + rowSpan > rows.length || col + colSpan > columns.length) continue;
+        const style = spec.style && typeof spec.style === "object" && !Array.isArray(spec.style) ? spec.style as Record<string, unknown> : {};
+        mergeOrigins.set(`${row}:${col}`, { colSpan, rowSpan, style });
+        for (let r = row; r < row + rowSpan; r++) for (let c = col; c < col + colSpan; c++) if (r !== row || c !== col) covered.add(`${r}:${c}`);
+      }
+      for (const [rowIndex, row] of rows.entries()) {
+        const rowRules = Array.isArray(element.props.rowRules) ? element.props.rowRules : element.props.rowCondition ? [element.props.rowCondition] : [];
+        const rowStyle = reportCondition({ conditions: rowRules }, data, row && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : undefined);
+        let left = x;
+        columns.forEach((column, colIndex) => {
+          const width = widths[colIndex]!;
+          if (!covered.has(`${rowIndex}:${colIndex}`)) {
+            const merge = mergeOrigins.get(`${rowIndex}:${colIndex}`);
+            const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[String(column.key ?? "")] : "";
+            const mergeStyle = merge?.style;
+            drawCell(left, rowY, widths.slice(colIndex, colIndex + (merge?.colSpan ?? 1)).reduce((sum, part) => sum + part, 0), rowHeight * (merge?.rowSpan ?? 1), tableCellText(raw, column, document.locale), false, column.align, { ...rowStyle, ...(typeof mergeStyle?.color === "string" ? { color: mergeStyle.color } : {}), ...(typeof mergeStyle?.background === "string" ? { background: mergeStyle.background } : {}), ...(typeof mergeStyle?.bold === "boolean" ? { bold: mergeStyle.bold } : {}) });
+          }
           left += width;
         });
-      };
-      drawRow(y, headerHeight, columns.map((column) => String(column.label ?? column.key ?? "")), true);
-      let rowY = y - headerHeight;
-      for (const row of rows) {
-        drawRow(rowY, rowHeight, columns.map((column) => {
-          const raw = row && typeof row === "object" ? (row as Record<string, unknown>)[String(column.key ?? "")] : "";
-          return tableCellText(raw, column, document.locale);
-        }), false);
         rowY -= rowHeight;
       }
     }
@@ -179,6 +260,7 @@ function drawBand(
 
 /** Dependency-free PDF 1.4 writer that follows the same pagination as the HTML print renderer. */
 export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number; unsupportedImages?: number; clippedCells?: number }): Uint8Array {
+  data = withParameterDefaults(document, data);
   const layouts = paginateReport(document, { data });
   const images = new Map<string, { name: string; data: PdfImageData }>();
   let unsupportedImages = 0;
