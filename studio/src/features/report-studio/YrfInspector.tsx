@@ -126,6 +126,7 @@ const dict = {
     dataField: "Data field",
     selectHint: "Click an object on the page or in Structure to edit it. Drag to move; use the handles to resize.",
     noGeometry: "This object does not have editable left/top/width/height properties.",
+    scriptProtected: "This object contains a vendor script and cannot be removed visually.",
     palette: "Palette",
     addLabel: "Text",
     addTextbox: "Field",
@@ -175,12 +176,15 @@ const dict = {
     shapeGroup: "Shapes",
     preview: "Preview change",
     saveCopy: "Save copy",
+    saveOriginal: "Save",
+    savedOriginal: "Saved original",
+    saveOriginalLimited: "Save supports caption, data field and geometry changes. Structural and source edits still require Save copy.",
     before: "Before",
     after: "After",
     saved: "Copy saved",
     created: "Created",
     readonlyNote:
-      "Saving always writes a copy; the original file is never rewritten. Creation is experimental and unverified.",
+      "Save updates the original for supported caption, data field and geometry changes. Other changes use Save copy. Creation is experimental and unverified.",
     empty: "Choose a .yrf file to inspect. Nothing is executed.",
     experimental: "Experimental write",
     designApprox: "Design (approximate)",
@@ -221,6 +225,7 @@ const dict = {
     dataField: "Field data",
     selectHint: "Klik objek pada halaman atau Struktur untuk mengedit. Tarik untuk memindahkan; tarik handle untuk mengubah ukuran.",
     noGeometry: "Objek ini tidak memiliki properti left/top/width/height yang dapat diedit.",
+    scriptProtected: "Objek ini berisi skrip vendor dan tidak dapat dihapus secara visual.",
     palette: "Palet",
     addLabel: "Teks",
     addTextbox: "Field",
@@ -270,12 +275,15 @@ const dict = {
     shapeGroup: "Bentuk",
     preview: "Pratinjau perubahan",
     saveCopy: "Simpan salinan",
+    saveOriginal: "Simpan",
+    savedOriginal: "File asli tersimpan",
+    saveOriginalLimited: "Simpan mendukung perubahan caption, data field dan geometri. Perubahan struktur dan source masih memerlukan Simpan salinan.",
     before: "Sebelum",
     after: "Sesudah",
     saved: "Salinan tersimpan",
     created: "Dibuat",
     readonlyNote:
-      "Penyimpanan selalu membuat salinan; file asli tidak pernah ditimpa. Pembuatan bersifat eksperimental.",
+      "Simpan memperbarui file asli untuk perubahan caption, data field dan geometri yang didukung. Perubahan lain memakai Simpan salinan. Pembuatan bersifat eksperimental.",
     empty: "Pilih file .yrf untuk diperiksa. Tidak ada yang dieksekusi.",
     experimental: "Tulis eksperimental",
     designApprox: "Desain (perkiraan)",
@@ -500,8 +508,20 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       if (structuralDraft) {
         const result = pendingAll.length ? applyYrfChanges(structuralDraft, pendingAll as YrfChange[]) : null;
         if (result && !result.ok) throw new Error(result.error);
-        setPending(result?.ok ? result.changes : []);
-        setMessage(tr.paletteHint);
+        const before = inspectYrf(report.source ?? "").inspection;
+        const after = inspectYrf(result?.ok ? result.text : structuralDraft).inspection;
+        if (!before || !after) throw new Error("Unable to compare report structure");
+        const bands = (inspection: YrfInspection) => [...inspection.pages.flatMap((page) => page.bands), ...inspection.sideBands];
+        const describe = (object: YrfObjectRef) => `${object.kind} · ${object.name}${object.caption !== null ? ` · ${object.caption.slice(0, 256)}` : ""}${object.dataField ? ` · ${object.dataField.slice(0, 256)}` : ""} · (${object.box.x}, ${object.box.y}, ${object.box.width}, ${object.box.height})${object.style ? ` · ${object.style.slice(0, 256)}` : ""}`;
+        const previous = new Map(bands(before).map((band) => [band.path, band.objects.map(describe).join("\n")]));
+        const current = new Map(bands(after).map((band) => [band.path, band.objects.map(describe).join("\n")]));
+        const structureChanges = [...new Set([...previous.keys(), ...current.keys()])].flatMap((path) => {
+          const oldList = previous.get(path) ?? "";
+          const newList = current.get(path) ?? "";
+          return oldList === newList ? [] : [{ path: `${path}.objects`, before: oldList || "—", after: newList || "—" }];
+        });
+        setPending([...structureChanges, ...(result?.ok ? result.changes : [])]);
+        setMessage("");
         return;
       }
       const result = await post<{ changes: ChangeView[] }>(token, "reports/yrf/patch", {
@@ -576,7 +596,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const updateSelectedStyle = (updates: Record<string, string | null>) => {
-    if (!selected) return;
+    if (!selected?.supported) return;
     const base = parseStyleDeclarations(
       String(draftChanges[`${selected.path}.style`]?.value ?? selected.style ?? ""),
     );
@@ -593,7 +613,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const object = valueAtPath(JSON.parse((structuralDraft ?? report.source).replace(/^\uFEFF/, "")), parseYrfPath(selected.path));
       if (!object || typeof object !== "object" || Array.isArray(object)) return [];
       const skip = new Set(["type", "caption", "text", "dataField", "left", "top", "width", "height", ...(selected.kind === "image" ? ["data"] : [])]);
-      return Object.entries(object).filter(([key, value]) => !skip.has(key) && /^[A-Za-z_$][\w$-]*$/.test(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")) as Array<[string, string | number | boolean]>;
+      return Object.entries(object).filter(([key, value]) => !skip.has(key) && !/scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key) && /^[A-Za-z_$][\w$-]*$/.test(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")) as Array<[string, string | number | boolean]>;
     } catch { return []; }
   }, [selected, report, structuralDraft]);
 
@@ -678,7 +698,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const setObjectProperty = (field: string, value: string | number | boolean) => {
-    if (!report?.source || !selected) return;
+    if (!report?.source || !selected?.supported || /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(field)) return;
     try {
       const base = structuralDraft ?? report.source;
       const patched = pendingAll.length ? applyYrfChanges(base, pendingAll as YrfChange[]) : null;
@@ -711,7 +731,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const removeObject = () => {
-    if (!report?.source || !selected) return;
+    if (!report?.source || !selected?.supported || selected.hasScript) return;
     try {
       const base = structuralDraft ?? report.source;
       const patched = pendingAll.length ? applyYrfChanges(base, pendingAll as YrfChange[]) : null;
@@ -727,8 +747,9 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     } catch (caught) { setError((caught as Error).message); }
   };
 
-  const saveCopy = async (): Promise<boolean> => {
+  const saveCopy = async (inPlace = false): Promise<boolean> => {
     if (!report) return false;
+    if (inPlace && structuralDraft) { setError(tr.saveOriginalLimited); return false; }
     if (pendingAll.length === 0 && !structuralDraft) return false;
     setBusy(true);
     setError("");
@@ -742,9 +763,10 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         source: string;
         inspection: YrfInspection;
         changes: ChangeView[];
-      }>(token, text !== null ? "reports/yrf/source" : "reports/yrf/save-copy", {
+      }>(token, inPlace ? "reports/yrf/save" : text !== null ? "reports/yrf/source" : "reports/yrf/save-copy", {
         path: report.file,
         expectedHash: report.hash,
+        ...(inPlace ? { approved: true } : {}),
         ...(text !== null ? { text } : { changes: pendingAll }),
       });
       const previousPath = selected?.path;
@@ -771,7 +793,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       setGeometryChanges({});
       setStructuralDraft(null);
       setPending(result.changes ?? []);
-      setMessage(`${tr.saved}: ${result.file}`);
+      setMessage(`${inPlace ? tr.savedOriginal : tr.saved}: ${result.file}`);
       return true;
     } catch (caught) {
       setError((caught as Error).message);
@@ -1002,7 +1024,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         <button className="yrf-ghost" onClick={() => setCreating((value) => !value)}>
           {tr.create}
         </button>
-        {inspection && panel === "design" && <button className="yrf-primary" disabled={busy || !dirty} onClick={() => void saveCopy()}>{tr.saveCopy}</button>}
+        {inspection && panel === "design" && <><button className="yrf-primary" disabled={busy || !dirty || !!structuralDraft} title={structuralDraft ? tr.saveOriginalLimited : undefined} onClick={() => void saveCopy(true)}>{tr.saveOriginal}</button><button className="yrf-ghost" disabled={busy || !dirty} onClick={() => void saveCopy()}>{tr.saveCopy}</button></>}
       </header>
 
       {error && <div className="yrf-alert bad">{error}</div>}
@@ -1163,7 +1185,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                 ).map(([key, label, updates]) => (
                   <button
                     key={key}
-                    disabled={!selected}
+                    disabled={!selected?.supported}
                     onClick={() => updateSelectedStyle({ ...updates })}
                   >
                     {label}
@@ -1354,6 +1376,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   </p>
                 )}
                 {!selected.editableGeometry && <p className="yrf-hint">{tr.noGeometry}</p>}
+                {selected.hasScript && <p className="yrf-hint">{tr.scriptProtected}</p>}
                 <div className="yrf-grid">
                   {(["left", "top", "width", "height"] as const).map((field) => (
                     <label className="yrf-field" key={field}>
@@ -1393,7 +1416,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                         String(draftChanges[`${selected.path}.style`]?.value ?? selected.style ?? ""),
                       );
                       return (
-                        <div className="yrf-style-controls">
+                        <fieldset className="yrf-style-controls" disabled={!selected.supported} aria-label={tr.styleTitle}>
                           <button
                             aria-pressed={styleMap["font-weight"] === "bold"}
                             className={styleMap["font-weight"] === "bold" ? "on" : ""}
@@ -1457,7 +1480,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                             <option value="center">{tr.alignCenterH}</option>
                             <option value="right">{tr.alignRight}</option>
                           </select>
-                        </div>
+                        </fieldset>
                       );
                     })()}
                   </>
@@ -1468,14 +1491,14 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   {scalarProperties.map(([key, value]) => (
                     <label className="yrf-field" key={`${selected.path}.${key}.${value}`}>
                       <span>{key}</span>
-                      {typeof value === "boolean" ? <select aria-label={key} value={String(value)} onChange={(event) => setObjectProperty(key, event.target.value === "true")}><option value="true">true</option><option value="false">false</option></select> : <input aria-label={key} type={typeof value === "number" ? "number" : "text"} defaultValue={String(value)} onBlur={(event) => {
+                      {typeof value === "boolean" ? <select disabled={!selected.supported} aria-label={key} value={String(value)} onChange={(event) => setObjectProperty(key, event.target.value === "true")}><option value="true">true</option><option value="false">false</option></select> : <input disabled={!selected.supported} aria-label={key} type={typeof value === "number" ? "number" : "text"} defaultValue={String(value)} onBlur={(event) => {
                         const next = typeof value === "number" ? Number(event.currentTarget.value) : event.currentTarget.value;
                         if (next !== value) setObjectProperty(key, next);
                       }} />}
                     </label>
                   ))}
                 </>}
-                <button className="yrf-remove" onClick={removeObject}>{tr.removeObject}</button>
+                <button className="yrf-remove" disabled={!selected.supported || selected.hasScript} title={selected.hasScript ? tr.scriptProtected : !selected.supported ? tr.unsupported : undefined} onClick={removeObject}>{tr.removeObject}</button>
                 <div className="yrf-actions">
                   <button disabled={busy || (pendingAll.length === 0 && !structuralDraft)} onClick={() => void preview()}>
                     {tr.preview}

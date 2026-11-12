@@ -65,12 +65,12 @@ flowchart LR
 4. Use **Code** to inspect or edit supported source, and **Preview** to check native
    output with sample data. Save your changes before leaving.
 5. For native reports, choose **Save** and optionally export PDF, HTML, CSV, XLSX,
-   or DOCX. For `.yrf`, choose **Save copy** and check that copy in WaiReport.
+   or DOCX. For `.yrf`, **Save** replaces the opened file for supported caption, data-field and geometry edits; **Save copy** creates a separate file. Check the result in WaiReport.
 
 | Format | What you can do | What to check |
 | --- | --- | --- |
 | Native `.report.json` | Create and open designs; edit text, fields, tables and other supported objects; preview and export. | Export formats have different limitations; review warnings, rows and totals. |
-| WaiReport `.yrf` | Open existing files; edit available object values, move/resize supported objects, use the experimental palette and save a copy. | Design is approximate; created or edited files have not been verified against the vendor renderer. Validate in WaiReport before business use. |
+| WaiReport `.yrf` | Open existing files; edit supported values and geometry, or save structural and source edits to a copy. | Save replaces the original without a backup for supported changes. Design is approximate and vendor rendering is unverified. Validate in WaiReport before business use. |
 | PDF, HTML, CSV, XLSX, DOCX | Export native reports to these formats. | They are output files, not interchangeable editable report designs; fidelity varies. |
 
 See the [step-by-step Report Studio guide](docs/USER_GUIDE_EN.md#14-report-studio-create-and-edit-reports),
@@ -128,16 +128,17 @@ node dist/cli.js open /absolute/path/to/react-project
 node dist/cli.js --help
 ```
 
-## Try the direct source-edit workflow
+## Try the draft editing workflow
 
 1. Choose English or Bahasa Indonesia, then open a trusted existing React project.
 2. Review the project report and explicitly start the local preview.
 3. Select a fixed element in Design mode. In Props, change a supported value and
-   choose **Save to source**; the file and preview update immediately.
+   choose **Apply to draft**. The source file is unchanged until you choose **Save**.
 4. Select a container in Pages, then add a reusable component or basic visual element
    from Components. You can also drag it directly onto the picture.
 5. Drag selected objects, use the alignment icons, Delete/Backspace to remove, and
-   Command/Ctrl+Z to restore the latest change.
+   Command/Ctrl+Z to undo a draft change. Choose **Preview draft** to refresh the
+   canvas, then **Save** to write the source or **Discard Draft** to cancel.
    In a real project, review the resulting files through Git before pushing.
 
 ## New and existing projects
@@ -248,4 +249,4 @@ license. Original implementation: **MIT © 2026 RA**.
 
 ### Workspace guides
 
-Use the [English guide](docs/USER_GUIDE_EN.md) or [panduan Indonesia](docs/USER_GUIDE_ID.md) for illustrated React editing, report design, palette, data, saving and troubleshooting. Report Studio supports native reports and experimental `.yrf` copy editing; see [format limitations](KNOWN_LIMITATIONS.md) before relying on vendor output.
+Use the [English guide](docs/USER_GUIDE_EN.md) or [panduan Indonesia](docs/USER_GUIDE_ID.md) for illustrated React editing, report design, palette, data, saving and troubleshooting. Report Studio supports native reports and experimental `.yrf` editing; see [format limitations](KNOWN_LIMITATIONS.md) before relying on vendor output.

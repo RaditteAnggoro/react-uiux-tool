@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyFile, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { startStudio } from "../../src/server/index.js";
@@ -66,6 +66,45 @@ test("yrf open inspects, patch previews, save-copy preserves the source", async 
     const copy = await readFile(saved.data.file, "utf8");
     assert.match(copy, /Kop Halaman Baru/);
     assert.equal(await readFile(file, "utf8"), original, "original stays byte-identical");
+  });
+});
+
+test("in-place YRF save keeps path, creates no backup and rejects stale edits", async () => {
+  await withYrf(async (call, file) => {
+    const original = await readFile(file, "utf8");
+    const unopened = await call("yrf/save", { path: file, expectedHash: "0".repeat(64), approved: true, changes: [] });
+    assert.equal(unopened.status, 403);
+    assert.equal(unopened.data.code, "YRF_NOT_OPEN");
+    const opened = await call("yrf/open", { path: file });
+    const request = { path: file, expectedHash: opened.data.hash, approved: true, changes: [{ objectPath: "layout.pages[0].bands[0].objects[0]", field: "caption", expected: "Kop Halaman", value: "Updated" }] };
+    const withoutApproval = await call("yrf/save", { ...request, approved: false });
+    assert.equal(withoutApproval.status, 403);
+    assert.equal(await readFile(file, "utf8"), original);
+    const saved = await call("yrf/save", request);
+    assert.equal(saved.status, 200, JSON.stringify(saved.data));
+    assert.equal(saved.data.file, await (await import("node:fs/promises")).realpath(file));
+    assert.equal(saved.data.backup, undefined);
+    assert.match(await readFile(file, "utf8"), /Updated/);
+    const stale = await call("yrf/save", request);
+    assert.equal(stale.status, 409);
+    assert.match(await readFile(file, "utf8"), /Updated/);
+    const again = await call("yrf/save", { ...request, expectedHash: saved.data.hash, changes: [{ ...request.changes[0], expected: "Updated", value: "Second update" }] });
+    assert.equal(again.status, 200, JSON.stringify(again.data));
+    assert.equal(again.data.backup, undefined);
+    assert.deepEqual((await readdir(path.dirname(file))).filter((name) => name.endsWith(".yrf")), ["sample.yrf"]);
+  });
+});
+
+test("concurrent in-place YRF saves cannot silently overwrite one another", async () => {
+  await withYrf(async (call, file) => {
+    if (process.platform !== "win32") await chmod(file, 0o751);
+    const opened = await call("yrf/open", { path: file });
+    const request = (value: string) => ({ path: file, expectedHash: opened.data.hash, approved: true, changes: [{ objectPath: "layout.pages[0].bands[0].objects[0]", field: "caption", expected: "Kop Halaman", value }] });
+    const results = await Promise.all([call("yrf/save", request("First")), call("yrf/save", request("Second"))]);
+    assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+    const saved = results.find((result) => result.status === 200)!;
+    assert.equal(await readFile(file, "utf8"), saved.data.source);
+    if (process.platform !== "win32") assert.equal((await stat(file)).mode & 0o777, 0o751);
   });
 });
 

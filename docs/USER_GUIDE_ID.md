@@ -418,7 +418,10 @@ Untuk menambah objek native, klik tombol objek atau tarik dari palette ke band y
 
 1. Pilih **YRF (.yrf)** dan pilih folder, lalu pilih file dari daftar; path manual tersedia sebagai cadangan.
 2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti; **Code** awalnya menampilkan source secara read-only. Pilih **Edit source** untuk mengubah draf, lalu **Apply & save copy** untuk menyimpan salinan. Script vendor tidak dijalankan saat inspeksi.
-3. Edit caption/geometri yang tersedia, pilih **Preview change**, lalu **Save copy**. File asli tidak ditimpa. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
+3. Edit caption/geometri yang tersedia dan pilih **Preview change**. **Simpan** memperbarui file asli tanpa backup; **Simpan salinan** membuat file terpisah. Perubahan struktur dan source saat ini masih memerlukan Simpan salinan. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
+
+Saat objek ditambah atau dihapus, **Preview change** membandingkan daftar objek band
+sebelum dan sesudah perubahan draft. Hasil renderer vendor belum terverifikasi.
 4. Unit, tampilan cetak, dan file yang dibuat/diubah belum divalidasi oleh renderer vendor. Cek salinan dalam WaiReport dengan data uji dan bandingkan total, barcode, halaman, dan cetakan sebelum digunakan.
 
 Jika folder tidak muncul, pilih kembali folder yang benar; jika file berubah di luar aplikasi, buka ulang sebelum menyimpan. Jangan menganggap hasil preview sebagai bukti bahwa fungsi atau angka bisnis sudah benar.
@@ -645,15 +648,17 @@ Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native
    Structure gunakan ↑/↓ untuk mengubah urutan bagian dan **Pindah halaman sebelum** untuk
    memulai halaman baru. Header laporan punya tombol **Keluar** eksplisit. Aksi hapus berwarna merah.
 6. `.yrf` dibuka di studio yang sama. Design ditandai perkiraan, Code bisa diedit dan
-   divalidasi, dan penyimpanan selalu membuat salinan `*.edited.yrf` — file asli tidak
-   pernah ditimpa. Pembuatan `.yrf` tetap eksperimental dan berlabel.
+   divalidasi. **Simpan** menimpa file yang dibuka untuk perubahan caption, data field,
+   dan geometri yang didukung tanpa backup; perubahan struktur dan Code menggunakan
+   **Simpan salinan**. Pembuatan `.yrf` tetap eksperimental dan berlabel.
 7. **Formats** menampilkan aksi yang didukung tiap format; format tak didukung seperti
    JRXML, RDL dan `.rpt` tidak pernah dikonversi diam-diam.
 
 Pada editor React, tab **Style** memiliki **Palet format** untuk memilih properti
 seperti font, warna, border, garis bawah, wrap dan rotation; masukkan nilai CSS lalu
-pilih **Save to source**. Contoh: pilih `Underline / strikethrough`, masukkan
-`underline`, dan simpan. Palet ini bekerja pada elemen dengan operasi style yang
+pilih **Terapkan ke draft**. Contoh: pilih `Underline / strikethrough`, masukkan
+`underline`, lalu terapkan. Pilih **Tampilkan draft** untuk memperbarui canvas dan
+**Simpan** untuk menulis source. Palet ini bekerja pada elemen dengan operasi style yang
 tersedia; ia belum menyediakan preset laporan atau pembuatan daftar otomatis.
 Di Report Studio, Align dan Group tersedia untuk pilihan dalam band yang sama;
 pilih objek pada satu band agar posisi tidak bergeser keliru antarbagian halaman.
@@ -713,6 +718,12 @@ Untuk menandai baris tabel, pilih tabel dan atur **Baris tabel bersyarat**, misa
 4. Isi **Sample data**, buka **Preview**, dan periksa setiap halaman sebelum menyimpan atau ekspor. HTML menjaga gabungan beberapa baris tetap bersama jika muat di satu halaman. Jika tidak muat, sel ditampilkan terpisah. PDF dan format lain dapat menyederhanakan hasil dan menampilkan warning.
 
 Di **Struktur**, buka bagian untuk mengganti nama dan mengubah urutan layer objek di bagian tersebut. Pilih field data untuk memilih field dari sample data yang tersedia, atau isi binding path secara manual.
+
+Daftar **Lapisan** untuk laporan native menampilkan objek pada bagian terpilih; objek
+teratas berada paling depan. Pilih baris untuk memilih objek, cari berdasarkan tipe
+atau ID, dan gunakan panah untuk memajukan/memundurkan objek atau membawanya ke
+depan/belakang. Perubahan tetap draft sampai **Save** dan bisa di-Undo/Redo. Urutan
+antarbagian belum dapat diubah melalui daftar ini.
 
 Untuk gambar native, pilih **Penyesuaian gambar → cover** agar gambar memenuhi bingkainya. Atur **Posisi gambar horizontal (%)** dan **Posisi gambar vertikal (%)** dari 0 sampai 100 untuk memilih bagian yang terlihat; 50 berarti di tengah. Posisi yang sama digunakan di Design, Preview, dan PDF. Ini mengatur posisi gambar dalam bingkai, belum membuat kotak crop bebas.
 

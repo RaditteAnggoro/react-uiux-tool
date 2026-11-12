@@ -99,12 +99,14 @@ async function withWriteLock<T>(key: string, task: () => Promise<T>): Promise<T>
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  writeLocks.set(key, previous.then(() => gate));
+  const queued = previous.then(() => gate);
+  writeLocks.set(key, queued);
   await previous.catch(() => undefined);
   try {
     return await task();
   } finally {
     release();
+    if (writeLocks.get(key) === queued) writeLocks.delete(key);
   }
 }
 
@@ -233,6 +235,24 @@ async function writeYrfCopy(file: string, text: string): Promise<string> {
   throw new ReportApiError(409, "COPY_EXISTS", "Could not allocate a save-copy name");
 }
 
+/** A filesystem rename is atomic for one path, but is not a cross-process compare-and-swap. */
+async function saveYrfInPlace(file: string, expectedHash: string, text: string): Promise<void> {
+  return withWriteLock(file, async () => {
+    const loaded = await loadYrfFile(file);
+    if (loaded.file !== file || loaded.hash !== expectedHash) throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; the draft was not saved");
+    const mode = (await fs.stat(file)).mode & 0o777;
+    const temp = await writeTempFile(file, text);
+    try {
+      await fs.chmod(temp, mode);
+      const latest = await loadYrfFile(file);
+      if (latest.file !== file || latest.hash !== expectedHash) throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; the draft was not saved");
+      await fs.rename(temp, file);
+      const saved = await loadYrfFile(file);
+      if (saved.hash !== sha256(text)) throw new ReportApiError(500, "SAVE_VERIFY_FAILED", "Saved file could not be verified; inspect the file before continuing");
+    } finally { await fs.rm(temp, { force: true }); }
+  });
+}
+
 
 function readYrfChanges(data: Record<string, unknown>): YrfChange[] {
   if (Array.isArray(data.changes)) {
@@ -351,6 +371,7 @@ export interface ReportApi {
 
 export function createReportApi(context: ReportApiContext): ReportApi {
   let manualRoot: string | null = null;
+  const openedYrfFiles = new Set<string>();
 
   const effectiveRoot = () => manualRoot ?? context.currentProjectRoot();
 
@@ -670,6 +691,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           json(res, 422, { code: "INVALID_YRF", error: result.error });
           return;
         }
+        openedYrfFiles.add(loaded.file);
         json(res, 200, {
           file: loaded.file,
           hash: loaded.hash,
@@ -679,8 +701,11 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         return;
       }
       case "yrf/patch":
+      case "yrf/save":
       case "yrf/save-copy": {
+        if (route === "yrf/save" && data.approved !== true) throw new ReportApiError(403, "APPROVAL_REQUIRED", "Explicit Save action is required");
         const loaded = await loadYrfFile(data.path);
+        if (route === "yrf/save" && !openedYrfFiles.has(loaded.file)) throw new ReportApiError(403, "YRF_NOT_OPEN", "Open this report before saving it");
         const expectedHash = requireString(data.expectedHash, "yrf hash", 64);
         if (loaded.hash !== expectedHash) {
           throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
@@ -699,6 +724,13 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           });
           return;
         }
+        if (route === "yrf/save") {
+          const inspected = inspectYrf(patched.text);
+          if (!inspected.ok) throw new ReportApiError(422, "INVALID_YRF", inspected.error ?? "Invalid YRF structure");
+          await saveYrfInPlace(loaded.file, expectedHash, patched.text);
+          json(res, 200, { ok: true, file: loaded.file, hash: sha256(patched.text), source: patched.text, inspection: inspected.inspection, changes: patched.changes });
+          return;
+        }
         await withWriteLock(loaded.file, async () => {
           const current = await readReportFile(loaded.file).catch(() => null);
           if (current === null || sha256(current) !== expectedHash) {
@@ -706,6 +738,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           }
         });
         const copy = await writeYrfCopy(loaded.file, patched.text);
+        openedYrfFiles.add(copy);
         json(res, 200, {
           ok: true,
           file: copy,
@@ -753,6 +786,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           }
         });
         const copy = await writeYrfCopy(loaded.file, text);
+        openedYrfFiles.add(copy);
         json(res, 200, {
           ok: true,
           file: copy,

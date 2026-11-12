@@ -17,6 +17,7 @@ Repository skills are in `.agents/skills/`. Users can describe a task normally; 
 do not need to know or type a skill name. When no workflow is named, use
 `adaptive-workflow` to select the smallest useful ordered set. Read only the selected
 skills and relevant references. State the selected workflow briefly and continue.
+Discover available tools when needed; prefer native capabilities when adequate.
 
 Route by outcome and consequence:
 

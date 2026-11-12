@@ -2,9 +2,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildTemplate,
+  exportReport,
   paginateReport,
   renderReportHtml,
 } from "../../src/reports/index.js";
+
+test("native element order controls overlapping HTML and PDF draw order", () => {
+  const document = buildTemplate("invoice");
+  const band = document.bands.find((item) => item.id === "band-title")!;
+  const sample = band.elements.find((item) => item.type === "text")!;
+  band.elements = [
+    { ...sample, id: "back", box: { ...sample.box }, props: { ...sample.props, text: "BACK_LAYER" } },
+    { ...sample, id: "front", box: { ...sample.box }, props: { ...sample.props, text: "FRONT_LAYER" } },
+  ];
+  for (const output of [renderReportHtml(document), Buffer.from(exportReport(document, "pdf").bytes).toString("latin1")]) {
+    assert.ok(output.indexOf("BACK_LAYER") >= 0);
+    assert.ok(output.indexOf("BACK_LAYER") < output.indexOf("FRONT_LAYER"));
+  }
+});
 
 const sampleData = {
   invoice: {

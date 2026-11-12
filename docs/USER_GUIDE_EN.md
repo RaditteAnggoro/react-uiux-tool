@@ -416,7 +416,10 @@ To add a native object, click its palette button or drag it onto an eligible ban
 
 1. Choose **YRF (.yrf)** and select a folder, then choose a file from the list; manual path entry is a fallback.
 2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** initially displays source read-only. Choose **Edit source** to edit a draft, then **Apply & save copy** to write a copy. Inspection does not execute vendor scripts.
-3. Edit available caption/geometry values, choose **Preview change**, then **Save copy**. The original is not overwritten. Creating a new `.yrf` requires acknowledging that output is experimental.
+3. Edit available caption/geometry values and choose **Preview change**. **Save** updates the original without a backup; **Save copy** creates a separate file. Structural and source changes currently require Save copy. Creating a new `.yrf` requires acknowledging that output is experimental.
+
+When objects are added or removed, **Preview change** compares the affected bands'
+object lists before and after the draft. Vendor rendering remains unverified.
 4. Units, print appearance, and created/edited files have not been validated by the vendor renderer. Open the copy in WaiReport with test data and compare totals, barcodes, pagination, and print output before use.
 
 If the folder is missing, choose it again; if a file changed outside the app, reopen it before saving. A preview does not prove that business functions or totals are correct.
@@ -639,15 +642,17 @@ Open **Report Studio** from Home. Use **Report guide** in either the native or Y
    use ↑/↓ to reorder sections and **Page break before** to start a new page. The report
    header has an explicit **Exit** button. Remove/Delete actions are filled red.
 6. `.yrf` opens in the same studio. Design is explicitly approximate, Code is editable and
-   validated, and saving always writes a sibling `*.edited.yrf` copy — the original is
-   never rewritten. Creation stays experimental and labelled.
+   validated. **Save** replaces the opened file for supported caption, data-field and
+   geometry edits without a backup; structural and Code changes use **Save copy**.
+   Creation stays experimental and labelled.
 7. **Formats** lists which actions each format supports; unsupported formats such as
    JRXML, RDL and `.rpt` are never converted silently.
 
 In the React editor, the **Style** tab offers a **Formatting palette** for a style
 property such as font, color, border, underline, wrapping or rotation. Enter a CSS
-value and choose **Save to source**. For example, select `Underline / strikethrough`,
-enter `underline`, and save. This works on elements with a supported style operation;
+value and choose **Apply to draft**. For example, select `Underline / strikethrough`,
+enter `underline`, and apply it. Choose **Preview draft** to update the canvas and
+**Save** to write the source. This works on elements with a supported style operation;
 it does not yet provide report presets or automatic list creation. In Report Studio,
 Align and Group apply to a selection within one band so objects in different page
 sections are not aligned using incompatible coordinates.
@@ -706,6 +711,11 @@ To highlight table rows, select a table and set **Conditional table rows**, for 
 4. Enter representative **Sample data**, select **Preview**, and check every page before saving or exporting. HTML keeps a multi-row merge together when it fits on a page. If it cannot fit, cells remain separate. PDF and other exports can simplify these features and show a warning.
 
 In **Structure**, expand a section to rename it and use its layer controls to change the order of elements within that section. Select a data field to choose a field from the available sample data, or enter its binding path manually.
+
+The native **Layers** list shows the selected section with frontmost objects first.
+Select a row to select the object, search by type or ID, or use the arrows to move it
+forward/backward or to the front/back. These changes remain a draft until **Save**;
+Undo/Redo also work. Ordering across different sections is not supported here.
 
 For a native image, choose **Image fit → cover** to fill its frame. Adjust **Image position horizontal (%)** and **Image position vertical (%)** from 0 to 100 to choose which part remains visible; 50 centers the image. The same position is used in Design, Preview and PDF. This is frame positioning, not a freeform crop rectangle.
 

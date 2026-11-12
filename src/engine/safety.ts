@@ -3,6 +3,11 @@ import { lstat, realpath, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+const sourceOverlay = new AsyncLocalStorage<{ root: string; files: ReadonlyMap<string, string> }>();
+export function withSourceOverlay<T>(root: string, files: ReadonlyMap<string, string>, fn: () => T): T {
+  return sourceOverlay.run({ root, files }, fn);
+}
 export const MAX_FILE_BYTES = 1024 * 1024;
 export interface ProjectDirectoryEntry {
   name: string;
@@ -186,5 +191,7 @@ export async function readProjectFile(
   const source = raw.toString("utf8");
   if (!Buffer.from(source, "utf8").equals(raw))
     throw new InvalidUtf8Error(file);
-  return source;
+  const overlay = sourceOverlay.getStore();
+  return overlay && (overlay.root === root || await realpath(root) === overlay.root)
+    ? (overlay.files.get(file) ?? source) : source;
 }

@@ -19,6 +19,40 @@ test("design preview uses Vite-style module IDs on Windows and Unix", () => {
   assert.equal(designModulePath('/tmp/project/'), '/tmp/project/__uiux_design.jsx');
 });
 
+test("controller draft keeps source unchanged until save and retains it after a conflict", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-draft-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "draft", dependencies: { react: "19", vite: "7" } }));
+    const file = path.join(root, "src/App.jsx");
+    const original = "export default function App(){return <main><button>Old</button></main>}";
+    await writeFile(file, original);
+    await withStudio(async (base) => {
+      const { token } = await (await fetch(`${base}/api/session`)).json() as { token: string };
+      const headers = { "content-type": "application/json", origin: base, "x-uiux-token": token };
+      const post = async (endpoint: string, data: object) => {
+        const response = await fetch(`${base}/api/${endpoint}`, { method: "POST", headers, body: JSON.stringify(data) });
+        return { status: response.status, value: await response.json() as any };
+      };
+      const opened = await post("open", { path: root });
+      const expectedProject = opened.value.projectRoot;
+      const button = opened.value.elements.find((element: any) => element.tag === "button");
+      const edit = await post("draft/edit", { expectedProject, file: button.source.file, elementId: button.id, expectedHash: button.hash, operation: "text", value: "New", scope: "instance" });
+      assert.equal(edit.status, 200, JSON.stringify(edit.value));
+      assert.equal(await readFile(file, "utf8"), original);
+      assert.equal((await post("open", { path: root })).status !== 200, true);
+      assert.equal((await post("draft/undo", { expectedProject })).value.count, 0);
+      assert.equal((await post("draft/redo", { expectedProject })).value.count, 1);
+      await writeFile(file, original + "// external");
+      assert.equal((await post("draft/commit", { expectedProject, approved: true })).status, 409);
+      assert.equal(await readFile(file, "utf8"), original + "// external");
+      await writeFile(file, original);
+      assert.equal((await post("draft/commit", { expectedProject, approved: true })).status, 200);
+      assert.match(await readFile(file, "utf8"), />New<\/button>/);
+    });
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
 test("successive insert, prop and event edits retain prior writes on success and conflict", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-sequential-edits-"));
   try {

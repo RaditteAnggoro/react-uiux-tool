@@ -20,6 +20,7 @@ import {
   undoPatch,
   readProjectFile,
   hashSource,
+  SourceDraft,
 } from "../src/engine/index.js";
 import type { PatchRequest, JsxElement } from "../src/engine/types.js";
 async function fixture(source: string, extra: Record<string, string> = {}) {
@@ -57,6 +58,55 @@ function req(
   };
 }
 const SIMPLE = `import React, { useState } from 'react';\r\n// Keep my comment exactly.\r\nexport default function App() {\r\n  const [count, setCount] = useState(0);\r\n  const submit = () => setCount(count + 1);\r\n  return <main><button className="primary" onClick={submit}>Search</button><p>Result</p></main>;\r\n}\r\n`;
+test("source draft combines edits without writes, supports history and rejects external conflicts", async () => {
+  const f = await fixture(SIMPLE);
+  try {
+    const file = path.join(f.root, "src/App.tsx");
+    const draft = new SourceDraft(f.root);
+    let analysis = await draft.analysis();
+    let button = analysis.elements.find((element) => element.tag === "button")!;
+    analysis = (await draft.edit(req(button, "text", "First"))).analysis;
+    button = analysis.elements.find((element) => element.tag === "button")!;
+    analysis = (await draft.edit(req(button, "style", "12px", "marginLeft"))).analysis;
+    assert.equal(await readFile(file, "utf8"), SIMPLE);
+    assert.equal(draft.count, 2);
+    await draft.undo();
+    assert.equal(draft.canRedo, true);
+    await draft.redo();
+    await writeFile(file, SIMPLE + "// external\r\n");
+    await assert.rejects(draft.commit(true), /conflict/i);
+    assert.equal(draft.count, 2);
+    assert.equal(await readFile(file, "utf8"), SIMPLE + "// external\r\n");
+    await writeFile(file, SIMPLE);
+    await draft.commit(true);
+    const saved = await readFile(file, "utf8");
+    assert.match(saved, /First/);
+    assert.match(saved, /marginLeft/);
+    assert.match(saved, /onClick=\{submit\}/);
+  } finally { await f.cleanup(); }
+});
+test("multi-file draft checks all files before saving and preserves cross-file history", async () => {
+  const f = await fixture(SIMPLE, { "src/Other.tsx": "function Other(){return <section>Other</section>}" });
+  try {
+    const appPath = path.join(f.root, "src/App.tsx");
+    const otherPath = path.join(f.root, "src/Other.tsx");
+    const originalOther = await readFile(otherPath, "utf8");
+    const draft = new SourceDraft(f.root);
+    let analysis = await draft.analysis();
+    analysis = (await draft.edit(req(analysis.elements.find((element) => element.tag === "button")!, "text", "Changed"))).analysis;
+    await draft.edit(req(analysis.elements.find((element) => element.tag === "section")!, "text", "Updated"));
+    assert.equal(await readFile(appPath, "utf8"), SIMPLE);
+    await draft.undo();
+    await draft.redo();
+    await writeFile(otherPath, originalOther + " // external");
+    await assert.rejects(draft.commit(true), /conflict/i);
+    assert.equal(await readFile(appPath, "utf8"), SIMPLE);
+    await writeFile(otherPath, originalOther);
+    assert.equal((await draft.commit(true)).length, 2);
+    assert.match(await readFile(appPath, "utf8"), /Changed/);
+    assert.match(await readFile(otherPath, "utf8"), /Updated/);
+  } finally { await f.cleanup(); }
+});
 test("analyzer is read-only and detects concrete evidence, handlers, aliases and dynamic editability", async () => {
   const f = await fixture(
     SIMPLE.replace(

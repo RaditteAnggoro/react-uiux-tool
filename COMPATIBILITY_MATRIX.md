@@ -12,17 +12,17 @@ all projects using the same framework or library. Development host: macOS, Node
 | Form + Tailwind v4                                  | Tested install/build       | Fresh isolated `npm install --ignore-scripts`, `tsc`, Vite production build passed                                                                      |
 | Other template + Tailwind v4                        | Partial                    | All emitted TSX parses; shared plugin config tested with Form; separate builds not recorded                                                             |
 | Tailwind in internal instrumented preview           | Limited                    | Project plugin config is bypassed; standalone project dev/build is the fidelity check                                                                   |
-| Literal static DOM text/props/classes/styles        | Tested subset              | Engine tests and real browser direct-write/Undo; operation-level validation applies                                                                     |
+| Literal static DOM text/props/classes/styles        | Tested subset              | Draft engine and browser fixture; operation-level validation applies, and preview refresh is explicit                                                                     |
 | Static primitive structure                          | Tested subset              | Reorder/insert/remove and invalid-nesting engine tests passed; insertion may append beside expression children without rewriting them; repeated or conditional targets remain restricted |
 | Compound component and tab insertion                 | Tested subset              | Reuses unique observed direct wrapper patterns, rejects ambiguous or unsupported wrappers and tab containers; arbitrary component contracts remain unverified |
-| Inserted literal props / existing event function    | Tested subset              | Exact string/number/boolean values and safe events write directly; missing/unsafe handlers and props are rejected                                       |
+| Inserted literal props / existing event function    | Tested subset              | Exact string/number/boolean values and safe events are staged before Save; missing/unsafe handlers and props are rejected                                       |
 | JSX insertion formatting                            | Tested subset              | Multiline fixture reuses child indentation and CRLF; one-line source retains minimal insertion; arbitrary formatting remains unverified |
 | Project component prop/event contracts              | Tested subset              | TS property/union declarations and JS destructuring drive literal controls; declared unknown JS props accept explicit primitives without runtime type proof; callbacks bind to existing owner functions |
 | Wrapped component contracts                        | Tested subset              | Static `memo`/`forwardRef` chains expose destructured public prop names, including renamed callbacks; arbitrary HOCs remain unverified |
 | Project palette insertion and styles                | Tested subset              | Component CSS modules retained in browser fixture; known missing required TypeScript props rejected; JavaScript/complex contracts and arbitrary styling remain incomplete |
 | Named event bindings                                | Tested subset              | Fixture coverage adds, changes, removes, and undoes named bindings; inline expressions remain source-owned and business behavior is not inferred          |
 | `.map()`, conditional JSX, spread/dynamic ownership | Inspect/read-only          | Demo and engine fixtures expose reasons; no single-row rewrite promise                                                                                  |
-| Reusable local project components                   | Tested subset              | Components filters out business views/pages/screens/routes and nonvisual modules; drag writes JSX and relative import directly; default/named and memo/forwardRef-wrapped exports supported |
+| Reusable local project components                   | Tested subset              | Components filters out business views/pages/screens/routes and nonvisual modules; drag stages JSX and relative imports; default/named and memo/forwardRef-wrapped exports supported |
 | Selection, move, align, delete, and Undo             | Tested subset              | Static elements with event bindings can be deleted and undone; ambiguous repeated component instances require exact source-tree selection; runtime identity and all project layouts remain unverified |
 | Existing JSX subtree duplication                    | Tested subset              | Copies without identities or spreads into an eligible container in the same file and scope; one literal identity may be changed for a sibling; multiple identities and ID references are rejected |
 | Direct local context-provider inference             | Tested subset              | Provider-backed menu fixture and a large private application check passed; nested/dynamic/router/auth setup is not promised                               |
@@ -62,7 +62,7 @@ Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support clai
 | Report browsing and entry | Tested subset | Home opens Report Studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths are skipped. The project rail does not contain a report shortcut. |
 | Native table editing and PDF cells | Tested subset | Configure columns, static rows or dataset binding, numeric format, header and border; PDF draws individual cells and warns on estimated text clipping. Complex merged cells and vendor parity are not covered. |
 | Native Code tab | Tested subset | JSON draft is validated through `/api/reports/validate`; invalid text is rejected without touching the draft |
-| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry (including line endpoints) can be edited; palette adds text, field, box, line and embedded PNG/JPEG/WebP images; static table/form layouts add individual objects, not repeating tables; existing objects can be removed. Changes save to a copy with hash checks; creation and edits are **not vendor-validated** |
+| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry can be edited; the palette adds objects and static table/form layouts. Save replaces the original for supported caption, data-field and geometry changes, with a hash check and no backup; structural and source changes require Save copy. Creation and edits are **not vendor-validated** |
 
 React Style includes a basic formatting property selector for supported inline JSX
 styles; report presets and automatic list creation are not shared with React or `.yrf`.
@@ -76,5 +76,12 @@ Native tested subset: multi-page rows and repeated/optional headings, multi-leve
 Advanced-table and pagination increment: the native inspector supports header matrices, body merges and multiple row rules; `pageBreakBefore` starts a new page, and sections can be renamed and reordered. HTML and PDF use page-relative merge coordinates and keep a merge together when it fits. PDF still simplifies some styling; PDF/XLSX/DOCX warn about advanced-table fidelity. Coverage is limited to synthetic fixtures; no WaiReport comparison exists.
 
 Native images support horizontal and vertical positioning within the frame for contain/cover in Design, HTML and PDF. A freeform crop rectangle is not supported; YRF image rendering remains unverified against WaiReport.
+
+Native Layers supports selecting, searching and changing object order within one
+section as an undoable draft. Synthetic HTML/PDF checks verify drawing in object order;
+cross-section and vendor YRF stacking are not verified.
+
+YRF in-place Save supports bounded caption/geometry patches with hash-conflict detection
+and no backup. Structural and raw source changes still require explicit Save copy.
 
 Native report parameter definitions can be edited, with defaults and sample overrides resolved for field bindings and expressions in HTML/PDF. Missing required values and incorrect types generate warnings, not blocks; parameter support across other formats is not verified.

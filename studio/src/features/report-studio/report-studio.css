@@ -219,6 +219,7 @@
   margin-top: 10px;
 }
 .rs-files,
+.rs-layer-list,
 .rs-tree,
 .rs-tree ul {
   list-style: none;
@@ -226,6 +227,7 @@
   padding: 0;
 }
 .rs-files button,
+.rs-layer-list > li > button,
 .rs-tree button {
   width: 100%;
   text-align: left;
@@ -238,10 +240,13 @@
   font-size: 11.5px;
 }
 .rs-files button.on,
+.rs-layer-list > li > button.on,
 .rs-tree button.on {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.rs-layer-list > li { display: flex; align-items: center; gap: 4px; }
+.rs-layer-list > li > button { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .rs-tree ul ul {
   padding-left: 12px;
 }

@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { SourceDraft } from "./draft.js";
 export {
   analyzeProject,
   parseSource,

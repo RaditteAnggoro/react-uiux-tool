@@ -102,6 +102,7 @@ export async function startStudio(options: StudioOptions = {}) {
   }
   let report: AnalysisReport | null = null;
   let staged: SourcePatch | null = null;
+  let draft: import("../engine/draft.js").SourceDraft | null = null;
   let checkpoint: Checkpoint | null = null;
   let watchers: FSWatcher[] = [];
   let watchGeneration = 0;
@@ -121,6 +122,9 @@ export async function startStudio(options: StudioOptions = {}) {
     },
     async overlay(patch: SourcePatch | null) {
       await previewImpl?.overlay(patch);
+    },
+    async draftOverlay(sources: ReadonlyMap<string, string>) {
+      await previewImpl?.draftOverlay(sources);
     },
     async design(target: { file: string; componentName: string } | null) {
       if (!previewImpl) throw new Error("Start the approved preview first");
@@ -324,11 +328,12 @@ export async function startStudio(options: StudioOptions = {}) {
           }
           if (url.pathname === "/api/source") {
             const file = string(url.searchParams.get("file"), "source path");
-            const { readProjectFile } = await import("../engine/index.js");
-            const source = await readProjectFile(current().projectRoot, file);
+            const { readProjectFile, hashSource } = await import("../engine/index.js");
+            const source = draft ? await draft.source(file) : await readProjectFile(current().projectRoot, file);
             json(res, 200, {
               source,
-              hash: current().files.find((f) => f.file === file)?.hash,
+              hash: hashSource(source),
+              draft: !!draft,
             });
             return;
           }
@@ -365,8 +370,10 @@ export async function startStudio(options: StudioOptions = {}) {
         }
         mutationBusy = true;
         locked = true;
-        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
+        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard", "/api/draft/edit", "/api/draft/edit-group", "/api/draft/undo", "/api/draft/redo", "/api/draft/commit", "/api/draft/discard", "/api/draft/preview"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
           throw new Error("Project changed in another tab; reopen your project before editing.");
+        if (draft && ["/api/open", "/api/demo", "/api/create", "/api/analyze", "/api/edit", "/api/edit-group", "/api/patch", "/api/apply", "/api/undo"].includes(url.pathname))
+          throw new Error("Save or discard the current draft before switching projects or editing committed source.");
         switch (url.pathname) {
           case "/api/open": {
             const root = string(data.path, "project path");
@@ -456,6 +463,48 @@ export async function startStudio(options: StudioOptions = {}) {
             staged = patch;
             await preview.overlay(patch);
             json(res, 200, patch);
+            return;
+          }
+          case "/api/draft/edit":
+          case "/api/draft/edit-group": {
+            if (staged) throw new Error("Discard the pending reviewed patch before starting a draft.");
+            const { SourceDraft } = await import("../engine/index.js");
+            const next = draft ?? new SourceDraft(current().projectRoot);
+            const result = url.pathname === "/api/draft/edit"
+              ? await next.edit(data as any)
+              : await next.editGroup(Array.isArray(data.items) ? data.items as any : []);
+            draft = next;
+            json(res, 200, { ...result, count: next.count, canRedo: next.canRedo });
+            return;
+          }
+          case "/api/draft/undo":
+          case "/api/draft/redo": {
+            if (!draft) throw new Error("No draft is open.");
+            const patch = url.pathname.endsWith("undo") ? draft.undoChange : draft.redoChange;
+            const analysis = url.pathname.endsWith("undo") ? await draft.undo() : await draft.redo();
+            json(res, 200, { analysis, patch, count: draft.count, canRedo: draft.canRedo });
+            return;
+          }
+          case "/api/draft/commit": {
+            approved(data);
+            if (!draft) throw new Error("No draft is open.");
+            const checkpoints = await draft.commit(true);
+            checkpoint = checkpoints.length === 1 ? checkpoints[0]! : null;
+            draft = null;
+            const refreshed = await refreshAfterWrite();
+            json(res, 200, { ...refreshed, checkpoints: checkpoints.map(({ id, file, appliedAt }) => ({ id, file, appliedAt })) });
+            return;
+          }
+          case "/api/draft/preview": {
+            if (!draft) throw new Error("No draft is open.");
+            await preview.draftOverlay(draft.sources);
+            json(res, 200, { ok: true });
+            return;
+          }
+          case "/api/draft/discard": {
+            if (!draft) throw new Error("No draft is open.");
+            draft = null;
+            json(res, 200, await refreshAfterWrite());
             return;
           }
           case "/api/edit": {

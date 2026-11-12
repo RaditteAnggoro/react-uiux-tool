@@ -7,7 +7,7 @@ export function setProject(value: string) {
   projectRoot = value;
 }
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
-  const projectActions = ['analyze', 'patch', 'edit', 'edit-group', 'apply', 'undo', 'discard'];
+  const projectActions = ['analyze', 'patch', 'edit', 'edit-group', 'apply', 'undo', 'discard', 'draft/edit', 'draft/edit-group', 'draft/undo', 'draft/redo', 'draft/commit', 'draft/discard', 'draft/preview'];
   const payload = body !== undefined && projectActions.includes(path)
     ? { ...(body as object), expectedProject: projectRoot, ...(path === 'undo' ? { expectedCheckpoint: checkpointId } : {}) }
     : body;

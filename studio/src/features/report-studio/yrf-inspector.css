@@ -524,6 +524,9 @@
 }
 .yrf-style-controls {
   display: flex;
+  min-width: 0;
+  padding: 0;
+  border: 0;
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;

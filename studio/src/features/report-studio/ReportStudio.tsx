@@ -163,6 +163,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [sampleSchema, setSampleSchema] = useState<string>("");
   const [showFormats, setShowFormats] = useState(false);
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
+  const [layerSearch, setLayerSearch] = useState("");
   useEffect(() => {
     if (!selectedId || !document) return;
     const band = document.bands.find((item) => item.elements.some((element) => element.id === selectedId));
@@ -590,6 +591,18 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return { ...band, elements };
     });
     commit({ ...document, bands });
+  };
+
+  const moveLayerToEdge = (bandId: string, elementId: string, front: boolean) => {
+    if (!document) return;
+    const band = document.bands.find((item) => item.id === bandId);
+    if (!band) return;
+    const index = band.elements.findIndex((item) => item.id === elementId);
+    if (index < 0 || index === (front ? band.elements.length - 1 : 0)) return;
+    const elements = [...band.elements];
+    const [item] = elements.splice(index, 1);
+    if (front) elements.push(item!); else elements.unshift(item!);
+    commit({ ...document, bands: document.bands.map((entry) => entry.id === bandId ? { ...entry, elements } : entry) });
   };
 
   const groupSelection = () => {
@@ -1422,6 +1435,12 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             )}
           </section>
 
+          {document && selectedBand && (() => {
+            const band = document.bands.find((item) => item.id === selectedBand);
+            if (!band) return null;
+            const filtered = band.elements.map((element, index) => ({ element, index })).reverse().filter(({ element }) => `${element.type} ${element.id}`.toLowerCase().includes(layerSearch.trim().toLowerCase()));
+            return <section className="rs-layers"><h3>{tr("layers")}</h3><p className="rs-hint">{tr("layersHint")}</p><label className="rs-field"><span>{tr("searchLayers")}</span><input value={layerSearch} onChange={(event) => setLayerSearch(event.target.value)} /></label><ul className="rs-layer-list">{filtered.map(({ element, index }) => <li key={element.id}><button type="button" aria-pressed={selectedIds.includes(element.id)} className={selectedIds.includes(element.id) ? "on" : ""} onClick={(event) => { const additive = event.shiftKey || event.metaKey || event.ctrlKey; selectIds(additive ? selectedIds.includes(element.id) ? selectedIds.filter((id) => id !== element.id) : [...selectedIds, element.id] : [element.id]); }}><span>{element.type} · {element.id}</span></button><span className="rs-band-controls"><button type="button" aria-label={`${tr("moveLayerUp")}: ${element.id}`} disabled={index === band.elements.length - 1} onClick={() => moveLayer(band.id, element.id, 1)}>↑</button><button type="button" aria-label={`${tr("moveLayerDown")}: ${element.id}`} disabled={index === 0} onClick={() => moveLayer(band.id, element.id, -1)}>↓</button><button type="button" aria-label={`${tr("bringFront")}: ${element.id}`} disabled={index === band.elements.length - 1} onClick={() => moveLayerToEdge(band.id, element.id, true)}>⇈</button><button type="button" aria-label={`${tr("sendBack")}: ${element.id}`} disabled={index === 0} onClick={() => moveLayerToEdge(band.id, element.id, false)}>⇊</button></span></li>)}</ul></section>;
+          })()}
           {document && (
             <section>
               <h3>{tr("palette")}</h3>

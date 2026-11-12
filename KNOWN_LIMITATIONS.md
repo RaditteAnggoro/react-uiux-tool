@@ -123,9 +123,14 @@ must not be represented as complete compatibility with arbitrary React/Next.js.
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification and
 [COMPATIBILITY_MATRIX.md](COMPATIBILITY_MATRIX.md) for fixture-level evidence.
 
+React Editor uses an in-memory draft for supported visual source edits. Preview must be
+explicitly refreshed after each change before interacting with the canvas again. Drafts
+are lost if the local server stops. Multi-file saves use checked per-file writes and
+best-effort rollback; they are not atomic across files or process crashes.
+
 ## Report Studio (P1)
 
-- Native `.report.json` is editable; `.yrf` supports the experimental copy-only
+- Native `.report.json` is editable; `.yrf` supports the experimental editing
   subset described below. PDF, HTML, XLSX, CSV, DOCX, and PNG/SVG are not editable sources.
 - Exports support PDF, HTML, CSV, XLSX, and DOCX. XLSX contains the first table
   only; DOCX has limited layout fidelity. Bar, line, and pie charts render as SVG
@@ -145,6 +150,13 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
   HTML preview and PDF. Missing required values and incorrect types warn in preview and
   export but do not block output; users must check values. Expression names must use
   identifier syntax.
+- YRF visual controls disable style and removal for unsupported object kinds, and
+  prevent removal of objects carrying script fields. The raw source editing path has
+  different capabilities and has not been verified as an equivalent protection.
+- YRF Save updates the original for bounded caption, data-field and geometry patches, with a hash
+  conflict check and no backup as requested. Structural and source edits still use the
+  explicitly labeled Save copy path. Filesystem rename is not a cross-process
+  compare-and-swap, and vendor rendering remains unverified.
 - Canvas fields display binding paths rather than evaluated data; the preview can
   evaluate supported bindings using supplied sample data.
 - The native inspector can configure multi-level table headers, body merges, and multiple
@@ -157,14 +169,13 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for actual verification
 - `.yrf` style edits change the vendor `style` declaration string only; the approximate
   canvas applies a small CSS subset (weight/style/decoration/size/colour/align) and the
   result is still not a vendor-rendered preview. Multi-select alignment stages raw-unit
-  geometry patches and always saves a copy.
-- `.yrf` patches refuse duplicated JSON keys, preserve BOM/CRLF/Unicode and unknown
-  vendor properties, and reject parent-directory symlinks. Adding/removing objects or
-  bands, editing scripts, and overwriting originals remain blocked.
-- `.yrf` support: inspection plus an **experimental** write path. Existing textbox `text` and `dataField`, captions
-  and numeric geometry can be patched into a sibling `*.edited.yrf` copy, and new
-  files can be produced from a native template after an explicit acknowledgement.
-  Adding objects/bands, editing scripts, and overwriting originals stay blocked. The
+  geometry patches.
+- `.yrf` scalar patches refuse duplicated JSON keys, preserve BOM/CRLF/Unicode and unknown
+  vendor properties, and reject parent-directory symlinks. Structural and source edits
+  use the separate copy path.
+- `.yrf` support: inspection plus an **experimental** write path. Supported captions,
+  data fields and numeric geometry can be saved in place or to a sibling copy; new
+  files can be produced from a native template after an explicit acknowledgement. The
   producer uses an approximate 11 units/mm mapping derived from three samples and has
   **not** been validated by the vendor renderer. Vendor licence status is unresolved;
   nothing vendor-owned is bundled.

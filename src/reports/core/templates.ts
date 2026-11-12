@@ -228,13 +228,13 @@ function invoice(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
           lineHeight: 1.35,
           color: tokens.colors.text,
         }),
-        field("el-invoice-number", { x: 118, y: 0, width: 60, height: 5 }, {
+        field("el-invoice-number", { x: 118, y: 0, width: 60, height: 7 }, {
           label: "No. Invoice",
           fontSize: 8,
           align: "right",
           color: tokens.colors.muted,
         }, "invoice.number"),
-        field("el-issued", { x: 118, y: 6, width: 60, height: 5 }, {
+        field("el-issued", { x: 118, y: 8, width: 60, height: 7 }, {
           label: "Tanggal",
           format: "date",
           fontSize: 8,
@@ -282,19 +282,19 @@ function invoice(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
           fontSize: 8,
           color: tokens.colors.muted,
         }),
-        field("el-subtotal", { x: 118, y: 2, width: 60, height: 5 }, {
+        field("el-subtotal", { x: 118, y: 2, width: 60, height: 7 }, {
           label: "Subtotal",
           format: "currency",
           align: "right",
           fontSize: 8,
         }, "invoice.subtotal"),
-        field("el-tax", { x: 118, y: 8, width: 60, height: 5 }, {
+        field("el-tax", { x: 118, y: 10, width: 60, height: 7 }, {
           label: "PPN",
           format: "currency",
           align: "right",
           fontSize: 8,
         }, "invoice.tax"),
-        field("el-total", { x: 118, y: 14, width: 60, height: 7 }, {
+        field("el-total", { x: 118, y: 18, width: 60, height: 7 }, {
           label: "Total",
           format: "currency",
           align: "right",

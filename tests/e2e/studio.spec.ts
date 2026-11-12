@@ -9,6 +9,12 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem("uiux-theme", "light");
   });
 });
+test.afterEach(async ({ request }) => {
+  const session = await (await request.get("/api/session")).json();
+  const headers = { "x-uiux-token": session.token, origin: new URL(test.info().project.use.baseURL as string).origin };
+  const status = await (await request.get("/api/status", { headers })).json();
+  if (status.projectRoot) await request.post("/api/draft/discard", { headers, data: { expectedProject: status.projectRoot } });
+});
 const fixtureRoots = new Set<string>();
 test.afterAll(async () => {
   await Promise.all(
@@ -41,6 +47,50 @@ async function stopPreview(page: import("@playwright/test").Page) {
     .getByRole("button", { name: "Stop preview" });
   if (await stop.isVisible().catch(() => false)) await stop.click();
 }
+
+test("Pages search and reusable Components search remain independent", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  await page.getByLabel("Search source files…").fill("not-a-component-name");
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await expect(page.getByLabel("Search components…")).toHaveValue("");
+  await expect(page.locator(".project-component-list").getByRole("button", { name: /Button/ })).toBeVisible();
+  await page.getByLabel("Search components…").fill("Button");
+  await page.locator(".icon-rail").getByRole("button", { name: "Pages" }).click();
+  await expect(page.getByLabel("Search source files…")).toHaveValue("not-a-component-name");
+  await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
+  await expect(page.getByLabel("Search components…")).toHaveValue("Button");
+  await stopPreview(page);
+});
+
+test("expanding a source file keeps the editor in Design mode", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  await page.getByLabel("Search source files…").fill("App.tsx");
+  const file = page.locator(".source-explorer .file-row", { hasText: "App.tsx" });
+  await expect(file).toHaveAttribute("aria-expanded", "false");
+  await file.click();
+  await expect(file).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("tab", { name: "Design", exact: true })).toHaveAttribute("aria-selected", "true");
+  await stopPreview(page);
+});
+
+test("Props excludes code-owned and style properties from source edits", async ({ page }) => {
+  await page.goto("/");
+  await openFixtureProject(page);
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  const name = page.getByLabel("Property name", { exact: true });
+  await expect(name).toBeVisible();
+  await expect(page.locator('#prop-names option[value="children"]')).toHaveCount(0);
+  await expect(page.locator('#prop-names option[value="style.display"]')).toHaveCount(0);
+  for (const forbidden of ["children", "style.display"]) {
+    await name.fill(forbidden);
+    await expect(page.locator(".inspector-section").filter({ has: name }).getByRole("button", { name: "Apply to draft" })).toBeDisabled();
+    await expect(page.getByText(/This property cannot be edited here/)).toBeVisible();
+  }
+  await stopPreview(page);
+});
 
 test("palette warns without a selected container and copies a button without an identity", async ({ page }) => {
   await page.goto("/");
@@ -171,7 +221,7 @@ test("basic paragraph starts with editable visible text", async ({ page }) => {
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>New paragraph</p>");
   await frame.getByText("New paragraph").click();
   await page.getByLabel("Text content").fill("Edited paragraph");
-  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
   await expect(frame.getByText("Edited paragraph")).toBeVisible();
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>Edited paragraph</p>");
   await stopPreview(page);
@@ -200,7 +250,7 @@ test("declared untyped JavaScript prop can be added and edited in the inspector"
   await page.getByRole("tab", { name: "Props" }).click();
   await page.getByLabel("Property name").fill("label");
   await page.getByLabel("Literal value").fill("Search");
-  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Save to source" }).click();
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Apply to draft" }).click();
   await expect(frame.getByRole("button", { name: "Search" })).toBeVisible();
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain('label="Search"');
   await stopPreview(page);
@@ -211,7 +261,8 @@ test("insert then edit props and event keeps the inserted element", async ({ pag
   fixtureRoots.add(root);
   await cp(path.resolve("fixtures/demo"), root, { recursive: true });
   const sourcePath = path.join(root, "src/App.tsx");
-  await writeFile(sourcePath, 'export default function App(){const handleSearch=()=>{};return <main><section><span>Keep existing</span></section></main>}');
+  const original = 'export default function App(){const handleSearch=()=>{};return <main><section><span>Keep existing</span></section></main>}';
+  await writeFile(sourcePath, original);
   await page.goto("/");
   await page.getByRole("button", { name: /Open Existing Project/ }).click();
   await page.getByLabel("Project directory").fill(root);
@@ -222,24 +273,51 @@ test("insert then edit props and event keeps the inserted element", async ({ pag
   await frame.locator("section").click();
   await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
   await page.locator(".primitive-grid").getByRole("button", { name: "Paragraph" }).click();
-  await expect.poll(() => readFile(sourcePath, "utf8")).toContain("<p>New paragraph</p>");
+  await expect(page.getByText("Unsaved draft (1)")).toBeVisible();
+  expect(await readFile(sourcePath, "utf8")).toBe(original);
+  await page.getByRole("button", { name: "Preview draft" }).click();
   await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft preview", { exact: true })).toBeVisible();
   await frame.getByText("New paragraph").click();
   await page.getByLabel("Property name").fill("title");
   await page.getByLabel("Literal value").fill("Example");
   await expect(page.getByLabel("Property name")).toHaveValue("title");
-  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Save to source" }).click();
-  await expect.poll(() => readFile(sourcePath, "utf8")).toContain('title="Example"');
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Apply to draft" }).click();
+  expect(await readFile(sourcePath, "utf8")).toBe(original);
   await page.getByRole("tab", { name: "Events" }).click();
   await page.getByLabel("Event property").selectOption("onClick");
   await page.getByLabel("Existing function").fill("handleSearch");
-  await page.getByRole("button", { name: "Bind event to source" }).click();
+  await page.getByRole("button", { name: "Add event to draft" }).click();
+  expect(await readFile(sourcePath, "utf8")).toBe(original);
+  await page.locator(".canvas-actions").getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => readFile(sourcePath, "utf8")).toContain("onClick={handleSearch}");
   const source = await readFile(sourcePath, "utf8");
   expect(source).toContain('title="Example"');
   expect(source).toContain("New paragraph</p>");
   expect(source).toContain("<span>Keep existing</span>");
+  await stopPreview(page);
+});
+
+test("draft discard and conflict preserve the source and pending edit", async ({ page }) => {
+  await page.goto("/");
+  const root = await openFixtureProject(page);
+  const sourcePath = path.join(root, "src/App.tsx");
+  const original = await readFile(sourcePath, "utf8");
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.getByLabel("Property name", { exact: true }).fill("title");
+  await page.getByLabel("Literal value").fill("Draft title");
+  await page.locator(".inspector-section").filter({ has: page.getByLabel("Property name", { exact: true }) }).getByRole("button", { name: "Apply to draft" }).click();
+  await expect(page.getByText("Unsaved draft (1)")).toBeVisible();
+  expect(await readFile(sourcePath, "utf8")).toBe(original);
+  await writeFile(sourcePath, original + "\n// external edit\n");
+  await page.locator(".canvas-actions").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/Source conflict/i).first()).toBeVisible();
+  expect(await readFile(sourcePath, "utf8")).toBe(original + "\n// external edit\n");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(".canvas-actions").getByRole("button", { name: "Discard Draft" }).click();
+  await expect(page.getByText("Unsaved draft (1)")).toHaveCount(0);
+  expect(await readFile(sourcePath, "utf8")).toBe(original + "\n// external edit\n");
   await stopPreview(page);
 });
 
@@ -394,10 +472,10 @@ test("editing a shared implementation requires explicit confirmation", async ({ 
   await page.getByRole("tab", { name: "Props" }).click();
   await page.getByLabel("Text content").fill("After");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
   expect(await readFile(file, "utf8")).toBe(source);
   page.once("dialog", (dialog) => dialog.accept());
-  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Save to source" }).click();
+  await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
   await expect.poll(() => readFile(file, "utf8")).toContain(">After</button>");
 });
 
@@ -417,7 +495,7 @@ test("an existing event handler updates local data after binding", async ({ page
   await page.getByRole("tab", { name: "Events" }).click();
   await page.getByLabel("Event property").selectOption("onClick");
   await page.getByLabel("Existing function").fill("increment");
-  await page.getByRole("button", { name: "Bind event to source" }).click();
+  await page.getByRole("button", { name: "Add event to draft" }).click();
   await expect.poll(() => readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("onClick={increment}");
   await page.getByRole("tab", { name: "Interact" }).click();
   await frame.getByRole("button", { name: "Increment" }).click();
@@ -768,7 +846,7 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
   await page
     .locator(".inspector-section")
     .filter({ has: page.getByRole("heading", { name: "Text content" }) })
-    .getByRole("button", { name: "Save to source" })
+    .getByRole("button", { name: "Apply to draft" })
     .click();
   await expect(
     frame.getByRole("button", { name: "Create workspace" }),
@@ -786,7 +864,7 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
     page
       .locator(".inspector-section")
       .filter({ has: page.getByRole("heading", { name: "Text content" }) })
-      .getByRole("button", { name: "Save to source" }),
+      .getByRole("button", { name: "Apply to draft" }),
   ).toBeDisabled();
 });
 
@@ -936,7 +1014,7 @@ test("project component drag and component copy write directly to source", async
     await page
       .locator(".inspector-section")
       .filter({ has: page.getByRole("heading", { name: "Props" }) })
-      .getByRole("button", { name: "Save to source" })
+      .getByRole("button", { name: "Apply to draft" })
       .click();
     await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
     expect(await readFile(path.join(root, "src/App.jsx"), "utf8")).toContain(
@@ -945,7 +1023,7 @@ test("project component drag and component copy write directly to source", async
     await page.getByRole("tab", { name: "Events" }).click();
     await page.getByLabel("Event property").selectOption("onChange");
     await page.getByLabel("Existing function").fill("handleDateChange");
-    await page.getByRole("button", { name: "Bind event to source" }).click();
+    await page.getByRole("button", { name: "Add event to draft" }).click();
     await expect(page.getByText("Working…", { exact: true })).toHaveCount(0);
     await expect.poll(async () => readFile(path.join(root, "src/App.jsx"), "utf8")).toContain('onChange={handleDateChange}');
     page.once("dialog", (dialog) => dialog.accept());
@@ -955,7 +1033,7 @@ test("project component drag and component copy write directly to source", async
     await expect(page.getByRole("button", { name: "Remove event binding" })).toBeDisabled();
     await page.getByLabel("Event property").selectOption("onChange");
     await page.getByLabel("Existing function").fill("handleDateChange");
-    await page.getByRole("button", { name: "Bind event to source" }).click();
+    await page.getByRole("button", { name: "Add event to draft" }).click();
     await expect.poll(async () => readFile(path.join(root, "src/App.jsx"), "utf8")).toContain('onChange={handleDateChange}');
 
     await expect(frame.getByLabel("Project date field")).toHaveCount(2);
@@ -1174,7 +1252,7 @@ test("React formatting palette writes a selected text style to source", async ({
   const palette = page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Formatting palette" }) });
   await palette.getByLabel("Formatting property").selectOption("textDecorationLine");
   await palette.getByLabel("CSS value").fill("underline");
-  await palette.getByRole("button", { name: "Save to source" }).click();
+  await palette.getByRole("button", { name: "Apply to draft" }).click();
   await expect.poll(async () => readFile(path.join(root, "src/App.tsx"), "utf8")).toContain('textDecorationLine: "underline"');
   await stopPreview(page);
 });

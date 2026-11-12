@@ -270,6 +270,7 @@ export function designNetworkGuardSource(): string {
 export class ProjectPreview {
   private server: ViteDevServer | null = null;
   private patch: SourcePatch | null = null;
+  private draftSources = new Map<string, string>();
   private cacheDirectory: string | null = null;
   private root = "";
   private report: AnalysisReport | null = null;
@@ -569,7 +570,8 @@ createRoot(document.getElementById("root")).render(
           .split(path.sep)
           .join("/");
         if (file.startsWith("../") || path.isAbsolute(file)) return null;
-        if (owner.patch?.file === file) code = owner.patch.after;
+        if (owner.draftSources.has(file)) code = owner.draftSources.get(file)!;
+        else if (owner.patch?.file === file) code = owner.patch.after;
         return { code: instrumentSource(code, file), map: null };
       },
     };
@@ -606,6 +608,14 @@ createRoot(document.getElementById("root")).render(
   }
   async overlay(patch: SourcePatch | null) {
     this.patch = patch;
+    this.draftSources.clear();
+    if (!this.server) return;
+    this.server.moduleGraph.invalidateAll();
+    this.server.ws.send({ type: "full-reload", path: "*" });
+  }
+  async draftOverlay(sources: ReadonlyMap<string, string>) {
+    this.patch = null;
+    this.draftSources = new Map(sources);
     if (!this.server) return;
     this.server.moduleGraph.invalidateAll();
     this.server.ws.send({ type: "full-reload", path: "*" });

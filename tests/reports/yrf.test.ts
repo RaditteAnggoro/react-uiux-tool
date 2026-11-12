@@ -302,3 +302,22 @@ test("remove object preserves the other objects and handles first, middle, and l
   }
   assert.throws(() => removeYrfObject(source, "pageSetting.paper"));
 });
+
+test("visual YRF changes reject unsupported objects and script fields", async () => {
+  const { removeYrfObject, setYrfObjectScalar } = await import("../../src/reports/formats/yrf/patch.js");
+  const document = JSON.parse(await fixture());
+  document.layout.pages[0].bands[0].objects.push({ type: "rtf", name: "unknown", style: "color:red" });
+  document.layout.pages[0].bands[0].objects[0].script = "inert";
+  const source = JSON.stringify(document);
+  const supported = "layout.pages[0].bands[0].objects[0]";
+  const unknown = "layout.pages[0].bands[0].objects[1]";
+  assert.throws(() => setYrfObjectScalar(source, unknown, "style", "color:blue"), /Unsupported/);
+  assert.throws(() => setYrfObjectScalar(source, supported, "script", "changed"), /script/);
+  assert.throws(() => removeYrfObject(source, unknown), /Unsupported/);
+  assert.throws(() => removeYrfObject(source, supported), /scripted/);
+  delete document.layout.pages[0].bands[0].objects[0].script;
+  document.layout.pages[0].bands[0].objects[0].description = "description stays editable";
+  const normal = JSON.stringify(document);
+  assert.match(setYrfObjectScalar(normal, supported, "description", "updated"), /updated/);
+  assert.doesNotThrow(() => removeYrfObject(normal, supported));
+});

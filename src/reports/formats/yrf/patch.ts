@@ -225,6 +225,8 @@ export function removeYrfObject(text: string, objectPath: string): string {
   const document = JSON.parse(text.replace(/^\uFEFF/, ""));
   const objects = valueAtPath(document, parseYrfPath(match[1]!));
   if (!Array.isArray(objects) || Number(match[2]) >= objects.length) throw new Error("Object not found");
+  const object = objects[Number(match[2])];
+  if (!object || typeof object !== "object" || Array.isArray(object) || !["label", "textbox", "line", "shape", "image"].includes(String((object as Record<string, unknown>).type)) || Object.keys(object).some((key) => /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key))) throw new Error("Unsupported or scripted objects cannot be removed visually");
   const spans: ContainerSpan[] = [];
   collectScalarSpans(text, spans);
   const arraySpans = spans.filter((span) => span.path === match[1] && span.kind === "array");
@@ -246,6 +248,7 @@ export function setYrfObjectScalar(text: string, objectPath: string, field: stri
   const document = JSON.parse(text.replace(/^\uFEFF/, ""));
   const object = valueAtPath(document, parseYrfPath(objectPath));
   if (!object || typeof object !== "object" || Array.isArray(object)) throw new Error("Object not found");
+  if (!["label", "textbox", "line", "shape", "image"].includes(String((object as Record<string, unknown>).type)) || /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(field)) throw new Error("Unsupported object or script property cannot be edited visually");
   const imageData = field === "data" && (object as Record<string, unknown>).type === "image" && typeof value === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 2_796_230;
   if (typeof value === "string" && value.length > 4000 && !imageData) throw new Error("Invalid property value");
   const booleanSpans: BooleanSpan[] = [];

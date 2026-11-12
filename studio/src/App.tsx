@@ -43,6 +43,9 @@ type Board = {
   name: string;
   scenario: string;
 };
+function isWritablePropName(name: string): boolean {
+  return /^[A-Za-z_][\w:-]*$/.test(name) && !/^on[A-Z]/.test(name) && !["dangerouslySetInnerHTML", "ref", "key", "style", "children"].includes(name);
+}
 const NATIVE_EVENTS = [
   "onClick",
   "onDoubleClick",
@@ -519,6 +522,10 @@ export default function App() {
     >("stopped"),
     [patch, setPatch] = useState<SourcePatch | null>(null),
     [designTarget, setDesignTarget] = useState<string | null>(null);
+  const [draftCount, setDraftCount] = useState(0);
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftRedo, setDraftRedo] = useState(false);
+  const [draftPreviewStale, setDraftPreviewStale] = useState(false);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [selectionWarning, setSelectionWarning] = useState(""),
@@ -543,7 +550,8 @@ export default function App() {
     >({}),
     [leftTab, setLeftTab] = useState<"components" | "tree" | "files">("tree"),
     [nav, setNav] = useState("pages"),
-    [search, setSearch] = useState("");
+    [pageSearch, setPageSearch] = useState(""),
+    [componentSearch, setComponentSearch] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"canvas" | "navigation" | "inspector">("canvas");
   const [treeChildren, setTreeChildren] = useState<
       Record<string, ProjectTreeEntry[]>
@@ -738,7 +746,7 @@ export default function App() {
     setGuideStep(0);
     setModal("guide");
   };
-  const applyReport = (value: AnalysisReport) => {
+  const applyReport = (value: AnalysisReport, change?: SourcePatch) => {
     setProject(value.projectRoot);
     const previousElements = new Map(
       (report?.elements || []).map((element) => [element.id, element]),
@@ -760,6 +768,18 @@ export default function App() {
         .join("|");
     const remap = (oldId: string | null) => {
       if (!oldId) return null;
+      const old = previousElements.get(oldId);
+      if (change && old?.source.file === change.file) {
+        let prefix = 0;
+        while (prefix < change.before.length && prefix < change.after.length && change.before[prefix] === change.after[prefix]) prefix++;
+        let suffix = 0;
+        while (suffix < change.before.length - prefix && suffix < change.after.length - prefix && change.before[change.before.length - suffix - 1] === change.after[change.after.length - suffix - 1]) suffix++;
+        const start = old.source.start;
+        const nextStart = start < prefix ? start : start >= change.before.length - suffix ? start + change.after.length - change.before.length : null;
+        if (nextStart === null) return null;
+        const candidate = nextElements.get(`${old.source.file}:${nextStart}`);
+        return candidate?.tag === old.tag ? candidate.id : null;
+      }
       if (nextElements.has(oldId)) return oldId;
       const previous = previousElements.get(oldId);
       if (!previous) return null;
@@ -827,6 +847,12 @@ export default function App() {
     localStorage.setItem("uiux-language", value);
     document.documentElement.lang = value;
   };
+  useEffect(() => {
+    if (!draftOpen) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [draftOpen]);
   useEffect(() => {
     document.documentElement.lang = language;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1105,6 +1131,8 @@ export default function App() {
     selectedIds,
     selectedId,
     checkpoint,
+    draftOpen,
+    draftCount,
     busy,
   ]);
   useEffect(() => {
@@ -1132,9 +1160,9 @@ export default function App() {
     if (propDraft.current.elementId !== selectedId) propDraft.current = { elementId: selectedId, dirty: false };
     setTextValue(selected.text || "");
     const firstProp =
-      selected.props.find((prop) => prop.editable && prop.name !== "style") ??
-      selectedDefinition?.props.find((prop) => !/^on[A-Z]/.test(prop.name));
-    const nextPropName = firstProp?.name ?? "className";
+      selected.props.find((prop) => prop.editable && isWritablePropName(prop.name)) ??
+      selectedDefinition?.props.find((prop) => isWritablePropName(prop.name));
+    const nextPropName = firstProp?.name ?? (/^[a-z]/.test(selected.tag) ? "className" : "");
     const instanceProp = selected.props.find(
       (prop) => prop.name === nextPropName,
     );
@@ -1273,13 +1301,13 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [mode, selectedId, selectedIds.length, report?.analyzedAt, busy, checkpoint]);
+  }, [mode, selectedId, selectedIds.length, report?.analyzedAt, busy, checkpoint, draftOpen, draftCount]);
   useEffect(() => {
-    if (!busy && checkpoint && pendingUndo.current) {
+    if (!busy && (draftOpen ? draftCount > 0 : checkpoint) && pendingUndo.current) {
       pendingUndo.current = false;
       void undo();
     }
-  }, [busy, checkpoint]);
+  }, [busy, checkpoint, draftOpen, draftCount]);
   function sendMode() {
     if (preview) {
       frame.current?.contentWindow?.postMessage(
@@ -1365,15 +1393,15 @@ export default function App() {
     extra: Partial<PatchRequest> = {},
   ) {
     const oldIds = new Set(report?.elements.map((candidate) => candidate.id));
-    const insertionAnchor = element.source.end;
     const shared = isSharedImplementation(element);
     if (shared && !window.confirm(t("sharedConfirm"))) return;
-    if (preview) setPreviewState("starting");
     await act(async () => {
       const value = await api<{
         patch: SourcePatch;
         analysis: AnalysisReport;
-      }>("edit", {
+        count: number;
+        canRedo: boolean;
+      }>("draft/edit", {
         file: element.source.file,
         elementId: element.id,
         expectedHash: element.hash,
@@ -1383,7 +1411,7 @@ export default function App() {
         ...extra,
       });
       if (operation === "prop") propDraft.current.dirty = false;
-      applyReport(value.analysis);
+      applyReport(value.analysis, value.patch);
       if (operation === "remove") {
         setSelectedId(null);
         setSelectedIds([]);
@@ -1397,13 +1425,8 @@ export default function App() {
             candidate.source.file === element.source.file &&
             candidate.tag === insertedTag,
         );
-        const inserted =
-          candidates.find((candidate) => !oldIds.has(candidate.id)) ??
-          candidates.sort(
-            (left, right) =>
-              Math.abs(left.source.start - insertionAnchor) -
-              Math.abs(right.source.start - insertionAnchor),
-          )[0];
+        const newCandidates = candidates.filter((candidate) => !oldIds.has(candidate.id));
+        const inserted = newCandidates.length === 1 ? newCandidates[0] : undefined;
         if (inserted) {
           setSelectedId(inserted.id);
           setInspectorTab("props");
@@ -1426,16 +1449,11 @@ export default function App() {
           }
         }
       }
-      setPatch(null);
-      setCheckpoint(true);
-      if (preview && frame.current) {
-        setPreviewState("starting");
-        // A focused iframe loses its keyboard listener during reload. Return
-        // focus to the studio so Undo remains available while preview restarts.
-        if (document.activeElement === frame.current) frame.current.blur();
-        frame.current.src = frame.current.src;
-      }
-      flash(t("savedDirectly"));
+      setDraftOpen(true);
+      setDraftCount(value.count);
+      setDraftRedo(value.canRedo);
+      setDraftPreviewStale(true);
+      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
     });
   }
   async function stage(
@@ -1469,6 +1487,14 @@ export default function App() {
     });
   }
   async function undo() {
+    if (draftOpen) {
+      await act(async () => {
+        const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/undo", {});
+        applyReport(result.analysis, result.patch);
+        setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+      });
+      return;
+    }
     if (preview) setPreviewState("starting");
     await act(async () => {
       const value = await api("undo", { approved: true });
@@ -1487,7 +1513,39 @@ export default function App() {
       pendingUndo.current = true;
       return;
     }
-    if (checkpoint) void undo();
+    if (draftOpen ? draftCount > 0 : checkpoint) void undo();
+  }
+  async function redoDraft() {
+    await act(async () => {
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/redo", {});
+      applyReport(result.analysis, result.patch);
+      setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+    });
+  }
+  async function refreshDraftPreview() {
+    await act(async () => {
+      await api("draft/preview", {});
+      previewSelections.current.clear();
+      setDraftPreviewStale(false);
+      if (preview) setPreviewState("starting");
+    });
+  }
+  async function saveDraft() {
+    await act(async () => {
+      const result = await api<{ analysis: AnalysisReport }>("draft/commit", { approved: true });
+      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false);
+      setCheckpoint(false);
+      flash(language === "id" ? "Draft disimpan ke source" : "Draft saved to source");
+    });
+  }
+  async function discardDraft() {
+    if (!window.confirm(language === "id" ? "Buang semua perubahan draft?" : "Discard all draft changes?")) return;
+    await act(async () => {
+      const result = await api<{ analysis: AnalysisReport }>("draft/discard", {});
+      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false);
+      setSelectedId(null); setSelectedIds([]); setSelectedRects({}); previewSelections.current.clear();
+      flash(t("discarded"));
+    });
   }
   async function createProject() {
     await act(async () => {
@@ -1583,7 +1641,8 @@ export default function App() {
       </div>
     </header>
   );
-  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearch = pageSearch.trim().toLowerCase();
+  const normalizedComponentSearch = componentSearch.trim().toLowerCase();
   const projectCatalog = useMemo(() => {
     const routeFiles = new Set(
       (report?.routes || []).map((route) =>
@@ -1604,9 +1663,9 @@ export default function App() {
         } =>
           item.rank !== null &&
           item.component.exported &&
-          (!normalizedSearch ||
-            item.component.name.toLowerCase().includes(normalizedSearch) ||
-            item.component.source.file.toLowerCase().includes(normalizedSearch)),
+          (!normalizedComponentSearch ||
+            item.component.name.toLowerCase().includes(normalizedComponentSearch) ||
+            item.component.source.file.toLowerCase().includes(normalizedComponentSearch)),
       )
       .sort(
         (left, right) =>
@@ -1616,7 +1675,7 @@ export default function App() {
       )
       .map((item) => item.component)
       .slice(0, 120);
-  }, [report?.components, report?.routes, normalizedSearch]);
+  }, [report?.components, report?.routes, normalizedComponentSearch]);
   const insertTypedValue: string | number | boolean =
     insertPropType === "number"
       ? Number(insertPropValue)
@@ -1651,7 +1710,7 @@ export default function App() {
     selected.editability !== "UNRESOLVED" &&
     selected.editability !== "ERROR";
   const propertyContracts = selectedDefinition?.props.filter(
-    (prop) => !/^on[A-Z]/.test(prop.name),
+    (prop) => isWritablePropName(prop.name),
   ) ?? [];
   const activeProperty = selected?.props.find(
     (prop) => prop.name === propName,
@@ -1802,7 +1861,6 @@ export default function App() {
       return;
     }
     if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
-    if (preview) setPreviewState("starting");
     void act(async () => {
       const items = group.map((item) => {
         const shared = isSharedImplementation(item);
@@ -1816,16 +1874,12 @@ export default function App() {
           confirmScope: shared,
         };
       });
-      const result = await api<{ analysis: AnalysisReport }>("edit-group", {
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", {
         items,
       });
-      applyReport(result.analysis);
-      setCheckpoint(true);
-      if (preview && frame.current) {
-        setPreviewState("starting");
-        frame.current.src = frame.current.src;
-      }
-      flash(t("groupMoved"));
+      applyReport(result.analysis, result.patch);
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
     });
   }
   function applyStylePreset(preset: string) {
@@ -1851,10 +1905,10 @@ export default function App() {
         scope: "instance" as const,
         confirmScope: false,
       }));
-      const result = await api<{ analysis: AnalysisReport }>("edit-group", { items });
-      applyReport(result.analysis);
-      setCheckpoint(true);
-      flash(t("styleApplied"));
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", { items });
+      applyReport(result.analysis, result.patch);
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
     });
   }
 
@@ -1930,7 +1984,6 @@ export default function App() {
       return;
     }
     if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
-    if (preview) setPreviewState("starting");
     void act(async () => {
       const items = changes.map(({ element: item, name, value }) => {
         const shared = isSharedImplementation(item);
@@ -1944,16 +1997,12 @@ export default function App() {
           confirmScope: shared,
         };
       });
-      const result = await api<{ analysis: AnalysisReport }>("edit-group", {
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", {
         items,
       });
-      applyReport(result.analysis);
-      setCheckpoint(true);
-      if (preview && frame.current) {
-        setPreviewState("starting");
-        frame.current.src = frame.current.src;
-      }
-      flash(group.length > 1 ? t("groupMoved") : t("savedDirectly"));
+      applyReport(result.analysis, result.patch);
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
     });
   }
   function alignSelected(
@@ -2164,8 +2213,8 @@ export default function App() {
           style={{ paddingLeft: 8 + depth * 14 }}
           disabled={!entry.browsable}
           onClick={() => {
-            openSourceFile(entry.path);
             if (components.length) toggleExpanded(key);
+            else openSourceFile(entry.path);
           }}
           title={entry.path}
         >
@@ -2813,12 +2862,12 @@ export default function App() {
                       disabled={!editableSelected}
                     />
                     <datalist id="prop-names">
-                      {[
+                      {[...new Set([
                         ...(/^[a-z]/.test(selected.tag) ? ["className", "title", "placeholder", "disabled", "aria-label"] : []),
                         ...propertyContracts.map((prop) => prop.name),
-                        ...selected.props.filter((prop) => prop.name !== "style" && !prop.name.startsWith("style.")).map((prop) => prop.name),
-                      ].map((name, index) => (
-                        <option key={index} value={name} />
+                        ...selected.props.filter((prop) => prop.editable && isWritablePropName(prop.name)).map((prop) => prop.name),
+                      ])].map((name) => (
+                        <option key={name} value={name} />
                       ))}
                     </datalist>
                   </Field>
@@ -2883,13 +2932,14 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  {propName && !isWritablePropName(propName) && <p className="property-lock-note">{t("unsupportedPropName")}</p>}
                   <button
                     className="button full"
                     disabled={
                       busy ||
                       !editableSelected ||
                       activePropertyLocked ||
-                      !propName ||
+                      !isWritablePropName(propName) ||
                       (propValueType === "number" &&
                         !Number.isFinite(Number(propValue)))
                     }
@@ -3937,7 +3987,7 @@ export default function App() {
             <span className="header-divider" />
             <button
               className="project-switch"
-              onClick={() => setScreen("analysis")}
+              onClick={() => draftOpen ? setModal("leave-project") : setScreen("analysis")}
             >
               <Icon name="folder" size={15} />
               <span>{report.name}</span>
@@ -4169,8 +4219,8 @@ export default function App() {
                     <input
                       aria-label={nav === "components" ? t("search") : t("sourceSearch")}
                       placeholder={nav === "components" ? t("search") : t("sourceSearch")}
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      value={nav === "components" ? componentSearch : pageSearch}
+                      onChange={(e) => nav === "components" ? setComponentSearch(e.target.value) : setPageSearch(e.target.value)}
                     />
                     <span>⌕</span>
                   </div>
@@ -4180,7 +4230,7 @@ export default function App() {
                         .filter((file) =>
                           file.file
                             .toLowerCase()
-                            .includes(search.toLowerCase()),
+                            .includes(normalizedSearch),
                         )
                         .map((file) => (
                           <button
@@ -4423,13 +4473,20 @@ export default function App() {
                     {!preview
                       ? t("staticInspection")
                       : previewState === "ready"
-                        ? "Live"
+                        ? draftOpen ? (draftPreviewStale ? (language === "id" ? "Preview lama" : "Preview out of date") : (language === "id" ? "Preview draft" : "Draft preview")) : "Live"
                         : previewState === "error"
                           ? t("error")
                           : t("working")}
                   </Badge>
                 </div>
                 <div className="canvas-actions">
+                  {draftOpen && <>
+                    <span role="status">{language === "id" ? `Draft belum disimpan (${draftCount})` : `Unsaved draft (${draftCount})`}</span>
+                    <button className="button small-button" disabled={busy || !preview} onClick={() => void refreshDraftPreview()}>{language === "id" ? "Tampilkan draft" : "Preview draft"}</button>
+                    <button className="button small-button" disabled={busy || !draftRedo} onClick={() => void redoDraft()}>Redo</button>
+                    <button className="button small-button" disabled={busy} onClick={() => void discardDraft()}>{t("discard")}</button>
+                    <button className="button accent small-button" disabled={busy || draftCount === 0} onClick={() => void saveDraft()}>{t("save")}</button>
+                  </>}
                   {designTarget && (
                     <button
                       className="button small-button"
@@ -4451,7 +4508,7 @@ export default function App() {
                     className="icon-button"
                     title={t("undoHint")}
                     aria-label={t("undo")}
-                    disabled={busy || !checkpoint}
+                    disabled={busy || (draftOpen ? draftCount === 0 : !checkpoint)}
                     onClick={() => void undo()}
                   >
                     <Icon name="undo" size={16} />
@@ -4636,7 +4693,7 @@ export default function App() {
                     <iframe
                       ref={frame}
                       src={frameSrc}
-                      style={{ visibility: previewState === "starting" ? "hidden" : undefined }}
+                      style={{ visibility: previewState === "starting" ? "hidden" : undefined, pointerEvents: draftOpen && draftPreviewStale ? "none" : undefined }}
                       title={t("preview")}
                       onLoad={sendMode}
                       sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
@@ -4828,13 +4885,14 @@ export default function App() {
           onClose={() => setModal(null)}
         >
           <p>{t("leaveWorkspaceMessage")}</p>
+          {draftOpen && <p role="alert">{language === "id" ? "Simpan atau buang draft sebelum keluar dari project." : "Save or discard the draft before leaving the project."}</p>}
           <p className="small muted">{t("leaveWorkspaceHint")}</p>
           {preview && <p className="small muted">{t("leavePreviewHint")}</p>}
           <div className="modal-footer">
             <button className="button" onClick={() => setModal(null)}>
               {t("stayInWorkspace")}
             </button>
-            <button className="button accent" disabled={busy} onClick={() => {
+            <button className="button accent" disabled={busy || draftOpen} onClick={() => {
               setModal(null);
               setScreen("home");
             }}>
