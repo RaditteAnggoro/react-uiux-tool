@@ -237,7 +237,7 @@ test("basic paragraph starts with editable visible text", async ({ page }) => {
   await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
   await expect(frame.getByText("Edited paragraph")).toBeVisible();
   await commitDraft(page);
-  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>Edited paragraph</p>");
+  expect((await readFile(path.join(root, "src/App.tsx"), "utf8")).replace(/\r\n/g, "\n")).toContain("<p>Edited paragraph</p>");
   await stopPreview(page);
 });
 
