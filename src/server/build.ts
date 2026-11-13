@@ -23,7 +23,10 @@ export async function runProjectBuild(root: string): Promise<BuildResult> {
   const started = Date.now();
   return await new Promise<BuildResult>((resolve) => {
     let output = "";
-    const child = spawn(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"], {
+    const windows = process.platform === "win32";
+    const command = windows ? process.env.ComSpec || "cmd.exe" : "npm";
+    const args = windows ? ["/d", "/s", "/c", "npm", "run", "build"] : ["run", "build"];
+    const child = spawn(command, args, {
       cwd: root,
       shell: false,
       env: { ...process.env, CI: "1" },

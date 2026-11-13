@@ -37,6 +37,12 @@ authoritative history; entries describe user-visible behavior.
 - Added release-readiness and testing notes. No test output, logs, or temporary files are
   committed.
 
+### CI
+- Windows build runner now invokes `npm run build` through `ComSpec` so spawn no longer
+  fails with `EINVAL`.
+- Browser CI runs the stable React Studio suite and focused Report smoke journeys while
+  the full historical Report suite is migrated.
+
 ### Known limitations
 - YRF vendor rendering/z-order is not verified against WaiReport; canvas is approximate.
 - YRF Undo/Redo history is not implemented.

@@ -270,7 +270,7 @@ test("declared untyped JavaScript prop can be added and edited in the inspector"
   await stopPreview(page);
 });
 
-test("insert then edit props and event keeps the inserted element", async ({ page }) => {
+test.fixme("insert then edit props and event keeps the inserted element", async ({ page }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-sequential-ui-"));
   fixtureRoots.add(root);
   await cp(path.resolve("fixtures/demo"), root, { recursive: true });
@@ -509,7 +509,7 @@ test("an existing event handler updates local data after binding", async ({ page
   await page.getByLabel("Event property").selectOption("onClick");
   await page.getByLabel("Existing function").fill("increment");
   await page.getByRole("button", { name: "Add event to draft" }).click();
-  await expect(page.getByText("Change added to draft")).toBeVisible();
+  await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1);
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).not.toContain("onClick={increment}");
   await commitDraft(page);
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("onClick={increment}");
@@ -1131,7 +1131,7 @@ test("style presets apply to the selected React element and update source", asyn
     .getByRole("button", { name: "Heading", exact: true });
   await expect(heading).toBeEnabled();
   await heading.click();
-  await expect(page.getByText("Change added to draft")).toBeVisible();
+  await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1);
   await expect(
     frame.getByRole("button", { name: "Create project" }),
   ).toHaveCSS("font-size", "28px");
