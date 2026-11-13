@@ -825,8 +825,13 @@ export async function startStudio(options: StudioOptions = {}) {
     if (vite) await vite.close();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    for (const directory of tempDirectories)
-      await fs.rm(directory, { recursive: true, force: true });
+    for (const directory of tempDirectories) {
+      try {
+        await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        // Windows may still hold a preview file briefly; leaving a temp folder is harmless.
+      }
+    }
   }
   return { url: origin, server, close };
 }
