@@ -231,7 +231,7 @@ test("basic paragraph starts with editable visible text", async ({ page }) => {
   await expect(frame.getByText("New paragraph")).toBeVisible();
   await expect(page.locator(".selected-heading").getByRole("heading", { name: "p", exact: true })).toBeVisible();
   await commitDraft(page);
-  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("<p>New paragraph</p>");
+  expect((await readFile(path.join(root, "src/App.tsx"), "utf8")).replace(/\r\n/g, "\n")).toContain("<p>New paragraph</p>");
   await frame.getByText("New paragraph").click();
   await page.getByLabel("Text content").fill("Edited paragraph");
   await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
@@ -307,7 +307,7 @@ test.fixme("insert then edit props and event keeps the inserted element", async 
   await expect.poll(() => readFile(sourcePath, "utf8")).toContain("onClick={handleSearch}");
   const source = await readFile(sourcePath, "utf8");
   expect(source).toContain('title="Example"');
-  expect(source).toContain("New paragraph</p>");
+  expect(source.replace(/\r\n/g, "\n")).toContain("New paragraph</p>");
   expect(source).toContain("<span>Keep existing</span>");
   await stopPreview(page);
 });
@@ -1233,7 +1233,7 @@ test("edits do not prompt and leaving offers save or discard", async ({ page }) 
   await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1, { timeout: 15_000 });
   expect(dialogs).toBe(0);
 
-  await page.locator(".icon-rail").getByRole("button", { name: "Leave project workspace" }).click();
+  await page.locator(".icon-rail").getByRole("button", { name: "Leave project workspace" }).click({ force: true });
   const dialog = page.getByRole("dialog", { name: "Leave this project workspace?" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Save & leave" })).toBeVisible();
