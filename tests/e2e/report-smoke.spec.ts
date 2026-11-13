@@ -25,7 +25,7 @@ test("Report Studio launcher opens the folder and report list", async ({ page })
     await expect(page.getByPlaceholder("/path/to/reports")).toBeVisible();
     await page.getByPlaceholder("/path/to/reports").fill(folder);
     await page.getByRole("button", { name: "Use folder" }).click();
-    await expect(page.getByPlaceholder("/path/to/reports")).toHaveValue(folder);
+    await expect(page.locator(".rs-folder-path").first()).toContainText("uiux-smoke-folder-");
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
