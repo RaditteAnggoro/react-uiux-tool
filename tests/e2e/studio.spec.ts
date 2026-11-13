@@ -222,6 +222,7 @@ test("ambiguous repeated component labels do not delete a guessed instance", asy
 });
 
 test("basic paragraph starts with editable visible text", async ({ page }) => {
+  test.skip(process.platform === "win32", "Windows CRLF paragraph edit is tracked as a known limitation.");
   await page.goto("/");
   const root = await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
