@@ -23,6 +23,20 @@ const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 type ResizeHandle = (typeof HANDLES)[number];
 const PT_TO_PX = 96 / 72;
 
+const STYLE_PRESETS: Record<string, Record<string, unknown>> = {
+  body: { fontSize: 10, fontWeight: 400, italic: false, list: undefined, color: "#111827" },
+  heading1: { fontSize: 18, fontWeight: 700, italic: false },
+  heading2: { fontSize: 14, fontWeight: 600, italic: false },
+  list: { fontSize: 10, list: "bullet" },
+  caption: { fontSize: 8, fontWeight: 400, color: "#6B7280" },
+  muted: { color: "#6B7280" },
+  danger: { color: "#B91C1C" },
+  highlight: { background: "#FEF3C7" },
+  card: { background: "#F8FAFC", borderWidth: 0.3, borderColor: "#CBD5E1" },
+  tableHeader: { fontWeight: 600, background: "#F1F5F9" },
+};
+
+
 interface TemplateInfo {
   id: string;
   name: { en: string; id: string };
@@ -124,6 +138,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [savedJson, setSavedJson] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const marqueeOrigin = useRef<{ x: number; y: number } | null>(null);
+  const marqueeBox = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const [selectedBand, setSelectedBand] = useState<string | null>(null);
   const [tab, setTab] = useState<"design" | "code" | "preview">("design");
   const [zoom, setZoom] = useState(1);
@@ -170,10 +187,44 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     if (band) setExpandedBands(new Set([band.id]));
   }, [selectedId]);
   const [flow, setFlow] = useState<"landing" | "open" | "create">("landing");
+  const [showStart, setShowStart] = useState(true);
   const [reportSearch, setReportSearch] = useState("");
   const [showLeft, setShowLeft] = useState(
     () => typeof window === "undefined" || window.innerWidth > 1100,
   );
+  const [leftWidth, setLeftWidth] = useState(() => {
+    const saved = Number(localStorage.getItem("uiux-report-left-width"));
+    return saved >= 220 && saved <= 520 ? saved : 280;
+  });
+  const [rightWidth, setRightWidth] = useState(() => {
+    const saved = Number(localStorage.getItem("uiux-report-right-width"));
+    return saved >= 220 && saved <= 520 ? saved : 290;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("uiux-report-left-width", String(leftWidth));
+      localStorage.setItem("uiux-report-right-width", String(rightWidth));
+    } catch {
+      // Width preferences are best-effort.
+    }
+  }, [leftWidth, rightWidth]);
+  const startPanelResize = (side: "left" | "right", event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = side === "left" ? leftWidth : rightWidth;
+    const move = (moveEvent: PointerEvent) => {
+      const delta = side === "left" ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      const next = Math.max(220, Math.min(520, startWidth + delta));
+      if (side === "left") setLeftWidth(next);
+      else setRightWidth(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const [showRight, setShowRight] = useState(
     () => typeof window === "undefined" || window.innerWidth > 1100,
   );
@@ -545,19 +596,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
 
   const applyPreset = (preset: string) => {
     if (!selected) return;
-    const presets: Record<string, Record<string, unknown>> = {
-      body: { fontSize: 10, fontWeight: 400, italic: false, list: undefined, color: "#111827" },
-      heading1: { fontSize: 18, fontWeight: 700, italic: false },
-      heading2: { fontSize: 14, fontWeight: 600, italic: false },
-      list: { fontSize: 10, list: "bullet" },
-      caption: { fontSize: 8, fontWeight: 400, color: "#6B7280" },
-      muted: { color: "#6B7280" },
-      danger: { color: "#B91C1C" },
-      highlight: { background: "#FEF3C7" },
-      card: { background: "#F8FAFC", borderWidth: 0.3, borderColor: "#CBD5E1" },
-      tableHeader: { fontWeight: 600, background: "#F1F5F9" },
-    };
-    const presetProps = presets[preset];
+    const presetProps = STYLE_PRESETS[preset];
     if (!presetProps) return;
     const next = { ...selected.props };
     for (const [key, value] of Object.entries(presetProps)) {
@@ -565,6 +604,27 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       else next[key] = value;
     }
     patchElement({ props: next });
+  };
+
+  const applyPresetToSelection = (preset: string) => {
+    if (!document || selectedIds.length < 2) return;
+    const presetProps = STYLE_PRESETS[preset];
+    if (!presetProps) return;
+    commit({
+      ...document,
+      bands: document.bands.map((band) => ({
+        ...band,
+        elements: band.elements.map((element) => {
+          if (!selectedIds.includes(element.id)) return element;
+          const next = { ...element.props };
+          for (const [key, value] of Object.entries(presetProps)) {
+            if (value === undefined) delete next[key];
+            else next[key] = value;
+          }
+          return { ...element, props: next };
+        }),
+      })),
+    });
   };
 
   const moveBand = (bandId: string, direction: -1 | 1) => {
@@ -1183,6 +1243,47 @@ export default function ReportStudio({ token, language, onExit, context = "home"
 
   return (
     <div className="rs">
+      {showStart && !document && (
+        <div className="rs-modal" role="dialog" aria-modal="true" aria-label={tr("howToStart")}>
+          <div className="rs-modal-card rs-start">
+            <div className="rs-start-mark" aria-hidden="true">▤</div>
+            <div className="rs-start-choices">
+              <button
+                className="rs-start-choice"
+                aria-label={tr("openExistingReport")}
+                title={tr("openExistingHint")}
+                onClick={() => {
+                  setFlow("open");
+                  setShowStart(false);
+                  setShowLeft(true);
+                  void loadBrowse();
+                  requestAnimationFrame(() => (globalThis.document.querySelector(".rs-folder-actions input") as HTMLInputElement | null)?.focus());
+                }}
+              >
+                <span className="rs-start-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+                </span>
+                <strong>{tr("openExistingReport")}</strong>
+              </button>
+              <button
+                className="rs-start-choice"
+                aria-label={tr("createNewReport")}
+                title={tr("createNewHint")}
+                onClick={() => {
+                  setFlow("create");
+                  setShowStart(false);
+                  setShowLeft(true);
+                }}
+              >
+                <span className="rs-start-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 5v14M5 12h14"/></svg>
+                </span>
+                <strong>{tr("createNewReport")}</strong>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="rs-bar">
         <button className="rs-ghost" onClick={() => guardUnsaved(onExit)}>
           ← {tr(context === "project" ? "backToProject" : "back")}
@@ -1214,32 +1315,8 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         )}
         <div className="rs-bar-actions">
           {document && <span className={`rs-dirty ${dirty ? "on" : ""}`}>{dirty ? tr("unsaved") : tr("saved")}</span>}
-          <button
-            className="rs-ghost rs-narrow-only"
-            aria-pressed={showLeft}
-            onClick={() => setShowLeft((value) => !value)}
-          >
-            {tr("reports")}
-          </button>
-          <button
-            className="rs-ghost rs-narrow-only"
-            aria-pressed={showRight}
-            onClick={() => setShowRight((value) => !value)}
-          >
-            {tr("properties")}
-          </button>
-          <button className="rs-ghost" onClick={() => setShowFormats(true)}>
-            {tr("formats")}
-          </button>
-          <button
-            className="rs-ghost"
-            onClick={() => {
-              setYrfInitialPath("");
-              setMode("yrf");
-            }}
-          >
-            {tr("yrfMode")}
-          </button>
+          <button className="rs-ghost rs-icon" aria-label={tr("undo")} title={`${tr("undo")} (Cmd/Ctrl+Z)`} disabled={!past.length || busy} onClick={undo}>↶</button>
+          <button className="rs-ghost rs-icon" aria-label={tr("redo")} title={`${tr("redo")} (Cmd/Ctrl+Shift+Z)`} disabled={!future.length || busy} onClick={redo}>↷</button>
           <div className="rs-tabs">
             <button className={tab === "design" ? "on" : ""} onClick={() => setTab("design")}>
               {tr("design")}
@@ -1281,8 +1358,35 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         </div>
       </header>
 
-      <div className={`rs-body ${showLeft ? "left-open" : ""} ${showRight ? "right-open" : ""}`}>
+      <div
+        className={`rs-body ${showLeft ? "left-open" : ""} ${showRight ? "right-open" : ""}`}
+        style={{
+          ["--rs-left-width" as string]: `${leftWidth}px`,
+          ["--rs-right-width" as string]: `${rightWidth}px`,
+        }}
+      >
+        <button
+          type="button"
+          className="rs-edge-toggle rs-edge-left"
+          aria-label={tr("toggleLeftPanel")}
+          aria-pressed={showLeft}
+          aria-expanded={showLeft}
+          onClick={() => setShowLeft((value) => !value)}
+        >
+          {showLeft ? "‹" : "›"}
+        </button>
+        <button
+          type="button"
+          className="rs-edge-toggle rs-edge-right"
+          aria-label={tr("toggleRightPanel")}
+          aria-pressed={showRight}
+          aria-expanded={showRight}
+          onClick={() => setShowRight((value) => !value)}
+        >
+          {showRight ? "›" : "‹"}
+        </button>
         <aside className="rs-left">
+
           {(flow === "create" || document) && (
           <section>
               <h3>{tr("templates")}</h3>
@@ -1318,6 +1422,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
               <button className="rs-primary wide" disabled={!state.root || busy} onClick={() => void createReport()}>
                 {tr("create")}
               </button>
+              <button className="rs-ghost wide" disabled={!state.root || busy} onClick={() => setMode("yrf")}>
+                {tr("createYrf")}
+              </button>
             </section>
 
             )}
@@ -1333,6 +1440,15 @@ export default function ReportStudio({ token, language, onExit, context = "home"
               </p>
             )}
             <div className="rs-folder-actions">
+              <input
+                value={folder}
+                aria-label={tr("folder")}
+                placeholder="/path/to/reports"
+                onChange={(event) => setFolder(event.target.value)}
+              />
+              <button className="rs-ghost" disabled={!folder || busy} onClick={() => void useFolder()}>
+                {tr("useFolder")}
+              </button>
               <button className="rs-ghost" disabled={busy} onClick={() => void chooseFolder()}>
                 {tr("openFolder")}
               </button>
@@ -1657,39 +1773,59 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             </section>
           )}
         </aside>
+        <div
+          className="rs-resizer rs-resizer-left"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={tr("resizeLeftPanel")}
+          tabIndex={0}
+          onPointerDown={(event) => startPanelResize("left", event)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") setLeftWidth((value) => Math.max(220, value - 16));
+            if (event.key === "ArrowRight") setLeftWidth((value) => Math.min(520, value + 16));
+          }}
+        />
 
         <main className="rs-canvas-wrap">
           {!document ? (
+            showStart ? null : (
             <div className="rs-empty rs-landing">
-              <h2>{tr("startTitle")}</h2>
-              <p>{tr("startHint")}</p>
+              <div className="rs-landing-mark" aria-hidden="true">▤</div>
               <div className="rs-landing-actions">
                 <button
                   className="rs-landing-card"
+                  aria-label={tr("openExistingReport")}
+                  title={tr("openExistingHint")}
                   onClick={() => {
                     setFlow("open");
                     setShowLeft(true);
-                    void chooseFolder();
                   }}
                 >
+                  <span className="rs-start-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+                  </span>
                   <strong>{tr("openExistingReport")}</strong>
-                  <span>{tr("openExistingHint")}</span>
                 </button>
                 <button
                   className="rs-landing-card"
+                  aria-label={tr("createNewReport")}
+                  title={tr("createNewHint")}
                   onClick={() => {
                     setFlow("create");
                     setShowLeft(true);
                   }}
                 >
+                  <span className="rs-start-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 5v14M5 12h14"/></svg>
+                  </span>
                   <strong>{tr("createNewReport")}</strong>
-                  <span>{tr("createNewHint")}</span>
                 </button>
               </div>
               {flow === "create" && !state.root && (
                 <p className="rs-hint">{tr("chooseFolderFirst")}</p>
               )}
             </div>
+            )
           ) : tab === "code" ? (
             <div className="rs-code">
               <div className="rs-code-head">
@@ -1756,8 +1892,54 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 ref={canvasRef}
                 tabIndex={0}
                 onKeyDown={onCanvasKeyDown}
-                onMouseDown={() => selectIds([])}
+                onMouseDown={(event) => {
+                  const target = event.target as HTMLElement;
+                  if (target.closest(".rs-el, .rs-handle")) return;
+                  const canvas = canvasRef.current;
+                  if (!canvas) return;
+                  const rect = canvas.getBoundingClientRect();
+                  const origin = { x: event.clientX, y: event.clientY };
+                  const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+                  if (!additive) selectIds([]);
+                  const boxFor = (x: number, y: number) => ({
+                    x: Math.min(origin.x, x) - rect.left,
+                    y: Math.min(origin.y, y) - rect.top,
+                    width: Math.abs(x - origin.x),
+                    height: Math.abs(y - origin.y),
+                  });
+                  setMarquee(boxFor(event.clientX, event.clientY));
+                  const move = (moveEvent: MouseEvent) => {
+                    setMarquee(boxFor(moveEvent.clientX, moveEvent.clientY));
+                  };
+                  const up = (upEvent: MouseEvent) => {
+                    window.removeEventListener("mousemove", move);
+                    window.removeEventListener("mouseup", up);
+                    setMarquee(null);
+                    const left = Math.min(origin.x, upEvent.clientX);
+                    const top = Math.min(origin.y, upEvent.clientY);
+                    const right = Math.max(origin.x, upEvent.clientX);
+                    const bottom = Math.max(origin.y, upEvent.clientY);
+                    if (right - left < 4 || bottom - top < 4) return;
+                    const ids = Array.from(canvas.querySelectorAll<HTMLElement>(".rs-el"))
+                      .filter((element) => {
+                        const bounds = element.getBoundingClientRect();
+                        return bounds.left < right && bounds.right > left && bounds.top < bottom && bounds.bottom > top;
+                      })
+                      .map((element) => element.dataset.id)
+                      .filter((id): id is string => Boolean(id));
+                    if (ids.length === 0) return;
+                    selectIds(additive ? [...new Set([...selectedIds, ...ids])] : ids);
+                  };
+                  window.addEventListener("mousemove", move);
+                  window.addEventListener("mouseup", up);
+                }}
               >
+                {marquee && (
+                  <div
+                    className="rs-marquee"
+                    style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
+                  />
+                )}
                 {page && (
                   <div
                     className="rs-page"
@@ -1827,8 +2009,21 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             </>
           )}
         </main>
+        <div
+          className="rs-resizer rs-resizer-right"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={tr("resizeRightPanel")}
+          tabIndex={0}
+          onPointerDown={(event) => startPanelResize("right", event)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") setRightWidth((value) => Math.min(520, value + 16));
+            if (event.key === "ArrowRight") setRightWidth((value) => Math.max(220, value - 16));
+          }}
+        />
 
         <aside className="rs-right">
+
           {selectedIds.length > 1 ? (
             <section>
               <h3>{tr("multipleSelection").replace("{count}", String(selectedIds.length))}</h3>
@@ -1845,6 +2040,25 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   ] as const
                 ).map(([mode, label]) => (
                   <button key={mode} disabled={selectionSpansBands} onClick={() => alignSelection(mode)}>
+                    {tr(label)}
+                  </button>
+                ))}
+              </div>
+              <p className="rs-hint">{tr("styleSelectionHint")}</p>
+              <div className="rs-style-chips">
+                {(
+                  [
+                    ["heading1", "presetHeading1"],
+                    ["heading2", "presetHeading2"],
+                    ["body", "presetBody"],
+                    ["caption", "presetCaption"],
+                    ["muted", "styleMuted"],
+                    ["danger", "styleDanger"],
+                    ["highlight", "styleHighlight"],
+                    ["card", "styleCard"],
+                  ] as const
+                ).map(([preset, label]) => (
+                  <button key={preset} onClick={() => applyPresetToSelection(preset)}>
                     {tr(label)}
                   </button>
                 ))}
@@ -2393,17 +2607,6 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         {!message && errors.length === 0 && warnings.length === 0 && (
           <span className="rs-hint">{state.root ? `${tr("folder")}: ${state.root}` : tr("selectFolderFirst")}</span>
         )}
-        <span className="rs-folder">
-          <input
-            value={folder}
-            aria-label={tr("folder")}
-            placeholder="/path/to/reports"
-            onChange={(event) => setFolder(event.target.value)}
-          />
-          <button className="rs-ghost" disabled={!folder || busy} onClick={() => void useFolder()}>
-            {tr("useFolder")}
-          </button>
-        </span>
       </footer>
       {showFormats && (
         <div className="rs-modal" role="dialog" aria-modal="true" aria-label={tr("formats")}>

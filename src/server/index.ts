@@ -5,9 +5,11 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { SourceDraft } from "../engine/draft.js";
 import { pickDirectory } from "./folder-picker.js";
 import { createReportApi } from "./report-routes.js";
+import { runProjectBuild } from "./build.js";
 import type { ViteDevServer } from "vite";
 import type {
   AnalysisReport,
@@ -102,7 +104,38 @@ export async function startStudio(options: StudioOptions = {}) {
   }
   let report: AnalysisReport | null = null;
   let staged: SourcePatch | null = null;
-  let draft: import("../engine/draft.js").SourceDraft | null = null;
+  let draft: SourceDraft | null = null;
+  let buildRunning = false;
+
+  const draftSnapshotPath = () =>
+    path.join(
+      os.tmpdir(),
+      `uiux-draft-${createHash("sha256").update(current().projectRoot).digest("hex").slice(0, 24)}.json`,
+    );
+  const persistDraft = async () => {
+    if (!draft) return;
+    try {
+      await fs.writeFile(draftSnapshotPath(), JSON.stringify(draft.toSnapshot()), { mode: 0o600 });
+    } catch {
+      // Snapshot persistence is best-effort; the in-memory draft remains authoritative.
+    }
+  };
+  const clearDraftSnapshot = async () => {
+    try {
+      await fs.unlink(draftSnapshotPath());
+    } catch {
+      // No snapshot to clear.
+    }
+  };
+  const restoreDraft = async () => {
+    if (draft) return;
+    try {
+      const raw = await fs.readFile(draftSnapshotPath(), "utf8");
+      draft = await SourceDraft.fromSnapshot(current().projectRoot, JSON.parse(raw));
+    } catch {
+      // Missing or invalid snapshot: start without a draft.
+    }
+  };
   let checkpoint: Checkpoint | null = null;
   let watchers: FSWatcher[] = [];
   let watchGeneration = 0;
@@ -370,10 +403,20 @@ export async function startStudio(options: StudioOptions = {}) {
         }
         mutationBusy = true;
         locked = true;
-        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard", "/api/draft/edit", "/api/draft/edit-group", "/api/draft/undo", "/api/draft/redo", "/api/draft/commit", "/api/draft/discard", "/api/draft/preview"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
+        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard", "/api/draft/edit", "/api/draft/edit-group", "/api/draft/undo", "/api/draft/redo", "/api/draft/commit", "/api/draft/discard", "/api/draft/preview", "/api/draft/state"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
           throw new Error("Project changed in another tab; reopen your project before editing.");
-        if (draft && ["/api/open", "/api/demo", "/api/create", "/api/analyze", "/api/edit", "/api/edit-group", "/api/patch", "/api/apply", "/api/undo"].includes(url.pathname))
-          throw new Error("Save or discard the current draft before switching projects or editing committed source.");
+        if (draft && ["/api/open", "/api/demo", "/api/create", "/api/analyze", "/api/edit", "/api/edit-group", "/api/patch", "/api/apply", "/api/undo"].includes(url.pathname)) {
+          let reopeningSameProject = false;
+          if (url.pathname === "/api/open" && typeof data.path === "string") {
+            try {
+              reopeningSameProject = (await fs.realpath(data.path)) === (await fs.realpath(current().projectRoot));
+            } catch {
+              reopeningSameProject = false;
+            }
+          }
+          if (!reopeningSameProject)
+            throw new Error("Save or discard the current draft before switching projects or editing committed source.");
+        }
         switch (url.pathname) {
           case "/api/open": {
             const root = string(data.path, "project path");
@@ -465,6 +508,37 @@ export async function startStudio(options: StudioOptions = {}) {
             json(res, 200, patch);
             return;
           }
+          case "/api/build": {
+            if (!current().projectRoot) throw new Error("Open a project before building.");
+            if (buildRunning) {
+              json(res, 409, { error: "A build is already running.", code: "BUILD_RUNNING" });
+              return;
+            }
+            buildRunning = true;
+            try {
+              const result = await runProjectBuild(current().projectRoot);
+              json(res, 200, result);
+            } finally {
+              buildRunning = false;
+            }
+            return;
+          }
+          case "/api/draft/state": {
+            await restoreDraft();
+            if (!draft) {
+              json(res, 200, { open: false });
+              return;
+            }
+            const analysis = await draft.analysis();
+            json(res, 200, {
+              open: true,
+              count: draft.count,
+              canRedo: draft.canRedo,
+              files: [...draft.sources.keys()],
+              analysis,
+            });
+            return;
+          }
           case "/api/draft/edit":
           case "/api/draft/edit-group": {
             if (staged) throw new Error("Discard the pending reviewed patch before starting a draft.");
@@ -474,6 +548,7 @@ export async function startStudio(options: StudioOptions = {}) {
               ? await next.edit(data as any)
               : await next.editGroup(Array.isArray(data.items) ? data.items as any : []);
             draft = next;
+            await persistDraft();
             json(res, 200, { ...result, count: next.count, canRedo: next.canRedo });
             return;
           }
@@ -482,6 +557,7 @@ export async function startStudio(options: StudioOptions = {}) {
             if (!draft) throw new Error("No draft is open.");
             const patch = url.pathname.endsWith("undo") ? draft.undoChange : draft.redoChange;
             const analysis = url.pathname.endsWith("undo") ? await draft.undo() : await draft.redo();
+            await persistDraft();
             json(res, 200, { analysis, patch, count: draft.count, canRedo: draft.canRedo });
             return;
           }
@@ -489,6 +565,7 @@ export async function startStudio(options: StudioOptions = {}) {
             approved(data);
             if (!draft) throw new Error("No draft is open.");
             const checkpoints = await draft.commit(true);
+            await clearDraftSnapshot();
             checkpoint = checkpoints.length === 1 ? checkpoints[0]! : null;
             draft = null;
             const refreshed = await refreshAfterWrite();

@@ -22,7 +22,8 @@ import { en, id, evidenceText, type Key } from "./i18n";
 import { releaseHistory } from "./release-history";
 const ReportStudio = lazy(() => import("./features/report-studio/ReportStudio"));
 type Screen = "home" | "wizard" | "open" | "analysis" | "studio" | "report";
-type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | "history" | null;
+type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | "close-tab" | "history" | null;
+type PageTab = { id: string; path: string; name: string; file: string; selectedId: string | null; selectedIds: string[]; inspectorTab: Key; zoom: number; kind?: "route" | "design"; componentId?: string };
 type ProjectTreeEntry = {
   name: string;
   path: string;
@@ -526,6 +527,10 @@ export default function App() {
   const [draftOpen, setDraftOpen] = useState(false);
   const [draftRedo, setDraftRedo] = useState(false);
   const [draftPreviewStale, setDraftPreviewStale] = useState(false);
+  const [draftRecovered, setDraftRecovered] = useState(false);
+  const [buildStatus, setBuildStatus] = useState<{ state: "running" | "success" | "error"; message: string; output?: string } | null>(null);
+  const [changeEntries, setChangeEntries] = useState<Array<{ id: string; file: string; object: string; action: string }>>([]);
+  const [undoneChanges, setUndoneChanges] = useState<Array<{ id: string; file: string; object: string; action: string }>>([]);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [selectionWarning, setSelectionWarning] = useState(""),
@@ -561,17 +566,24 @@ export default function App() {
     [treeLoading, setTreeLoading] = useState<Set<string>>(new Set()),
     [guideStep, setGuideStep] = useState(0);
   const [inspectorTab, setInspectorTab] = useState<Key>("props"),
-    [bottomTab, setBottomTab] = useState<Key>("analysis"),
-    [bottomOpen, setBottomOpen] = useState(true);
-  const [mode, setMode] = useState<"design" | "interact" | "code">("design"),
+    [bottomTab, setBottomTab] = useState<Key>("changes"),
+    [bottomOpen, setBottomOpen] = useState(false);
+  const [mode, setMode] = useState<"design" | "code">("design"),
     [viewport, setViewport] = useState("desktop"),
     [zoom, setZoom] = useState(100),
     [route, setRoute] = useState("/");
+  const [pageTabs, setPageTabs] = useState<PageTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [draftFiles, setDraftFiles] = useState<string[]>([]);
+  const [closeTabId, setCloseTabId] = useState<string | null>(null);
   const [source, setSource] = useState("");
   const [codeSearchOpen, setCodeSearchOpen] = useState(false);
   const [codeSearch, setCodeSearch] = useState("");
   const [codeMatch, setCodeMatch] = useState(0);
+  const [codeRevealLine, setCodeRevealLine] = useState<number | null>(null);
   const codeSearchInput = useRef<HTMLInputElement>(null);
+  const draftPreviewTimer = useRef<number | null>(null);
+  const localDragRef = useRef(false);
   const codeSource = useRef<HTMLPreElement>(null);
   const codeMatches = useMemo(() => {
     if (!codeSearch) return [];
@@ -738,10 +750,81 @@ export default function App() {
       setBusy(false);
     }
   };
+  const actQuiet = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
   const flash = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 4000);
   };
+  const markDraftFile = (file?: string) => {
+    if (file) setDraftFiles((current) => (current.includes(file) ? current : [...current, file]));
+  };
+  const tabDirty = (tab: PageTab) =>
+    draftFiles.includes(tab.file) || (draftCount > 0 && tab.id === activeTabId);
+  const routeName = (path: string) => path === "/" ? "Home" : path.split("/").filter(Boolean).pop() ?? path;
+  const persistActiveTab = () => setPageTabs((tabs) => tabs.map((tab) => tab.id === activeTabId ? { ...tab, selectedId, selectedIds, inspectorTab, zoom } : tab));
+  const switchTab = (id: string) => {
+    const target = pageTabs.find((tab) => tab.id === id);
+    if (!target || target.id === activeTabId) return;
+    persistActiveTab();
+    setActiveTabId(target.id); setRoute(target.path);
+    setSelectedId(target.selectedId); setSelectedIds(target.selectedIds); setSelectedRects({});
+    previewSelections.current.clear(); setInspectorTab(target.inspectorTab); setZoom(target.zoom); setMode("design");
+  };
+  const removeTab = (id: string) => {
+    const remaining = pageTabs.filter((tab) => tab.id !== id);
+    setPageTabs(remaining);
+    if (activeTabId !== id) return;
+    const next = remaining.at(-1);
+    setActiveTabId(next?.id ?? null); setSelectedId(next?.selectedId ?? null);
+    setSelectedIds(next?.selectedIds ?? []); setSelectedRects({});
+    if (next) { setRoute(next.path); setInspectorTab(next.inspectorTab); setZoom(next.zoom); }
+  };
+  const closeTab = (id: string) => {
+    const tab = pageTabs.find((candidate) => candidate.id === id);
+    if (!tab) return;
+    if (tabDirty(tab)) {
+      setCloseTabId(id);
+      setModal("close-tab");
+    } else removeTab(id);
+  };
+  const openTab = (path: string, activate = true) => {
+    if (!report) return;
+    const existing = pageTabs.find((tab) => tab.path === path);
+    if (existing) { if (activate) switchTab(existing.id); return; }
+    if (pageTabs.length >= 3) {
+      const clean = pageTabs.find((tab) => !tabDirty(tab) && tab.id !== activeTabId);
+      if (!clean) {
+        setError(language === "id" ? "Maksimal 3 tab. Simpan atau tutup satu tab dulu." : "Maximum 3 tabs. Save or close one tab first.");
+        return;
+      }
+      setPageTabs((tabs) => tabs.filter((tab) => tab.id !== clean.id));
+    }
+    const file = report.routes.find((candidate) => candidate.path === path)?.file ?? report.files.find((candidate) => /(^|\/)App\.[jt]sx?$/.test(candidate.file))?.file ?? "";
+    const tab: PageTab = { id: `tab:${path}`, path, name: routeName(path), file, selectedId: null, selectedIds: [], inspectorTab: "props", zoom: 100, kind: "route" };
+    setPageTabs((tabs) => [...tabs, tab]);
+    if (activate) {
+      persistActiveTab(); setActiveTabId(tab.id); setRoute(path);
+      setSelectedId(null); setSelectedIds([]); setSelectedRects({});
+      previewSelections.current.clear(); setInspectorTab("props"); setZoom(100);
+    }
+  };
+  const recordChange = (file: string, object: string, action: string) => {
+    setUndoneChanges([]);
+    setChangeEntries((entries) => [
+      ...entries,
+      { id: `${file}:${object}:${action}:${entries.length}`, file, object, action },
+    ].slice(-50));
+  };
+  const multiSelectHint =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+      ? "⌘+click"
+      : "Ctrl+click";
   const openGuide = () => {
     setGuideStep(0);
     setModal("guide");
@@ -955,6 +1038,42 @@ export default function App() {
         requestUndo();
         return;
       }
+          if (event.data.type === "uiux:marquee") {
+            const items: Array<Record<string, unknown>> = Array.isArray(event.data.items) ? event.data.items : [];
+            const resolved: Array<{ element: JsxElement; item: Record<string, unknown> }> = [];
+            for (const item of items) {
+              const id = typeof item.elementId === "string" ? item.elementId : "";
+              const element = report?.elements.find((candidate) => candidate.id === id);
+              if (element) resolved.push({ element, item });
+            }
+            if (resolved.length === 0) return;
+            const additive = event.data.additive === true;
+            const ids = resolved.map((entry) => entry.element.id);
+            const next = additive ? [...new Set([...selectedIds, ...ids])] : ids;
+            previewSelections.current.clear();
+            const rects: Record<string, { left: number; top: number; width: number; height: number }> = {};
+            resolved.forEach(({ element, item }) => {
+              previewSelections.current.set(element.id, {
+                elementId: String(item.elementId ?? element.id),
+                instanceIndex: Number(item.instanceIndex) || 0,
+              });
+              const rect = item.rect as { left?: unknown; top?: unknown; width?: unknown; height?: unknown } | undefined;
+              if (rect && [rect.left, rect.top, rect.width, rect.height].every(Number.isFinite)) {
+                rects[element.id] = {
+                  left: Number(rect.left),
+                  top: Number(rect.top),
+                  width: Number(rect.width),
+                  height: Number(rect.height),
+                };
+              }
+            });
+            setSelectedIds(next);
+            setSelectedRects((current) => (additive ? { ...current, ...rects } : rects));
+            setSelectedId(resolved.at(-1)!.element.id);
+            setSelectionWarning("");
+            return;
+          }
+
       if (
         [
           "uiux:select",
@@ -971,17 +1090,18 @@ export default function App() {
         if (sourceElement) {
           let target = sourceElement;
           if (
-            designTarget &&
             sourceElement.ownerComponent &&
             sourceElement.ownerComponent !== designTarget
           ) {
             const usages = report!.elements.filter(
               (element) =>
-                element.ownerComponent === designTarget &&
-                element.componentId === sourceElement.ownerComponent,
+                element.componentId === sourceElement.ownerComponent &&
+                (!designTarget
+                  ? element.parentId !== null && element.ownerComponent !== undefined
+                  : element.ownerComponent === designTarget),
             );
             if (usages.length === 1) target = usages[0];
-            else {
+            else if (designTarget) {
               if (["div", "section", "form", "fieldset"].includes(sourceElement.tag) && event.data.type === "uiux:select") {
                 setSelectedId(null);
                 setSelectedIds([]);
@@ -1017,6 +1137,8 @@ export default function App() {
               }
             }
           }
+          const logical = logicalAncestor(target);
+          if (logical) target = logical;
           if (event.data.type === "uiux:drop") {
             const selectedTarget = report?.elements.find((element) => element.id === selectedId);
             if (!selectedTarget?.operations.includes("insert")) {
@@ -1098,8 +1220,10 @@ export default function App() {
               Math.abs(dx) <= 2000 &&
               Math.abs(dy) <= 2000 &&
               (dx || dy)
-            )
+            ) {
+              localDragRef.current = true;
               moveElementByDelta(target, dx, dy);
+            }
             return;
           }
           if (event.data.type === "uiux:delete") {
@@ -1149,6 +1273,113 @@ export default function App() {
     }, 10_000);
     return () => window.clearTimeout(timer);
   }, [previewState, frameSrc, preview?.url, language]);
+  async function restoreDraftState() {
+    if (!report?.projectRoot) return;
+    try {
+      const result = await api<{
+        open: boolean;
+        count?: number;
+        canRedo?: boolean;
+        files?: string[];
+        analysis?: AnalysisReport;
+      }>("draft/state", { expectedProject: report.projectRoot });
+      if (!result.open || !result.analysis) return;
+      applyReport(result.analysis);
+      setDraftOpen(true);
+      setDraftFiles(Array.isArray(result.files) ? result.files : []);
+      setDraftCount(result.count ?? 0);
+      setDraftRedo(result.canRedo ?? false);
+      setDraftPreviewStale(true);
+      setDraftRecovered(true);
+      flash(language === "id" ? "Draft dipulihkan" : "Draft recovered");
+    } catch {
+      // No recoverable draft for this project.
+    }
+  }
+  useEffect(() => {
+    void restoreDraftState();
+  }, [report?.projectRoot, language]);
+  useEffect(() => {
+    if (!preview || previewState !== "ready" || !draftOpen || !draftPreviewStale) return;
+    scheduleDraftPreview();
+  }, [preview, previewState, draftOpen, draftPreviewStale]);
+  useEffect(() => {
+    if (!preview || !report || pageTabs.length > 0) return;
+    openTab(route || "/");
+  }, [preview, report?.projectRoot, pageTabs.length]);
+  const tabProjectRoot = useRef<string | null>(null);
+  useEffect(() => {
+    const root = report?.projectRoot ?? null;
+    if (tabProjectRoot.current === root) return;
+    tabProjectRoot.current = root;
+    setPageTabs([]);
+    setActiveTabId(null);
+    setDraftFiles([]);
+  }, [report?.projectRoot]);
+  useEffect(() => {
+    if (mode !== "code" || !selected) return;
+    const file = selected.source.file;
+    const line = selected.source.line;
+    void act(async () => {
+      const value = await api<{ source: string }>("source?file=" + encodeURIComponent(file));
+      setSource(value.source);
+      setCodeRevealLine(line);
+    });
+  }, [mode, selectedId]);
+  useEffect(() => {
+    if (mode !== "code" || !codeRevealLine) return;
+    const pre = codeSource.current;
+    if (!pre) return;
+    const lineHeight = parseFloat(getComputedStyle(pre).lineHeight || "") || 16;
+    pre.scrollTop = Math.max(0, (codeRevealLine - 3) * lineHeight);
+  }, [source, codeRevealLine, mode]);
+  useEffect(() => {
+    if (!error) return;
+    setLogs((current) => [...current, `[error] ${error}`].slice(-200));
+  }, [error]);
+  useEffect(() => {
+    if (!report) return;
+    const warnings = report.warnings.map((warning) => `[warning] ${warning}`);
+    if (warnings.length === 0) return;
+    setLogs((current) => [...current, ...warnings.filter((warning) => !current.includes(warning))].slice(-200));
+  }, [report?.analyzedAt]);
+  useEffect(() => {
+    if (!report?.projectRoot) return;
+    try {
+      const raw = localStorage.getItem(`uiux-console:${report.projectRoot}`);
+      if (raw) setLogs(JSON.parse(raw) as string[]);
+    } catch {
+      // Console persistence is best-effort.
+    }
+  }, [report?.projectRoot]);
+  useEffect(() => {
+    if (!report?.projectRoot) return;
+    try {
+      localStorage.setItem(`uiux-console:${report.projectRoot}`, JSON.stringify(logs.slice(-200)));
+    } catch {
+      // Storage may be unavailable.
+    }
+  }, [logs, report?.projectRoot]);
+  useEffect(() => {
+    if (screen !== "studio") return;
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) void redoDraft();
+        else requestUndo();
+      } else if (key === "y") {
+        event.preventDefault();
+        void redoDraft();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [screen, draftOpen, draftCount, draftRedo, checkpoint, busy]);
+
   useEffect(() => {
     setSelectedIds((current) => {
       if (!selectedId) return [];
@@ -1313,7 +1544,7 @@ export default function App() {
       frame.current?.contentWindow?.postMessage(
         {
           type: "uiux:mode",
-          mode: mode === "interact" ? "interact" : "design",
+          mode: "design",
         },
         new URL(preview.url).origin,
       );
@@ -1360,11 +1591,23 @@ export default function App() {
   async function startApprovedPreview() {
     setPreviewState("starting");
     try {
-      const value = await api<Preview>("preview/start", { approved: true });
+      let value: Preview | undefined;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          value = await api<Preview>("preview/start", { approved: true });
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt === 5 || !/Another operation is still running/i.test(message)) throw error;
+          await new Promise((resolve) => window.setTimeout(resolve, 300));
+        }
+      }
+      if (!value) throw new Error("Preview did not start.");
       setPreview(value);
       setDesignTarget(null);
       setModal(null);
       setScreen("studio");
+      void restoreDraftState();
     } catch (err) {
       setPreview(null);
       setDesignTarget(null);
@@ -1382,6 +1625,27 @@ export default function App() {
       }
     });
   }
+  function logicalAncestor(element: JsxElement): JsxElement | null {
+    if (/Date|Calendar|Range|Period/.test(element.tag) && element.parentId) return element;
+    const elements = report?.elements;
+    if (!elements) return null;
+    const byId = new Map(elements.map((candidate) => [candidate.id, candidate]));
+    let current = element;
+    for (let depth = 0; depth < 6 && current.parentId; depth += 1) {
+      const parent = byId.get(current.parentId);
+      if (!parent) break;
+      if (
+        (parent.tag.includes(".") || /Date|Calendar|Range|Period/.test(parent.tag)) &&
+        parent.operations.includes("style") &&
+        ["EDITABLE", "LIMITED"].includes(parent.editability)
+      ) {
+        return parent;
+      }
+      current = parent;
+    }
+    return null;
+  }
+
   function isSharedImplementation(element: JsxElement) {
     const owner = report?.components.find((component) => component.id === element.ownerComponent);
     const routeOwner = !!owner && !!report?.routes.some((route) => route.file === owner.source.file) && ((owner.name === "App" && owner.references.length <= 1) || !!owner.defaultExported);
@@ -1394,8 +1658,7 @@ export default function App() {
   ) {
     const oldIds = new Set(report?.elements.map((candidate) => candidate.id));
     const shared = isSharedImplementation(element);
-    if (shared && !window.confirm(t("sharedConfirm"))) return;
-    await act(async () => {
+    await actQuiet(async () => {
       const value = await api<{
         patch: SourcePatch;
         analysis: AnalysisReport;
@@ -1412,6 +1675,8 @@ export default function App() {
       });
       if (operation === "prop") propDraft.current.dirty = false;
       applyReport(value.analysis, value.patch);
+      markDraftFile(value.patch?.file);
+      recordChange(element.source.file, element.tag, operation);
       if (operation === "remove") {
         setSelectedId(null);
         setSelectedIds([]);
@@ -1452,8 +1717,10 @@ export default function App() {
       setDraftOpen(true);
       setDraftCount(value.count);
       setDraftRedo(value.canRedo);
-      setDraftPreviewStale(true);
-      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
+      const keepLocal = localDragRef.current;
+      localDragRef.current = false;
+      setDraftPreviewStale(!keepLocal);
+      if (!keepLocal) scheduleDraftPreview();
     });
   }
   async function stage(
@@ -1464,8 +1731,7 @@ export default function App() {
   }
   function removeSelectedElement(element: JsxElement) {
     if (busy || !element.operations.includes("remove")) return;
-    if (window.confirm(t("removeConfirm")))
-      void editElement(element, "remove");
+    void editElement(element, "remove");
   }
   async function discard() {
     await act(async () => {
@@ -1492,6 +1758,12 @@ export default function App() {
         const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/undo", {});
         applyReport(result.analysis, result.patch);
         setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+        setChangeEntries((entries) => {
+          const last = entries.at(-1);
+          if (last) setUndoneChanges((undone) => [last, ...undone]);
+          return entries.slice(0, -1);
+        });
+        scheduleDraftPreview();
       });
       return;
     }
@@ -1520,29 +1792,91 @@ export default function App() {
       const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/redo", {});
       applyReport(result.analysis, result.patch);
       setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
+      setUndoneChanges((undone) => {
+        const next = undone[0];
+        if (next) setChangeEntries((entries) => [...entries, next]);
+        return undone.slice(1);
+      });
+      scheduleDraftPreview();
     });
   }
   async function refreshDraftPreview() {
     await act(async () => {
       await api("draft/preview", {});
-      previewSelections.current.clear();
       setDraftPreviewStale(false);
-      if (preview) setPreviewState("starting");
+      if (preview && frame.current && frameSrc) {
+        const url = new URL(frameSrc);
+        url.searchParams.set("__draft", String(Date.now()));
+        frame.current.src = url.toString();
+      }
     });
   }
-  async function saveDraft() {
+  function scheduleDraftPreview() {
+    if (!preview) return;
+    if (draftPreviewTimer.current !== null) window.clearTimeout(draftPreviewTimer.current);
+    draftPreviewTimer.current = window.setTimeout(() => {
+      draftPreviewTimer.current = null;
+      void refreshDraftPreview();
+    }, 350);
+  }
+  async function saveDraft(): Promise<boolean> {
+    let saved = false;
+    if (draftPreviewTimer.current !== null) {
+      window.clearTimeout(draftPreviewTimer.current);
+      draftPreviewTimer.current = null;
+    }
     await act(async () => {
       const result = await api<{ analysis: AnalysisReport }>("draft/commit", { approved: true });
       applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false);
       setCheckpoint(false);
+      setDraftFiles([]);
+      setChangeEntries([]);
+      setUndoneChanges([]);
+      setDraftRecovered(false);
+      saved = true;
       flash(language === "id" ? "Draft disimpan ke source" : "Draft saved to source");
     });
+    return saved;
+  }
+  async function saveAndBuild() {
+    if (draftOpen && draftCount > 0) {
+      const saved = await saveDraft();
+      if (!saved) return;
+    }
+    setBuildStatus({
+      state: "running",
+      message: language === "id" ? "Build berjalan…" : "Build running…",
+    });
+    try {
+      const result = await api<{ ok: boolean; code: number | null; output: string; durationMs: number }>("build");
+      setBuildStatus({
+        state: result.ok ? "success" : "error",
+        message: result.ok
+          ? `${language === "id" ? "Build berhasil" : "Build succeeded"} · ${(result.durationMs / 1000).toFixed(1)}s`
+          : `${language === "id" ? "Build gagal" : "Build failed"} · exit ${result.code}`,
+        output: result.output,
+      });
+      flash(
+        result.ok
+          ? language === "id" ? "Build berhasil" : "Build succeeded"
+          : language === "id" ? "Build gagal — lihat detail" : "Build failed — see details",
+      );
+    } catch (caught) {
+      setBuildStatus({
+        state: "error",
+        message: caught instanceof Error ? caught.message : String(caught),
+      });
+    }
   }
   async function discardDraft() {
-    if (!window.confirm(language === "id" ? "Buang semua perubahan draft?" : "Discard all draft changes?")) return;
+    if (draftPreviewTimer.current !== null) {
+      window.clearTimeout(draftPreviewTimer.current);
+      draftPreviewTimer.current = null;
+    }
+
     await act(async () => {
       const result = await api<{ analysis: AnalysisReport }>("draft/discard", {});
-      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false);
+      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false); setDraftRecovered(false); setDraftFiles([]); setChangeEntries([]); setUndoneChanges([]);
       setSelectedId(null); setSelectedIds([]); setSelectedRects({}); previewSelections.current.clear();
       flash(t("discarded"));
     });
@@ -1860,7 +2194,7 @@ export default function App() {
       setError(t("groupSameScreen"));
       return;
     }
-    if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
+    const sharedGroup = group.some(isSharedImplementation);
     void act(async () => {
       const items = group.map((item) => {
         const shared = isSharedImplementation(item);
@@ -1878,12 +2212,23 @@ export default function App() {
         items,
       });
       applyReport(result.analysis, result.patch);
-      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
-      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
+      markDraftFile(result.patch?.file);
+      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      const keepLocal = localDragRef.current;
+      localDragRef.current = false;
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
+      if (!keepLocal) scheduleDraftPreview();
     });
   }
   function applyStylePreset(preset: string) {
-    if (!selected || busy || !selected.operations.includes("style")) return;
+    if (busy) return;
+    const targets = selectedIds.length > 1
+      ? selectedElements
+      : selected
+        ? [selected]
+        : [];
+    const usable = targets.filter((element) => element.operations.includes("style") && element.hash);
+    if (usable.length === 0) return;
     const presets: Record<string, Array<[string, string | number]>> = {
       heading: [["fontSize", 28], ["fontWeight", 700], ["lineHeight", 1.2]],
       body: [["fontSize", 16], ["fontWeight", 400], ["lineHeight", 1.5]],
@@ -1893,22 +2238,27 @@ export default function App() {
       danger: [["color", "#c62828"]],
     };
     const styles = presets[preset];
-    if (!styles || !selected.hash) return;
-    const target = selected;
+    if (!styles) return;
     void act(async () => {
-      const items = styles.map(([name, value]) => ({
-        file: target.source.file,
-        elementId: target.id,
-        expectedHash: target.hash,
-        name,
-        value,
-        scope: "instance" as const,
-        confirmScope: false,
-      }));
+      const items = usable.flatMap((target) =>
+        styles.map(([name, value]) => ({
+          file: target.source.file,
+          elementId: target.id,
+          expectedHash: target.hash,
+          name,
+          value,
+          scope: "instance" as const,
+          confirmScope: false,
+        })),
+      );
       const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", { items });
       applyReport(result.analysis, result.patch);
-      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
-      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
+      markDraftFile(result.patch?.file);
+      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      const keepLocal = localDragRef.current;
+      localDragRef.current = false;
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
+      if (!keepLocal) scheduleDraftPreview();
     });
   }
 
@@ -1983,7 +2333,7 @@ export default function App() {
       });
       return;
     }
-    if (group.some(isSharedImplementation) && !window.confirm(t("sharedConfirm"))) return;
+    const sharedGroup = group.some(isSharedImplementation);
     void act(async () => {
       const items = changes.map(({ element: item, name, value }) => {
         const shared = isSharedImplementation(item);
@@ -2001,8 +2351,12 @@ export default function App() {
         items,
       });
       applyReport(result.analysis, result.patch);
-      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
-      flash(language === "id" ? "Perubahan masuk ke draft" : "Change added to draft");
+      markDraftFile(result.patch?.file);
+      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      const keepLocal = localDragRef.current;
+      localDragRef.current = false;
+      setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
+      if (!keepLocal) scheduleDraftPreview();
     });
   }
   function alignSelected(
@@ -2063,6 +2417,40 @@ export default function App() {
     else if (tag) stageDroppedElement(target, tag);
     else setError(t("simpleDropError"));
   }
+  const openDesignTab = (component: AnalysisReport["components"][number]) => {
+    if (!component.exported) {
+      flash(t("privateDesignComponent"));
+      return;
+    }
+    const existing = pageTabs.find((tab) => tab.kind === "design" && tab.componentId === component.id);
+    if (existing) {
+      switchTab(existing.id);
+      return;
+    }
+    if (pageTabs.length >= 3) {
+      const clean = pageTabs.find((tab) => !tabDirty(tab) && tab.id !== activeTabId);
+      if (!clean) {
+        setError(language === "id" ? "Maksimal 3 tab. Tutup salah satu tab dulu." : "Maximum 3 tabs. Close one tab first.");
+        return;
+      }
+      setPageTabs((tabs) => tabs.filter((tab) => tab.id !== clean.id));
+    }
+    const tab: PageTab = {
+      id: `design:${component.id}`,
+      path: "/",
+      name: component.name,
+      file: component.source.file,
+      selectedId: null,
+      selectedIds: [],
+      inspectorTab: "props",
+      zoom: 100,
+      kind: "design",
+      componentId: component.id,
+    };
+    setPageTabs((tabs) => [...tabs.filter((candidate) => candidate.id !== tab.id), tab]);
+    setActiveTabId(tab.id);
+    activateDesignComponent(component);
+  };
   const activateDesignComponent = (
     component: AnalysisReport["components"][number],
   ) => {
@@ -2179,7 +2567,7 @@ export default function App() {
           className="explorer-row component-row"
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={() => {
-            activateDesignComponent(component);
+            openDesignTab(component);
             if (roots.length) toggleExpanded(key);
           }}
         >
@@ -3202,7 +3590,7 @@ export default function App() {
                   className="button full"
                   disabled={busy || !editableSelected || !selected.events.some((event) => event.name === eventName && /^[A-Za-z_$][\w$]*$/.test(event.expression))}
                   onClick={() => {
-                    if (window.confirm(t("removeEventConfirm")))
+                    if (true)
                       void stage("remove-event", { name: eventName });
                   }}
                 >
@@ -3947,31 +4335,31 @@ export default function App() {
           <div className="analysis-card">
             {renderAnalysis()}
             <div className="analysis-actionbar">
-              <div className="analysis-choice"><button className="button" onClick={() => setScreen("studio")}>
-                {t("inspectOnly")}
-                <Icon name="arrow" size={16} />
-              </button><p>{t("inspectOnlyHint")}</p></div>
-              <div className="analysis-choice"><button
-                className="button accent"
-                disabled={report.readiness.state === "UNSUPPORTED"}
-                title={report.readiness.reason}
-                onClick={() => {
-                  setScreen("studio");
-                  setModal("preview");
-                }}
-              >
-                {report.readiness.state === "UNSUPPORTED"
-                  ? t("unsupported")
-                  : t("startPreview")}
-                <Icon name="play" size={15} />
-              </button><p>{t("startPreviewHint")}</p></div>
+              <div className="analysis-choice">
+                <button
+                  className="button accent"
+                  disabled={busy || report.readiness.state === "UNSUPPORTED"}
+                  title={report.readiness.reason}
+                  onClick={() => void act(startApprovedPreview)}
+                >
+                  {report.readiness.state === "UNSUPPORTED"
+                    ? t("unsupported")
+                    : t("startPreview")}
+                  <Icon name="play" size={15} />
+                </button>
+                <p>{t("startPreviewHint")}</p>
+              </div>
             </div>
           </div>
         </main>
       )}
       {screen === "studio" && report && (
         <>
-          <header className="studio-header">
+          <header
+            className="studio-header"
+            data-draft-count={draftCount}
+            data-draft-open={draftOpen ? "true" : "false"}
+          >
             <button
               className="brand"
               onClick={() => setModal("leave-project")}
@@ -3998,7 +4386,7 @@ export default function App() {
               role="tablist"
               aria-label="Editor mode"
             >
-              {(["design", "interact", "code"] as const).map((value) => (
+              {(["design", "code"] as const).map((value) => (
                 <button
                   key={value}
                   role="tab"
@@ -4047,7 +4435,6 @@ export default function App() {
               {[
                 ["pages", "file"],
                 ["components", "layers"],
-                ["boards", "board"],
               ].map(([name, icon]) => (
                 <button
                   key={name}
@@ -4067,14 +4454,7 @@ export default function App() {
                   <Icon name={icon} />
                 </button>
               ))}
-              <button
-                className="rail-button rail-bottom"
-                title={t("help")}
-                aria-label={t("help")}
-                onClick={openGuide}
-              >
-                <Icon name="help" />
-              </button>
+
             </nav>
             <aside className="left-panel" style={{ width: panelWidths.left }}>
               <div className="panel-heading">
@@ -4160,7 +4540,7 @@ export default function App() {
                       <button
                         className="button full danger-quiet"
                         onClick={() => {
-                          if (window.confirm(t("deleteConfirm"))) {
+                          if (true) {
                             const nextBoards = boards.filter(
                               (b) => b.id !== boardId,
                             );
@@ -4451,6 +4831,28 @@ export default function App() {
               }}
             />
             <section className="canvas-panel">
+              <div className="page-tabs" role="tablist" aria-label="Open pages">
+                {pageTabs.map((tab) => (
+                  <div className={`page-tab ${tab.id === activeTabId ? "active" : ""}`} key={tab.id}>
+                    <button
+                      role="tab"
+                      aria-selected={tab.id === activeTabId}
+                      title={tab.path}
+                      onClick={() => switchTab(tab.id)}
+                    >
+                      {tab.name}
+                      {tabDirty(tab) && <span className="tab-dirty" aria-label="Unsaved">•</span>}
+                    </button>
+                    <button
+                      className="tab-close"
+                      aria-label={`Close ${tab.name}`}
+                      onClick={() => closeTab(tab.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
               <div className="canvas-toolbar">
                 <div className="route-control">
                   <Icon name={nav === "boards" ? "board" : "globe"} size={15} />
@@ -4460,7 +4862,7 @@ export default function App() {
                     <select
                       aria-label={t("selectRoute")}
                       value={route}
-                      onChange={(e) => setRoute(e.target.value)}
+                      onChange={(e) => openTab(e.target.value)}
                     >
                       {[
                         ...new Set(["/", ...report.routes.map((r) => r.path)]),
@@ -4480,13 +4882,62 @@ export default function App() {
                   </Badge>
                 </div>
                 <div className="canvas-actions">
-                  {draftOpen && <>
-                    <span role="status">{language === "id" ? `Draft belum disimpan (${draftCount})` : `Unsaved draft (${draftCount})`}</span>
-                    <button className="button small-button" disabled={busy || !preview} onClick={() => void refreshDraftPreview()}>{language === "id" ? "Tampilkan draft" : "Preview draft"}</button>
-                    <button className="button small-button" disabled={busy || !draftRedo} onClick={() => void redoDraft()}>Redo</button>
-                    <button className="button small-button" disabled={busy} onClick={() => void discardDraft()}>{t("discard")}</button>
-                    <button className="button accent small-button" disabled={busy || draftCount === 0} onClick={() => void saveDraft()}>{t("save")}</button>
-                  </>}
+                  <button
+                    className="icon-button"
+                    aria-label={language === "id" ? "Urungkan" : "Undo"}
+                    title="Undo (Ctrl/Cmd+Z)"
+                    disabled={busy || (draftOpen ? draftCount === 0 : !checkpoint)}
+                    onClick={() => requestUndo()}
+                  >
+                    ↶
+                  </button>
+                  <button
+                    className="icon-button"
+                    aria-label={language === "id" ? "Ulangi" : "Redo"}
+                    title="Redo (Ctrl/Cmd+Shift+Z)"
+                    disabled={busy || !draftRedo}
+                    onClick={() => void redoDraft()}
+                  >
+                    ↷
+                  </button>
+                  <button
+                    className="button accent small-button"
+                    disabled={busy || !draftOpen || draftCount === 0}
+                    onClick={() => void saveDraft()}
+                  >
+                    {t("save")}
+                  </button>
+                  <button
+                    className="button small-button"
+                    disabled={busy || buildStatus?.state === "running"}
+                    title={
+                      language === "id"
+                        ? "Simpan draft lalu jalankan npm run build pada project"
+                        : "Save the draft, then run the project's npm run build"
+                    }
+                    onClick={() => void saveAndBuild()}
+                  >
+                    {draftOpen && draftCount > 0 ? "Save & Build" : "Build"}
+                  </button>
+                  <details className="canvas-more">
+                    <summary aria-label={language === "id" ? "Aksi lain" : "More actions"}>⋯</summary>
+                    <div className="canvas-more-menu">
+                      <button
+                        disabled={busy || !draftOpen || !preview}
+                        onClick={() => void refreshDraftPreview()}
+                      >
+                        {language === "id" ? "Tampilkan draft" : "Preview draft"}
+                      </button>
+                      <button disabled={busy || !draftOpen} onClick={() => void discardDraft()}>
+                        {language === "id" ? "Buang draft" : "Discard Draft"}
+                      </button>
+                    </div>
+                  </details>
+                  {buildStatus && (
+                    <span role="status" className={`build-status ${buildStatus.state}`}>
+                      {buildStatus.message}
+                    </span>
+                  )}
                   {designTarget && (
                     <button
                       className="button small-button"
@@ -4566,10 +5017,22 @@ export default function App() {
                       !preview && report.readiness.state === "UNSUPPORTED"
                     }
                     title={report.readiness.reason}
-                    onClick={() => setModal("preview")}
+                    onClick={() =>
+                      void act(async () => {
+                        if (preview) {
+                          await api("preview/stop", {});
+                          setPreview(null);
+                          setDesignTarget(null);
+                          setPreviewState("stopped");
+                          flash(t("stopped"));
+                          return;
+                        }
+                        await startApprovedPreview();
+                      })
+                    }
                   >
                     {preview
-                      ? t("configurePreview")
+                      ? t("cancelPreview")
                       : report.readiness.state === "UNSUPPORTED"
                         ? t("unsupported")
                         : t("startPreview")}{" "}
@@ -4577,9 +5040,6 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              {mode === "interact" && (
-                <div className="interact-banner">△ {t("interactWarning")}</div>
-              )}
               {sourceChanged && (
                 <div className="conflict-banner">
                   {t("conflict")}
@@ -4642,6 +5102,7 @@ export default function App() {
                     <div className="source-file-label">
                       <Icon name="file" size={15} />
                       {selected?.source.file || t("sourceReadOnly")}
+                      {codeRevealLine ? ` · line ${codeRevealLine}` : ""}
                     </div>
                     {codeSearchOpen && <div className="code-find" role="search">
                       <input ref={codeSearchInput} aria-label={t("findInCode")} placeholder={t("findInCode")} value={codeSearch} onChange={(event) => setCodeSearch(event.target.value)} onKeyDown={(event) => {
@@ -4736,7 +5197,7 @@ export default function App() {
               <div className="canvas-breadcrumb">
                 <span>
                   <Icon
-                    name={mode === "interact" ? "play" : "code"}
+                    name="code"
                     size={13}
                   />
                   {t(mode)}
@@ -4775,13 +5236,7 @@ export default function App() {
             <div className="bottom-toolbar">
               <div role="tablist" aria-label={t("analysis")}>
                 {(
-                  [
-                    "analysis",
-                    "problems",
-                    "changes",
-                    "logs",
-                    "scenarios",
-                  ] as Key[]
+                  ["analysis", "problems", "changes", "logs"] as Key[]
                 ).map((tab) => (
                   <button
                     role="tab"
@@ -4794,8 +5249,8 @@ export default function App() {
                     }}
                   >
                     {t(tab)}
-                    {tab === "changes" && patch && (
-                      <span className="tab-count">1</span>
+                    {tab === "changes" && (draftCount > 0 || patch) && (
+                      <span className="tab-count">{draftCount || 1}</span>
                     )}
                     {tab === "problems" && report.warnings.length > 0 && (
                       <span className="tab-count neutral">
@@ -4835,7 +5290,22 @@ export default function App() {
             {bottomOpen && (
               <div className="bottom-content">
                 {bottomTab === "analysis" && renderAnalysis(true)}
-                {bottomTab === "changes" && renderDiff()}
+                {bottomTab === "changes" && (
+                  <>
+                    {changeEntries.length > 0 && (
+                      <ul className="change-list" aria-label={t("changes")}>
+                        {changeEntries.map((entry) => (
+                          <li key={entry.id}>
+                            <span className="change-object">{entry.object}</span>
+                            <span className="change-action">{entry.action}</span>
+                            <code>{entry.file}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {renderDiff()}
+                  </>
+                )}
                 {bottomTab === "problems" && (
                   <div className="problem-list">
                     {report.warnings.length ? (
@@ -4850,18 +5320,6 @@ export default function App() {
                     {logs.length ? logs.join("\n") : t("noOutput")}
                   </pre>
                 )}
-                {bottomTab === "scenarios" && (
-                  <div className="scenarios-panel">
-                    <Icon name="board" size={22} />
-                    <div>
-                      <strong>{t("boards")}</strong>
-                      <p>{isDemo ? t("boardHint") : t("boardUnavailable")}</p>
-                    </div>
-                    <button className="button" onClick={() => setNav("boards")}>
-                      {t("boards")} →
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </section>
@@ -4874,6 +5332,9 @@ export default function App() {
               {report.detected.framework} · {report.coverage.filesInspected}{" "}
               {t("scanned")}
             </span>
+            <span className="multi-select-hint" title={multiSelectHint}>
+              {multiSelectHint} {t("multiSelect")}
+            </span>
             <span className="statusbar-end">{t("noPush")}</span>
           </footer>
         </>
@@ -4885,19 +5346,67 @@ export default function App() {
           onClose={() => setModal(null)}
         >
           <p>{t("leaveWorkspaceMessage")}</p>
-          {draftOpen && <p role="alert">{language === "id" ? "Simpan atau buang draft sebelum keluar dari project." : "Save or discard the draft before leaving the project."}</p>}
+          {draftOpen && (
+            <p role="alert">
+              {language === "id"
+                ? `Ada draft belum disimpan (${draftCount}). Pilih simpan atau buang sebelum keluar.`
+                : `Unsaved draft (${draftCount}). Save or discard it before leaving.`}
+            </p>
+          )}
+          {draftOpen && pageTabs.length > 0 && (
+            <ul className="tab-summary">
+              {pageTabs.map((tab) => (
+                <li key={tab.id}>
+                  {tab.name} · {tabDirty(tab) ? (language === "id" ? "belum disimpan" : "unsaved") : (language === "id" ? "bersih" : "clean")}
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="small muted">{t("leaveWorkspaceHint")}</p>
           {preview && <p className="small muted">{t("leavePreviewHint")}</p>}
           <div className="modal-footer">
             <button className="button" onClick={() => setModal(null)}>
               {t("stayInWorkspace")}
             </button>
-            <button className="button accent" disabled={busy || draftOpen} onClick={() => {
-              setModal(null);
-              setScreen("home");
-            }}>
-              {t("leaveWorkspace")}
-            </button>
+            {draftOpen ? (
+              <>
+                <button
+                  className="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void discardDraft().then(() => {
+                      setModal(null);
+                      setScreen("home");
+                    });
+                  }}
+                >
+                  {language === "id" ? "Buang & keluar" : "Discard & leave"}
+                </button>
+                <button
+                  className="button accent"
+                  disabled={busy}
+                  onClick={() => {
+                    void saveDraft().then((saved) => {
+                      if (!saved) return;
+                      setModal(null);
+                      setScreen("home");
+                    });
+                  }}
+                >
+                  {language === "id" ? "Simpan & keluar" : "Save & leave"}
+                </button>
+              </>
+            ) : (
+              <button
+                className="button accent"
+                onClick={() => {
+                  setModal(null);
+                  setScreen("home");
+                }}
+              >
+                {t("leaveWorkspace")}
+              </button>
+            )}
           </div>
         </Modal>
       )}
@@ -4942,78 +5451,20 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {modal === "preview" && (
-        <Modal
-          closeLabel={t("close")}
-          title={t("previewApproval")}
-          onClose={() => setModal(null)}
-        >
-          <div className="notice warning">
-            <span>△</span>
-            <p>{t("previewRisk")}</p>
-          </div>
-          <dl className="detail-list preview-details">
-            <div>
-              <dt>{t("path")}</dt>
-              <dd>
-                <code>{report?.projectRoot}</code>
-              </dd>
+      {modal === "close-tab" && closeTabId && (() => {
+        const tab = pageTabs.find((candidate) => candidate.id === closeTabId);
+        if (!tab) return null;
+        return (
+          <Modal closeLabel={t("close")} title={`${t("close")}: ${tab.name}`} onClose={() => { setModal(null); setCloseTabId(null); }}>
+            <p>{language === "id" ? "Tab ini memiliki perubahan yang belum disimpan." : "This tab has unsaved draft changes."}</p>
+            <div className="modal-footer">
+              <button className="button" onClick={() => { setModal(null); setCloseTabId(null); }}>{t("stayInWorkspace")}</button>
+              <button className="button" onClick={() => { void discardDraft().then(() => { removeTab(tab.id); setModal(null); setCloseTabId(null); }); }}>{language === "id" ? "Buang & tutup" : "Discard & close"}</button>
+              <button className="button accent" onClick={() => { void saveDraft().then((saved) => { if (!saved) return; removeTab(tab.id); setModal(null); setCloseTabId(null); }); }}>{language === "id" ? "Simpan & tutup" : "Save & close"}</button>
             </div>
-            <div>
-              <dt>{t("command")}</dt>
-              <dd>
-                <code>
-                  {report?.detected.framework === "nextjs"
-                    ? "Next.js adapter unavailable"
-                    : "Controlled Vite preview adapter"}
-                </code>
-              </dd>
-            </div>
-          </dl>
-          <p className="small muted">{t("safePreview")}</p>
-          {preview?.warnings?.map((warning, index) => (
-            <p key={index} className="small muted">
-              {warning}
-            </p>
-          ))}
-          <div className="modal-footer">
-            {preview && (
-              <button
-                className="button danger-quiet"
-                onClick={() =>
-                  void act(async () => {
-                    await api("preview/stop", {});
-                    setPreview(null);
-                    setDesignTarget(null);
-                    setPreviewState("stopped");
-                    setModal(null);
-                    flash(t("stopped"));
-                  })
-                }
-              >
-                <Icon name="stop" size={15} />
-                {t("cancelPreview")}
-              </button>
-            )}
-            <button className="button" onClick={() => setModal(null)}>
-              {t("cancel")}
-            </button>
-            <button
-              className="button accent"
-              disabled={busy || report?.readiness.state === "UNSUPPORTED"}
-              title={report?.readiness.reason}
-              onClick={() => void act(startApprovedPreview)}
-            >
-              <Icon name="play" size={15} />
-              {busy
-                ? t("working")
-                : report?.readiness.state === "UNSUPPORTED"
-                  ? t("unsupported")
-                  : t("approvePreview")}
-            </button>
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
       {modal === "review" && (
         <Modal
           closeLabel={t("close")}

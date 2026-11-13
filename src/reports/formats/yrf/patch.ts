@@ -241,6 +241,40 @@ export function removeYrfObject(text: string, objectPath: string): string {
   return next;
 }
 
+/** Reorder supported objects in their band (paint order), preserving object contents. */
+export function moveYrfObject(
+  text: string,
+  objectPath: string,
+  position: "front" | "back" | "up" | "down",
+): { text: string; objectPath: string } {
+  const match = /^(layout\.(?:(?:pages\[\d+\]\.bands\[\d+\])|reportHeader|reportFooter)\.objects)\[(\d+)\]$/.exec(objectPath);
+  if (!match) throw new Error("Invalid report object path");
+  const document = JSON.parse(text.replace(/^\uFEFF/, ""));
+  const objects = valueAtPath(document, parseYrfPath(match[1]!));
+  if (!Array.isArray(objects) || Number(match[2]) >= objects.length) throw new Error("Object not found");
+  for (const object of objects) {
+    if (!object || typeof object !== "object" || Array.isArray(object) || typeof (object as Record<string, unknown>).type !== "string" || Object.keys(object).some((key) => /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key))) throw new Error("Scripted objects cannot be reordered visually");
+  }
+  const index = Number(match[2]);
+  const target = position === "front" ? objects.length - 1 : position === "back" ? 0 : position === "up" ? index - 1 : index + 1;
+  if (target < 0 || target >= objects.length || target === index) return { text, objectPath };
+  const spans: ContainerSpan[] = [];
+  collectScalarSpans(text, spans);
+  const entries = objects.map((_, entryIndex) => spans.filter((span) => span.path === `${match[1]}[${entryIndex}]` && span.kind === "object"));
+  if (entries.some((entry) => entry.length !== 1)) throw new Error("Object array is ambiguous");
+  const entrySpans = entries.map((entry) => entry[0]!);
+  const texts = entrySpans.map((span) => text.slice(span.start, span.end));
+  const order = [...texts];
+  const [moved] = order.splice(index, 1);
+  if (moved === undefined) throw new Error("Object not found");
+  order.splice(target, 0, moved);
+  const start = entrySpans[0]!.start;
+  const end = entrySpans[entrySpans.length - 1]!.end;
+  const next = text.slice(0, start) + order.join(",") + text.slice(end);
+  JSON.parse(next.replace(/^\uFEFF/, ""));
+  return { text: next, objectPath: `${match[1]}[${target}]` };
+}
+
 /** Change an existing immediate scalar on one report object, preserving other bytes. */
 export function setYrfObjectScalar(text: string, objectPath: string, field: string, value: string | number | boolean): string {
   if (!/^layout\.(?:(?:pages\[\d+\]\.bands\[\d+\])|reportHeader|reportFooter)\.objects\[\d+\]$/.test(objectPath) || !/^[A-Za-z_$][\w$-]*$/.test(field) || field === "type") throw new Error("Invalid object property");

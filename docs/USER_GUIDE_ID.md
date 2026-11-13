@@ -66,11 +66,11 @@ memengaruhi Studio, bukan CSS aplikasi target.
 | --- | --- |
 | Home | User Guide di depan, Buat Project Baru, Buka Project Existing, recent projects |
 | Pemeriksaan Project | Hasil deteksi, cakupan pemeriksaan, kesiapan, status edit, peringatan |
-| Rail/panel kiri | Pages, Components, Tree, Files, Boards |
-| Canvas | Preview nyata yang disetujui, Design/Interact, lebar viewport, zoom |
+| Rail/panel kiri | Pages, Components, Tree, Files |
+| Canvas | Preview nyata yang disetujui, Design/Code, lebar viewport, zoom |
 | Inspector | Props, Style, Layout, Events, Data, A11y |
-| Panel bawah | Analysis, Problems, Changes, Console, Scenarios |
-| Alur source | Simpan langsung dengan pemeriksaan konflik, Batalkan sesi, review Git sebelum push |
+| Panel bawah | Analysis, Problems, Changes, Console |
+| Alur source | Draft-first: edit di memori; **Simpan** menulis source dengan cek konflik; **Simpan & Build** menjalankan build; **Changes** menampilkan objek yang berubah; review Git sebelum push |
 
 Panel separator dapat di-drag atau diubah memakai tombol panah saat fokus. Ukuran
 layar kecil tetap berguna untuk inspeksi, tetapi editor ini ditujukan untuk desktop.
@@ -92,12 +92,12 @@ jadi gunakan branch atau project latihan saat belajar dan review melalui Git seb
 flowchart LR
   A[Buka project tepercaya] --> B[Baca hasil pemeriksaan]
   B --> C{Jalankan preview?}
-  C -- Periksa saja --> D[Telusuri Pages dan Source]
-  C -- Setujui --> E[Preview Design]
-  E --> F[Pilih objek yang tepat]
-  F --> G[Ubah properti, event, posisi, atau struktur]
-  G --> H[Periksa dan simpan source]
-  H --> I[Batalkan jika perlu]
+  C -- Start local preview (satu klik) --> E[Preview Design]
+  E --> D[Buka maksimal tiga tab halaman]
+  D --> F[Pilih objek atau group logis]
+  F --> G[Ubah properti, event, posisi, atau struktur ke draft]
+  G --> H[Simpan atau Simpan & Build]
+  H --> I[Undo/Redo bila perlu]
   H --> J[Review dan test dengan Git]
 ```
 
@@ -184,11 +184,10 @@ sehingga screen berbasis menu dapat diperiksa tanpa login. Gunakan **App preview
 untuk kembali ke entry normal. Element dengan mapping belum jelas tidak dipaksa
 menjadi editable.
 
-**Interact** mengaktifkan event aplikasi biasa dan bisa memanggil backend sungguhan.
-Design terpisah mengarahkan request service fetch/XMLHttpRequest ke jawaban lokal
-kosong agar screen menu dapat dibuka tanpa backend perusahaan. App preview, Interact,
-WebSocket/EventSource, serta efek saat halaman dibuka tetap dapat berjalan. Gunakan
-environment development yang dipercaya.
+Design mencegat event aplikasi; interaksi runtime terbatas pada preview terkontrol.
+Isolated Design mengarahkan request service fetch/XMLHttpRequest ke jawaban lokal kosong
+agar screen menu dapat dibuka tanpa backend perusahaan. WebSocket/EventSource serta efek
+saat halaman dibuka tetap dapat berjalan. Gunakan environment development yang dipercaya.
 
 **Code** menampilkan source tanpa menjalankannya; untuk `.yrf` tersedia **Edit source**. Di Props, klik lokasi source untuk membuka file pada Code.
 File tetap dapat diedit normal melalui VS Code. Setelah ada
@@ -200,14 +199,30 @@ external edit, lakukan re-analysis. Patch lama tidak boleh menimpa source yang b
 
 ![Penjelasan source yang read-only](screenshots/unsupported-id.png)
 
-## 7. Component Boards dan scenario
+## 7. Halaman, tab, dan multi-selection
 
-Boards saat ini masih area percobaan dalam sesi, bukan alur edit utama. Boards
-belum mengimpor scenario project bebas atau menyimpan konfigurasi. Untuk project
-existing gunakan Pages → Components → Inspector. Board dengan provider pengguna,
-contoh response yang dapat diatur, dan import scenario Storybook masih pekerjaan lanjutan.
+- **Start local preview** adalah satu-satunya klik persetujuan. Tidak ada dialog
+  persetujuan kedua; pindah tab atau mengedit draft tidak meminta ulang.
+- Route dibuka sebagai tab halaman, maksimal **tiga**. Route yang sudah terbuka
+  mengaktifkan tab-nya; route keempat mengevict tab bersih atau meminta menutup tab
+  dirty. Titik menandai draft belum disimpan. Menutup tab dirty menawarkan
+  **Simpan & tutup / Buang & tutup / Tetap**.
+- Klik label, input, atau ikon di dalam kontrol compound seperti `Form.Field` memilih
+  logical owner, bukan hanya input dalam. Inspector menampilkan path source-nya.
+- **⌘+click** di macOS atau **Ctrl+click** di Windows/Linux menambah/menghapus objek
+  logis dari seleksi. Satu drag atau nudge keyboard untuk multi-selection dicatat sebagai
+  satu langkah draft. Align dinonaktifkan bila geometri tidak bisa diukur.
+- Komponen date/range adalah satu unit logis: klik input, teks, atau tombol kalender
+  memilih owner, bukan kontrol dalam yang terlepas.
+- Drag seleksi memperbarui kanvas langsung dan **tidak** me-reload preview; daftar Changes
+  mencatat objek yang dipindah. Edit struktural (insert/remove/teks) tetap menyinkronkan
+  preview.
+- Beralih ke **Code** saat objek terpilih membuka file objek itu dan menggulir ke barisnya.
+  **Console** menyimpan warning/error, termasuk error yang tampil sebagai popup.
 
-![Button Board dengan scenario lokal deterministik](screenshots/boards.png)
+![Seleksi kanvas dan inspector berbasis source](screenshots/canvas-inspector.png)
+
+![Palette komponen dan primitif visual](screenshots/component-palette.png)
 
 ## 8. Props, style, events, data, dan cakupan perubahan
 
@@ -418,9 +433,9 @@ Untuk menambah objek native, klik tombol objek atau tarik dari palette ke band y
 
 1. Pilih **YRF (.yrf)** dan pilih folder, lalu pilih file dari daftar; path manual tersedia sebagai cadangan.
 2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti; **Code** awalnya menampilkan source secara read-only. Pilih **Edit source** untuk mengubah draf, lalu **Apply & save copy** untuk menyimpan salinan. Script vendor tidak dijalankan saat inspeksi.
-3. Edit caption/geometri yang tersedia dan pilih **Preview change**. **Simpan** memperbarui file asli tanpa backup; **Simpan salinan** membuat file terpisah. Perubahan struktur dan source saat ini masih memerlukan Simpan salinan. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
+3. Edit caption/geometri yang tersedia dan pilih **Simpan**. **Simpan** memperbarui file asli tanpa backup; **Simpan salinan** membuat file terpisah. Perubahan struktur dan source saat ini masih memerlukan Simpan salinan. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
 
-Saat objek ditambah atau dihapus, **Preview change** membandingkan daftar objek band
+Saat objek ditambah atau dihapus, **Simpan** membandingkan daftar objek band
 sebelum dan sesudah perubahan draft. Hasil renderer vendor belum terverifikasi.
 4. Unit, tampilan cetak, dan file yang dibuat/diubah belum divalidasi oleh renderer vendor. Cek salinan dalam WaiReport dengan data uji dan bandingkan total, barcode, halaman, dan cetakan sebelum digunakan.
 
@@ -594,7 +609,7 @@ kamu menyimpan laporan ke salinan.
    di-resize dengan delapan handle; **Caption** dan `left`, `top`, `width`, `height`
    tetap tersedia untuk nilai tepat. Geometri memakai unit mentah vendor yang belum
    terverifikasi, bukan mm. Objek yang tidak didukung tetap hanya baca.
-3. Tekan **Preview change**, periksa nilai sebelum/sesudah, lalu **Save copy**.
+3. Tekan **Simpan**, periksa nilai sebelum/sesudah, lalu **Simpan**.
    File asli tidak ditimpa dan pengeditan berikutnya berlanjut dari salinan. Tab
    **Code** menampilkan source secara inert; **Edit source** mengaktifkan draf
    tervalidasi dan **Apply & save copy** menulis salinan baru. Draf yang belum
@@ -642,8 +657,13 @@ Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native
    dan menerapkannya menulis patch gaya ke source. File `.yrf` yang sudah ada juga punya
    palette Gaya dan kontrol gaya (tebal/miring/garis bawah, ukuran, warna, perataan) yang
    mengubah string `style` vendor dan memperbarui kanvas perkiraan; pilih beberapa objek
-   dengan Shift/Cmd-click untuk meratakannya, lalu **Save copy**. Header laporan punya
-   Template baru **Pra-analisis kredit** dan **Memo persetujuan** menambahkan halaman
+   dengan Shift/Cmd-click untuk meratakannya, lalu **Simpan**. Header laporan punya
+   Edit tidak lagi meminta konfirmasi satu per satu: ubah apa pun, lalu **Simpan** untuk
+   finalisasi (atau **Simpan & Build** untuk juga menjalankan `npm run build`). Undo/Redo
+   berupa ikon (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z); Preview draft dan Buang draft ada di **⋯**.
+   Keluar saat ada draft memunculkan Simpan & keluar / Buang & keluar / Tetap di sini.
+   Panel report bisa di-resize dan dibuka/tutup; objek `.yrf` punya Layers (Depan/Belakang/
+   Naik/Turun) dan warna Teks/Isi/Garis berlabel. Template baru **Pra-analisis kredit** dan **Memo persetujuan** menambahkan halaman
    ringkasan, header tabel dua tingkat, baris tersorot, narasi dan area tanda tangan. Di
    Structure gunakan ↑/↓ untuk mengubah urutan bagian dan **Pindah halaman sebelum** untuk
    memulai halaman baru. Header laporan punya tombol **Keluar** eksplisit. Aksi hapus berwarna merah.
@@ -678,7 +698,7 @@ flowchart LR
   L --> D[Design: pilih, drag, resize]
   D --> A[Palette: tambah objek]
   A --> O[Properties: ubah nilai]
-  O --> W[Save atau Save copy]
+  O --> W[Save atau Simpan]
   W --> T[Periksa hasil dan data]
 ```
 
@@ -687,12 +707,12 @@ container yang didukung. Di Report Studio, palette dan daftar objek dikelompokka
 buka atau tutup kelompok untuk mengurangi scroll. Klik objek pada kertas untuk
 melihat propertinya, atau pilih dari struktur di kiri. **Remove object** menghapus
 objek terpilih dari draft; **Exit** meminta keputusan jika ada perubahan belum disimpan.
-Untuk `.yrf`, Design adalah perkiraan dan Save copy membuat salinan; pastikan hasilnya
+Untuk `.yrf`, Design adalah perkiraan dan Simpan membuat salinan; pastikan hasilnya
 terbuka dan tercetak dengan benar di WaiReport sebelum digunakan.
 
 ### YRF: image and static layouts
 
-Di Design YRF, pilih band lalu **Gambar**; pilih objek gambar dan gunakan **Import gambar** (PNG, JPEG atau WebP, maksimal 2 MiB). Ubah ukuran di canvas atau Geometri, lalu **Save copy**. **Layout tabel** dan **Layout form** menambah objek terpisah sebagai susunan statis, bukan tabel berulang otomatis. Periksa salinan di WaiReport.
+Di Design YRF, pilih band lalu **Gambar**; pilih objek gambar dan gunakan **Import gambar** (PNG, JPEG atau WebP, maksimal 2 MiB). Ubah ukuran di canvas atau Geometri, lalu **Simpan**. **Layout tabel** dan **Layout form** menambah objek terpisah sebagai susunan statis, bukan tabel berulang otomatis. Periksa salinan di WaiReport.
 
 ### Native table columns and rows
 

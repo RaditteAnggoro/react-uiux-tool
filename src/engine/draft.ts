@@ -86,6 +86,50 @@ export class SourceDraft {
     this.future.pop(); this.past.push(step);
     return analysis;
   }
+  toSnapshot(): {
+    version: 1;
+    root: string;
+    files: Array<{ file: string; original: string; text: string }>;
+    past: Step[];
+    future: Step[];
+  } {
+    return {
+      version: 1,
+      root: this.root,
+      files: [...this.files].map(([file, state]) => ({ file, original: state.original, text: state.text })),
+      past: this.past,
+      future: this.future,
+    };
+  }
+
+  static async fromSnapshot(
+    root: string,
+    snapshot: unknown,
+  ): Promise<SourceDraft> {
+    const record = snapshot as {
+      version?: unknown;
+      root?: unknown;
+      files?: unknown;
+      past?: unknown;
+      future?: unknown;
+    } | null;
+    if (!record || record.version !== 1 || record.root !== root)
+      throw new Error("Draft snapshot belongs to another project.");
+    if (!Array.isArray(record.files) || !Array.isArray(record.past) || !Array.isArray(record.future))
+      throw new Error("Draft snapshot is invalid.");
+    const draft = new SourceDraft(root);
+    for (const item of record.files) {
+      const file = item as { file?: unknown; original?: unknown; text?: unknown };
+      if (typeof file.file !== "string" || typeof file.original !== "string" || typeof file.text !== "string")
+        throw new Error("Draft snapshot file entry is invalid.");
+      await resolveProjectPath(root, file.file);
+      draft.files.set(file.file, { original: file.original, text: file.text });
+    }
+    draft.past = record.past as Step[];
+    draft.future = record.future as Step[];
+    return draft;
+  }
+
   async commit(approved: boolean): Promise<Checkpoint[]> {
     if (approved !== true) throw new Error("Explicit review approval is required before writing source.");
     const patches: SourcePatch[] = [];

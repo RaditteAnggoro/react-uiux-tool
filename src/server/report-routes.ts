@@ -700,6 +700,25 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         });
         return;
       }
+      case "yrf/save-source": {
+        if (data.approved !== true) throw new ReportApiError(403, "APPROVAL_REQUIRED", "Explicit overwrite approval is required");
+        const loaded = await loadYrfFile(data.path);
+        if (!openedYrfFiles.has(loaded.file)) throw new ReportApiError(403, "YRF_NOT_OPEN", "Open this report before saving it");
+        const expectedHash = requireString(data.expectedHash, "yrf hash", 64);
+        if (loaded.hash !== expectedHash) throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
+        const source = requireString(data.source, "yrf source", 5_000_000);
+        const inspected = inspectYrf(source);
+        if (!inspected.ok) throw new ReportApiError(422, "INVALID_YRF", inspected.error ?? "Invalid YRF structure");
+        await saveYrfInPlace(loaded.file, expectedHash, source);
+        json(res, 200, {
+          ok: true,
+          file: loaded.file,
+          hash: sha256(source),
+          source,
+          inspection: inspected.inspection,
+        });
+        return;
+      }
       case "yrf/patch":
       case "yrf/save":
       case "yrf/save-copy": {

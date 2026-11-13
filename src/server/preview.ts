@@ -79,9 +79,22 @@ export function bridgeSource(parentOrigin: string): string {
     hoverOutline.setAttribute('aria-hidden','true');hoverOutline.dataset.uiuxSelection='hover';
     Object.assign(hoverOutline.style,{position:'fixed',pointerEvents:'none',zIndex:'2147483645',border:'2px dotted #8B7CFF',borderRadius:'3px',display:'none',boxSizing:'border-box'});
     let hovered=null;
+    const visualGroup = el => {
+      let node = el;
+      let best = el;
+      for (let depth = 0; depth < 4 && node?.parentElement; depth += 1) {
+        node = node.parentElement;
+        if (!node || node === document.body) break;
+        const hasLabel = !!node.querySelector('label');
+        const hasControl = !!node.querySelector('input,select,textarea,button,[role="combobox"]');
+        const r = node.getBoundingClientRect();
+        if (hasLabel && hasControl && r.width > 0 && r.height > 0 && r.width < innerWidth * 0.8 && r.height < innerHeight * 0.6) best = node;
+      }
+      return best;
+    };
     const attach = () => { if (!outline.parentNode) document.documentElement.append(outline);if(!hoverOutline.parentNode)document.documentElement.append(hoverOutline); };
-    const show = el => { attach(); if (!el || mode !== 'design') {outline.style.display='none'; return;} const r=el.getBoundingClientRect();selectionLabel.style.top=r.top<26?'0px':'-24px';Object.assign(outline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'}); };
-    const showHover = el => {attach();hovered=el;if(!el||el===selected||mode!=='design'){hoverOutline.style.display='none';return;}const r=el.getBoundingClientRect();Object.assign(hoverOutline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});};
+    const show = el => { attach(); if (!el || mode !== 'design') {outline.style.display='none'; return;} const r=visualGroup(el).getBoundingClientRect();selectionLabel.style.top=r.top<26?'0px':'-24px';Object.assign(outline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'}); };
+    const showHover = el => {attach();hovered=el;if(!el||el===selected||mode!=='design'){hoverOutline.style.display='none';return;}const r=visualGroup(el).getBoundingClientRect();Object.assign(hoverOutline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});};
     let multiOutlines=[];
     const showMany = () => {
       multiOutlines.forEach(item=>item.remove());multiOutlines=[];
@@ -89,7 +102,7 @@ export function bridgeSource(parentOrigin: string): string {
       selectedMany.filter(el=>el&&el!==selected).forEach(el=>{
         const marker=document.createElement('div');
         marker.setAttribute('aria-hidden','true');
-        const r=el.getBoundingClientRect();
+        const r=visualGroup(el).getBoundingClientRect();
         marker.dataset.uiuxSelection='additional';
         Object.assign(marker.style,{position:'fixed',pointerEvents:'none',zIndex:'2147483646',border:'2px dashed #8B5CF6',borderRadius:'3px',background:'rgba(139,92,246,.06)',boxSizing:'border-box',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});
         document.documentElement.append(marker);multiOutlines.push(marker);
@@ -119,6 +132,33 @@ export function bridgeSource(parentOrigin: string): string {
       show(selected);showMany();
       parent.postMessage({type:'uiux:select',...sourcePosition(el),additive,selected:isSelected},parentOrigin);
     };
+    let marquee = null;
+    const startMarquee = event => {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;border:1px dashed #635bff;background:rgba(99,91,255,.12);pointer-events:none;z-index:2147483646;left:0;top:0;width:0;height:0';
+      document.body.appendChild(box);
+      marquee = { x: event.clientX, y: event.clientY, box, additive: event.ctrlKey || event.metaKey || event.shiftKey };
+      event.preventDefault();
+    };
+    const updateMarquee = event => {
+      if (!marquee) return;
+      const x = Math.min(marquee.x, event.clientX), y = Math.min(marquee.y, event.clientY);
+      marquee.box.style.left = x + 'px'; marquee.box.style.top = y + 'px';
+      marquee.box.style.width = Math.abs(event.clientX - marquee.x) + 'px';
+      marquee.box.style.height = Math.abs(event.clientY - marquee.y) + 'px';
+    };
+    const finishMarquee = event => {
+      if (!marquee) return;
+      const state = marquee; marquee = null; state.box.remove();
+      const left = Math.min(state.x, event.clientX), top = Math.min(state.y, event.clientY);
+      const right = Math.max(state.x, event.clientX), bottom = Math.max(state.y, event.clientY);
+      if (right - left < 4 || bottom - top < 4) return;
+      const items = Array.from(document.querySelectorAll('[data-uiux-id]')).filter(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
+      }).map(el => ({ ...sourcePosition(el), additive: state.additive, selected: true }));
+      if (items.length) parent.postMessage({ type: 'uiux:marquee', items, additive: state.additive }, parentOrigin);
+    };
     const beginDrag = (event,el) => {
       if(!el||event.button!==0)return;
       const additive=event.ctrlKey||event.metaKey;
@@ -126,7 +166,7 @@ export function bridgeSource(parentOrigin: string): string {
       if(additive)choose(el,true);
       else if(!keepGroup)choose(el,false);
       else {selected=el;show(selected);showMany();}
-      const items=(selectedMany.includes(el)?selectedMany:[el]).filter(Boolean).map(item=>({el:item,transform:item.style.transform,transition:item.style.transition}));
+      const items=(selectedMany.includes(el)?selectedMany:[el]).filter(Boolean).map(item=>{const dragEl=visualGroup(item);return {el:dragEl,transform:dragEl.style.transform,transition:dragEl.style.transition};});
       dragState={x:event.clientX,y:event.clientY,items,moved:false,keepGroup,target:el};
       try {event.target.setPointerCapture?.(event.pointerId);} catch {}
     };
@@ -134,12 +174,17 @@ export function bridgeSource(parentOrigin: string): string {
       if(mode!=='design')return;
       if(event.type==='keydown' && !['Enter',' ','Escape'].includes(event.key))return;
       event.preventDefault();event.stopImmediatePropagation();
-      if(event.type==='pointerdown')beginDrag(event,event.target.closest?.('[data-uiux-id]'));
+      if(event.type==='pointerdown'){
+        const target=event.target.closest?.('[data-uiux-id]');
+        if(target) beginDrag(event,target); else startMarquee(event);
+      }
       if(event.type==='keydown'&&event.key==='Escape')choose(selected?.parentElement?.closest('[data-uiux-id]'));
     };
     ['click','dblclick','pointerdown','mousedown','mouseup','touchstart','submit','beforeinput','change','keydown'].forEach(type=>window.addEventListener(type,block,true));
     window.addEventListener('pointermove',event=>{
-      if(mode!=='design'||!dragState)return;
+      if(mode!=='design')return;
+      if(marquee){ updateMarquee(event); return; }
+      if(!dragState)return;
       const dx=Math.round(event.clientX-dragState.x),dy=Math.round(event.clientY-dragState.y);
       if(!dragState.moved&&Math.abs(dx)+Math.abs(dy)<4)return;
       event.preventDefault();event.stopImmediatePropagation();dragState.moved=true;
@@ -147,10 +192,11 @@ export function bridgeSource(parentOrigin: string): string {
       show(selected);showMany();
     },true);
     window.addEventListener('pointerup',event=>{
+      if(marquee){ finishMarquee(event); return; }
       if(!dragState)return;
       const state=dragState;dragState=null;
       const dx=Math.round(event.clientX-state.x),dy=Math.round(event.clientY-state.y);
-      state.items.forEach(item=>{item.el.style.transform=item.transform;item.el.style.transition=item.transition;});
+      if(!(state.moved&&(dx||dy))) state.items.forEach(item=>{item.el.style.transform=item.transform;item.el.style.transition=item.transition;});
       show(selected);showMany();
       if(state.moved&&(dx||dy)){
         event.preventDefault();event.stopImmediatePropagation();
@@ -617,9 +663,12 @@ createRoot(document.getElementById("root")).render(
     this.patch = null;
     this.draftSources = new Map(sources);
     if (!this.server) return;
+    // Vite's React adapter does not reliably accept a synthetic js-update for the
+    // transformed entry graph, so refresh the preview rather than leaving stale DOM.
     this.server.moduleGraph.invalidateAll();
     this.server.ws.send({ type: "full-reload", path: "*" });
   }
+
   async design(target: DesignTarget | null) {
     if (!this.server) throw new Error("Start the approved preview first.");
     if (target) {

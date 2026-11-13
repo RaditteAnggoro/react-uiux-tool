@@ -1196,3 +1196,46 @@ test("UTF-8 BOM and executable permissions survive apply; malformed UTF-8 is iso
     await f.cleanup();
   }
 });
+
+
+test("a serialized draft snapshot restores edits and rejects another project", async () => {
+  const f = await fixture(SIMPLE);
+  try {
+    const draft = new SourceDraft(f.root);
+    let analysis = await draft.analysis();
+    const button = analysis.elements.find((element) => element.tag === "button")!;
+    analysis = (await draft.edit(req(button, "text", "Recovered"))).analysis;
+    const snapshot = JSON.parse(JSON.stringify(draft.toSnapshot()));
+    const restored = await SourceDraft.fromSnapshot(f.root, snapshot);
+    assert.equal(restored.count, 1);
+    assert.equal(restored.canRedo, false);
+    const restoredAnalysis = await restored.analysis();
+    assert.ok(restoredAnalysis.elements.some((element) => element.text === "Recovered"));
+    assert.equal(await readFile(path.join(f.root, "src/App.tsx"), "utf8"), SIMPLE);
+    await assert.rejects(() => SourceDraft.fromSnapshot("/tmp/other-project", snapshot), /another project/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test("compound member assignments resolve Form.Field as a component contract", async () => {
+  const source = 'import Form from "./Form";import CodeCombo from "./CodeCombo";export default function App(){return <main><Form><Form.Field label="Branch No"><CodeCombo /></Form.Field></Form></main>}';
+  const f = await fixture(source, {
+    'src/Form.jsx': 'function Form({children}){return <div>{children}</div>} Form.Field=({label,children})=><div><label>{label}</label>{children}</div>;export default Form;',
+    'src/CodeCombo.jsx': 'export default function CodeCombo(){return <select/>}',
+  });
+  try {
+    const report = await analyzeProject(f.root);
+    const compound = report.components.find((component) => component.name === "Form.Field");
+    assert.ok(compound, "Form.Field component should be discovered");
+    assert.ok(compound!.props.some((prop) => prop.name === "label"));
+    const field = report.elements.find((element) => element.tag === "Form.Field")!;
+    assert.equal(field.componentId, compound!.id);
+    assert.notEqual(field.editability, "UNRESOLVED");
+    const combo = report.elements.find((element) => element.tag === "CodeCombo")!;
+    assert.equal(combo.parentId, field.id);
+  } finally {
+    await f.cleanup();
+  }
+});

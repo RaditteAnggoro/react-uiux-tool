@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { inspectYrf, type YrfInspection, type YrfObjectRef } from "../../../../src/reports/formats/yrf/inspect";
-import { appendYrfObject, applyYrfChanges, parseYrfPath, removeYrfObject, setYrfObjectScalar, valueAtPath, type YrfChange } from "../../../../src/reports/formats/yrf/patch";
+import { appendYrfObject, applyYrfChanges, moveYrfObject, parseYrfPath, removeYrfObject, setYrfObjectScalar, valueAtPath, type YrfChange } from "../../../../src/reports/formats/yrf/patch";
 import "./yrf-inspector.css";
 import ReportHelp from "./ReportHelp";
 import CanvasRulers from "./CanvasRulers";
@@ -160,6 +160,13 @@ const dict = {
     rawUnits: "raw units",
     styleAlign: "Alignment",
     multiSelected: "{count} objects selected",
+    layers: "Layers",
+    layersHint: "Topmost first; select a row to edit that object.",
+    alignment: "Alignment",
+    bringFront: "Bring to Front",
+    sendBack: "Send to Back",
+    moveLayerUp: "Up one layer",
+    moveLayerDown: "Down one layer",
     alignLeft: "Align left",
     alignCenterH: "Center horizontally",
     alignRight: "Align right",
@@ -177,6 +184,11 @@ const dict = {
     preview: "Preview change",
     saveCopy: "Save copy",
     saveOriginal: "Save",
+    saveToOriginal: "Save original",
+    resizeLeftPanel: "Resize .yrf structure panel",
+    resizeRightPanel: "Resize .yrf properties panel",
+    overwriteConfirm: "Overwrite the original .yrf file? A timestamped .bak file is written beside it.",
+    updatedOriginal: "Original updated",
     savedOriginal: "Saved original",
     saveOriginalLimited: "Save supports caption, data field and geometry changes. Structural and source edits still require Save copy.",
     before: "Before",
@@ -259,6 +271,13 @@ const dict = {
     rawUnits: "unit mentah",
     styleAlign: "Perataan",
     multiSelected: "{count} objek dipilih",
+    layers: "Lapisan",
+    layersHint: "Paling atas lebih dulu; pilih baris untuk mengedit objek.",
+    alignment: "Perataan",
+    bringFront: "Bawa ke depan",
+    sendBack: "Kirim ke belakang",
+    moveLayerUp: "Naik satu lapisan",
+    moveLayerDown: "Turun satu lapisan",
     alignLeft: "Rata kiri",
     alignCenterH: "Tengah horizontal",
     alignRight: "Rata kanan",
@@ -276,6 +295,11 @@ const dict = {
     preview: "Pratinjau perubahan",
     saveCopy: "Simpan salinan",
     saveOriginal: "Simpan",
+    saveToOriginal: "Simpan ke asli",
+    resizeLeftPanel: "Ubah lebar panel struktur .yrf",
+    resizeRightPanel: "Ubah lebar panel properti .yrf",
+    overwriteConfirm: "Timpa file .yrf asli? File .bak bertanda waktu akan ditulis di sampingnya.",
+    updatedOriginal: "File asli diperbarui",
     savedOriginal: "File asli tersimpan",
     saveOriginalLimited: "Simpan mendukung perubahan caption, data field dan geometri. Perubahan struktur dan source masih memerlukan Simpan salinan.",
     before: "Sebelum",
@@ -329,6 +353,39 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const [showRuler, setShowRuler] = useState(false);
   const [selected, setSelected] = useState<YrfObjectRef | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [leftWidth, setLeftWidth] = useState(() => {
+    const saved = Number(localStorage.getItem("uiux-yrf-left-width"));
+    return saved >= 230 && saved <= 520 ? saved : 290;
+  });
+  const [rightWidth, setRightWidth] = useState(() => {
+    const saved = Number(localStorage.getItem("uiux-yrf-right-width"));
+    return saved >= 230 && saved <= 520 ? saved : 280;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("uiux-yrf-left-width", String(leftWidth));
+      localStorage.setItem("uiux-yrf-right-width", String(rightWidth));
+    } catch {
+      // Width preferences are best-effort.
+    }
+  }, [leftWidth, rightWidth]);
+  const startPanelResize = (side: "left" | "right", event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = side === "left" ? leftWidth : rightWidth;
+    const move = (moveEvent: PointerEvent) => {
+      const delta = side === "left" ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      const next = Math.max(230, Math.min(520, startWidth + delta));
+      if (side === "left") setLeftWidth(next);
+      else setRightWidth(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -477,6 +534,14 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     const x1 = value("x1"), x2 = value("x2"), y1 = value("y1"), y2 = value("y2");
     return { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
   };
+
+  const layerGroups = useMemo(() => {
+    if (!report) return [];
+    return [
+      ...report.inspection.pages.flatMap((page) => page.bands),
+      ...report.inspection.sideBands,
+    ].filter((band) => band.objects.length > 0);
+  }, [report]);
 
   const changes = useMemo(() => {
     if (!selected) return [];
@@ -650,9 +715,59 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     }
   };
 
+  const saveSourceToOriginal = async (): Promise<boolean> => {
+    if (!report?.source) return false;
+    const base = codeEditing && codeDraft !== null ? codeDraft : structuralDraft ?? report.source;
+    const patched = !codeEditing && pendingAll.length
+      ? applyYrfChanges(base, pendingAll as YrfChange[])
+      : { ok: true as const, text: base };
+    if (!patched.ok) {
+      const failure = "error" in patched ? patched.error : undefined;
+      setError(failure || "Invalid YRF structure");
+      return false;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await post<{
+        file: string;
+        hash: string;
+        source: string;
+        inspection: YrfInspection;
+      }>(token, "reports/yrf/save-source", {
+        path: report.file,
+        expectedHash: report.hash,
+        source: patched.text,
+        approved: true,
+      });
+      setReport({
+        file: result.file,
+        hash: result.hash,
+        inspection: result.inspection,
+        source: result.source,
+      });
+      setFilePath(result.file);
+      setStructuralDraft(null);
+      setDraftChanges({});
+      setGeometryChanges({});
+      setPending([]);
+      setCodeEditing(false);
+      setCodeDraft(null);
+      setSelected(null);
+      setSelectedPaths([]);
+      setPanel("design");
+      setMessage(`${tr.updatedOriginal}: ${result.file}`);
+      return true;
+    } catch (caught) {
+      setError((caught as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveAll = async (): Promise<boolean> => {
-    if (codeEditing) return applySource();
-    return saveCopy();
+    return saveSourceToOriginal();
   };
 
   const addObject = (kind: "label" | "textbox" | "shape" | "line" | "image" | "table" | "form", bandPath?: string, position?: { x: number; y: number }) => {
@@ -728,6 +843,34 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     };
     reader.onerror = () => setError(tr.imageError);
     reader.readAsDataURL(file);
+  };
+
+  const moveObjectLayer = (position: "front" | "back" | "up" | "down") => {
+    if (!report?.source || !selected) return;
+    try {
+      const base = structuralDraft ?? report.source;
+      const patched = pendingAll.length ? applyYrfChanges(base, pendingAll as YrfChange[]) : null;
+      if (patched && !patched.ok) throw new Error(patched.error ?? "Invalid YRF structure");
+      const result = moveYrfObject(patched?.ok ? patched.text : base, selected.path, position);
+      const inspected = inspectYrf(result.text, report.hash);
+      if (!inspected.ok || !inspected.inspection) throw new Error(inspected.error ?? "Invalid YRF structure");
+      setStructuralDraft(result.text);
+      setReport({ ...report, inspection: inspected.inspection });
+      const updated = findObject(inspected.inspection, result.objectPath);
+      setSelected(updated);
+      setSelectedPaths([result.objectPath]);
+      if (updated) {
+        setCaption(updated.caption ?? "");
+        setDataField(updated.dataField ?? "");
+        setGeometry({ left: updated.box.x, top: updated.box.y, width: updated.box.width, height: updated.box.height });
+      }
+      setDraftChanges({});
+      setGeometryChanges({});
+      setPending([]);
+      setError("");
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
   };
 
   const removeObject = () => {
@@ -1024,7 +1167,11 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         <button className="yrf-ghost" onClick={() => setCreating((value) => !value)}>
           {tr.create}
         </button>
-        {inspection && panel === "design" && <><button className="yrf-primary" disabled={busy || !dirty || !!structuralDraft} title={structuralDraft ? tr.saveOriginalLimited : undefined} onClick={() => void saveCopy(true)}>{tr.saveOriginal}</button><button className="yrf-ghost" disabled={busy || !dirty} onClick={() => void saveCopy()}>{tr.saveCopy}</button></>}
+        {inspection && (
+          <button className="yrf-primary" disabled={busy || !dirty} title={tr.saveOriginalLimited} onClick={() => void saveAll()}>
+            {tr.saveOriginal}
+          </button>
+        )}
       </header>
 
       {error && <div className="yrf-alert bad">{error}</div>}
@@ -1131,10 +1278,10 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   </button>
                   <button
                     className="yrf-primary"
-                    disabled={busy}
-                    onClick={() => void applySource()}
+                    disabled={busy || codeDraft === null || codeDraft === report?.source}
+                    onClick={() => void saveSourceToOriginal()}
                   >
-                    {tr.applySource}
+                    {tr.saveOriginal}
                   </button>
                 </>
               )}
@@ -1158,7 +1305,13 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           <p className="yrf-hint">{tr.readonlyNote}</p>
         </div>
       ) : (
-        <div className="yrf-body">
+        <div
+          className="yrf-body"
+          style={{
+            ["--yrf-left-width" as string]: `${leftWidth}px`,
+            ["--yrf-right-width" as string]: `${rightWidth}px`,
+          }}
+        >
           <aside className="yrf-left">
             <h3>{tr.palette}</h3>
             <p className="yrf-hint">{tr.paletteHint}</p>
@@ -1234,6 +1387,18 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
               ))}
             </ul>
           </aside>
+          <div
+            className="yrf-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={tr.resizeLeftPanel}
+            tabIndex={0}
+            onPointerDown={(event) => startPanelResize("left", event)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") setLeftWidth((value) => Math.max(230, value - 16));
+              if (event.key === "ArrowRight") setLeftWidth((value) => Math.min(520, value + 16));
+            }}
+          />
 
           <main className="yrf-canvas-wrap">
             <div className="yrf-note">{tr.selectHint} {tr.readonlyNote}</div>
@@ -1359,6 +1524,18 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
               })()}
             </div>
           </main>
+          <div
+            className="yrf-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={tr.resizeRightPanel}
+            tabIndex={0}
+            onPointerDown={(event) => startPanelResize("right", event)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") setRightWidth((value) => Math.min(520, value + 16));
+              if (event.key === "ArrowRight") setRightWidth((value) => Math.max(230, value - 16));
+            }}
+          />
 
           <aside className="yrf-right">
             <h3>{tr.geometry}</h3>
@@ -1461,16 +1638,25 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                               updateSelectedStyle({ "font-size": `${Number(event.target.value)}pt` })
                             }
                           />
-                          <input
-                            aria-label={tr.styleColor}
-                            type="color"
-                            value={
-                              /^#[0-9A-Fa-f]{6}$/.test(styleMap.color ?? "") ? styleMap.color! : "#111827"
-                            }
-                            onChange={(event) => updateSelectedStyle({ color: event.target.value })}
-                          />
-                          <input aria-label={tr.fillColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["background-color"] ?? "") ? styleMap["background-color"] : "#ffffff"} onChange={(event) => updateSelectedStyle({ "background-color": event.target.value })} />
-                          <input aria-label={tr.borderColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["border-color"] ?? "") ? styleMap["border-color"] : "#cbd5e1"} onChange={(event) => updateSelectedStyle({ "border-color": event.target.value })} />
+                          <label className="yrf-color-field">
+                            <span>{tr.styleColor}</span>
+                            <input
+                              aria-label={tr.styleColor}
+                              type="color"
+                              value={
+                                /^#[0-9A-Fa-f]{6}$/.test(styleMap.color ?? "") ? styleMap.color! : "#111827"
+                              }
+                              onChange={(event) => updateSelectedStyle({ color: event.target.value })}
+                            />
+                          </label>
+                          <label className="yrf-color-field">
+                            <span>{tr.fillColor}</span>
+                            <input aria-label={tr.fillColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["background-color"] ?? "") ? styleMap["background-color"] : "#ffffff"} onChange={(event) => updateSelectedStyle({ "background-color": event.target.value })} />
+                          </label>
+                          <label className="yrf-color-field">
+                            <span>{tr.borderColor}</span>
+                            <input aria-label={tr.borderColor} type="color" value={/^#[0-9A-Fa-f]{6}$/.test(styleMap["border-color"] ?? "") ? styleMap["border-color"] : "#cbd5e1"} onChange={(event) => updateSelectedStyle({ "border-color": event.target.value })} />
+                          </label>
                           <select
                             aria-label={tr.styleAlign}
                             value={styleMap["text-align"] ?? "left"}
@@ -1485,6 +1671,34 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                     })()}
                   </>
                 )}
+                <h3>{tr.layers}</h3>
+                <p className="yrf-hint">{tr.layersHint}</p>
+                <div className="yrf-layer-list" role="listbox" aria-label={tr.layers}>
+                  {layerGroups.map((band) => (
+                    <div className="yrf-layer-group" key={band.path}>
+                      <strong>{band.type}</strong>
+                      {band.objects.slice().reverse().map((object) => (
+                        <button
+                          type="button"
+                          key={object.path}
+                          aria-pressed={selected?.path === object.path}
+                          className={selected?.path === object.path ? "on" : ""}
+                          onClick={() => selectObject(object)}
+                          title={`${object.kind} · ${object.name}`}
+                        >
+                          <span aria-hidden="true">{object.kind === "label" ? "T" : object.kind === "textbox" ? "▤" : object.kind === "line" ? "╱" : object.kind === "image" ? "▧" : "□"}</span>
+                          {object.kind} · {object.name}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="yrf-layer-actions" aria-label={tr.layers}>
+                  <button disabled={!selected.supported || selected.hasScript} onClick={() => moveObjectLayer("front")}>{tr.bringFront}</button>
+                  <button disabled={!selected.supported || selected.hasScript} onClick={() => moveObjectLayer("up")}>{tr.moveLayerUp}</button>
+                  <button disabled={!selected.supported || selected.hasScript} onClick={() => moveObjectLayer("down")}>{tr.moveLayerDown}</button>
+                  <button disabled={!selected.supported || selected.hasScript} onClick={() => moveObjectLayer("back")}>{tr.sendBack}</button>
+                </div>
                 {scalarProperties.length > 0 && <>
                   <h3>{tr.objectProperties}</h3>
                   <p className="yrf-hint">{tr.objectPropertiesHint}</p>
@@ -1499,18 +1713,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   ))}
                 </>}
                 <button className="yrf-remove" disabled={!selected.supported || selected.hasScript} title={selected.hasScript ? tr.scriptProtected : !selected.supported ? tr.unsupported : undefined} onClick={removeObject}>{tr.removeObject}</button>
-                <div className="yrf-actions">
-                  <button disabled={busy || (pendingAll.length === 0 && !structuralDraft)} onClick={() => void preview()}>
-                    {tr.preview}
-                  </button>
-                  <button
-                    className="yrf-primary"
-                    disabled={busy || (pendingAll.length === 0 && !structuralDraft)}
-                    onClick={() => void saveCopy()}
-                  >
-                    {tr.saveCopy}
-                  </button>
-                </div>
+
                 {pending.length > 0 && (
                   <div className="yrf-diff">
                     {pending.map((change) => (
@@ -1559,7 +1762,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   });
                 }}
               >
-                  {pendingAll.length > 0 || structuralDraft ? tr.saveCopy : tr.applySource}
+                  {tr.saveOriginal}
               </button>
             </div>
           </div>

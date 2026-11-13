@@ -40,7 +40,10 @@ test("controller draft keeps source unchanged until save and retains it after a 
       const edit = await post("draft/edit", { expectedProject, file: button.source.file, elementId: button.id, expectedHash: button.hash, operation: "text", value: "New", scope: "instance" });
       assert.equal(edit.status, 200, JSON.stringify(edit.value));
       assert.equal(await readFile(file, "utf8"), original);
-      assert.equal((await post("open", { path: root })).status !== 200, true);
+      assert.equal((await post("open", { path: root })).status, 200);
+      const otherProject = await mkdtemp(path.join(os.tmpdir(), "uiux-other-project-"));
+      assert.notEqual((await post("open", { path: otherProject })).status, 200);
+      await rm(otherProject, { recursive: true, force: true });
       assert.equal((await post("draft/undo", { expectedProject })).value.count, 0);
       assert.equal((await post("draft/redo", { expectedProject })).value.count, 1);
       await writeFile(file, original + "// external");
@@ -414,6 +417,31 @@ test("approved preview safely resolves tsconfig and static Vite aliases inside p
         "controlled preview cache stays outside project",
       );
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("runProjectBuild runs the declared build script and reports failure", async () => {
+  const { runProjectBuild } = await import("../src/server/build.js");
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-build-"));
+  try {
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "build-fixture", scripts: { build: "node -e \"require('fs').writeFileSync('built.txt','ok')\"" } }),
+    );
+    const ok = await runProjectBuild(root);
+    assert.equal(ok.ok, true);
+    assert.equal(await readFile(path.join(root, "built.txt"), "utf8"), "ok");
+
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "build-fixture", scripts: { build: "node -e \"process.exit(3)\"" } }));
+    const failed = await runProjectBuild(root);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.code, 3);
+
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "build-fixture", scripts: {} }));
+    await assert.rejects(() => runProjectBuild(root), /no npm build script/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

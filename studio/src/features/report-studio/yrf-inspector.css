@@ -75,7 +75,7 @@
 .yrf-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr) 280px;
+  grid-template-columns: var(--yrf-left-width, 290px) 6px minmax(0, 1fr) 6px var(--yrf-right-width, 280px);
   min-height: 0;
 }
 .yrf-left,
@@ -557,3 +557,122 @@
 .yrf-object.kind-image img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .yrf-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; align-self: flex-start; }
 .yrf-object.on { outline: 2px solid #635bff; outline-offset: 1px; box-shadow: none; }
+
+.yrf-danger {
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  background: var(--error);
+  color: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.yrf-danger:hover {
+  filter: brightness(1.05);
+}
+
+.yrf-resizer {
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+.yrf-resizer:hover,
+.yrf-resizer:focus-visible {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  outline: none;
+}
+@media (max-width: 1100px) {
+  .yrf-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .yrf-resizer,
+  .yrf-left,
+  .yrf-right {
+    display: none;
+  }
+}
+
+.yrf-layer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 4px;
+}
+.yrf-layer-actions button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 10.5px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.yrf-layer-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.yrf-color-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.yrf-color-field input[type="color"] {
+  width: 34px;
+  height: 26px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+}
+
+.yrf-layer-list {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 8px;
+}
+.yrf-layer-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface2);
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.yrf-layer-list button.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.yrf-layer-list button > span {
+  width: 16px;
+  text-align: center;
+  color: var(--accent);
+}
+
+.yrf-layer-group {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 8px;
+}
+.yrf-layer-group > strong {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.yrf-layer-group + .yrf-layer-group {
+  margin-top: 10px;
+}
+.yrf-right h3 {
+  margin-top: 18px;
+}
+.yrf-right h3:first-child {
+  margin-top: 0;
+}

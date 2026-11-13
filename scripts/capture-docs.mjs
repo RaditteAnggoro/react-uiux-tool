@@ -112,10 +112,6 @@ try {
   });
   console.log("Captured docs/screenshots/analysis.png");
   await page.getByRole("button", { name: "Start local preview" }).click();
-  await page
-    .getByRole("dialog", { name: "Approve local preview" })
-    .getByRole("button", { name: "Approve & start" })
-    .click();
 
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).waitFor();
@@ -188,15 +184,20 @@ try {
   console.log("Captured docs/screenshots/dark.png");
   await page.getByLabel("Theme").selectOption("light");
 
-  await page
-    .locator(".icon-rail")
-    .getByRole("button", { name: "Boards" })
-    .click();
-  await page.screenshot({
-    path: path.join(outputDir, "boards.png"),
-    fullPage: true,
-  });
-  console.log("Captured docs/screenshots/boards.png");
+  await page.goto(baseUrl);
+  await page.getByRole("button", { name: /Report Studio/ }).click();
+  await page.getByRole("dialog").waitFor();
+  await page.screenshot({ path: path.join(outputDir, "report-start.png"), fullPage: true });
+  console.log("Captured docs/screenshots/report-start.png");
+  await page.getByRole("dialog").getByRole("button", { name: "Open existing report" }).click();
+  await page.getByPlaceholder("/path/to/reports").fill(path.join(projectRoot, "fixtures", "reports", "synthetic"));
+  await page.getByRole("button", { name: "Use folder" }).click();
+  const reportEntry = page.locator(".rs-files button").filter({ hasText: "invoice.report.json" }).first();
+  await reportEntry.waitFor();
+  await reportEntry.click();
+  await page.locator(".rs-page").waitFor();
+  await page.screenshot({ path: path.join(outputDir, "report-studio.png"), fullPage: true });
+  console.log("Captured docs/screenshots/report-studio.png");
 } finally {
   await browser?.close();
   if (server.exitCode === null) {

@@ -16,7 +16,7 @@ existing codebase with a proprietary page format.
 [Panduan Bahasa Indonesia](docs/USER_GUIDE_ID.md) · [Compatibility](COMPATIBILITY_MATRIX.md) ·
 [Known limitations](KNOWN_LIMITATIONS.md) · [Benchmarks](BENCHMARKS.md) ·
 [License](LICENSE) · [Third-party licenses](THIRD_PARTY_NOTICES.md) ·
-[Inspiration & credits](INSPIRATION.md) ·
+[Changelog](CHANGELOG.md) · [Inspiration & credits](INSPIRATION.md) ·
 [GitHub](https://github.com/RaditteAnggoro/react-uiux-tool)
 
 Version **0.1.0**, prepared for local testing. The package has not been published to
@@ -31,17 +31,20 @@ there is no hidden page schema replacing an existing application.
 existing report folder. You can also enter it from **Reports** in an open React project.
 It works locally with the report files you choose.
 
-![Report Studio workflow: choose a folder, edit a report, then check the result](docs/screenshots/report-workflow-en.svg)
+![Report Studio launcher with Open existing and Create new](docs/screenshots/report-start.png)
+
+![Report Studio design canvas and properties](docs/screenshots/report-studio.png)
 
 ```mermaid
 flowchart LR
-  Home[Home: Report Studio] --> Folder[Choose report folder]
-  Folder --> Open[Open existing report]
-  Folder --> New[Create from a template]
+  Home[Home: Report Studio] --> Start[Open existing or Create new]
+  Start --> Folder[Choose report folder]
+  Folder --> Open[Pick a report from one list]
+  Folder --> New[Pick a template]
   Open --> Design[Design: select, drag and resize]
   New --> Design
-  Design --> Palette[Palette + properties]
-  Palette --> Save[Save report or save copy]
+  Design --> Palette[Palette + alignment/layers/properties]
+  Palette --> Save[Single Save in place]
   Save --> Check[Preview and check output]
 ```
 
@@ -65,12 +68,16 @@ flowchart LR
 4. Use **Code** to inspect or edit supported source, and **Preview** to check native
    output with sample data. Save your changes before leaving.
 5. For native reports, choose **Save** and optionally export PDF, HTML, CSV, XLSX,
-   or DOCX. For `.yrf`, **Save** replaces the opened file for supported caption, data-field and geometry edits; **Save copy** creates a separate file. Check the result in WaiReport.
+   or DOCX. For `.yrf`, the same **Save** updates the opened original in place for
+   supported caption, data-field, geometry, style, structure and source edits, with a
+   content-hash conflict check and **no backup or `.edited` copy**.
+6. Use **Alignment** and **Layers** in the inspector: layers are grouped by band,
+   topmost first, and selecting a row edits that object even when it is covered on canvas.
 
 | Format | What you can do | What to check |
 | --- | --- | --- |
 | Native `.report.json` | Create and open designs; edit text, fields, tables and other supported objects; preview and export. | Export formats have different limitations; review warnings, rows and totals. |
-| WaiReport `.yrf` | Open existing files; edit supported values and geometry, or save structural and source edits to a copy. | Save replaces the original without a backup for supported changes. Design is approximate and vendor rendering is unverified. Validate in WaiReport before business use. |
+| WaiReport `.yrf` | Open existing files; edit supported values, style, structure and source drafts; one Save writes the same opened file. | Save is in-place with a hash conflict check and no backup; unsupported/scripted objects are refused. Design is approximate and vendor rendering is unverified. Validate in WaiReport before business use. |
 | PDF, HTML, CSV, XLSX, DOCX | Export native reports to these formats. | They are output files, not interchangeable editable report designs; fidelity varies. |
 
 See the [step-by-step Report Studio guide](docs/USER_GUIDE_EN.md#14-report-studio-create-and-edit-reports),
@@ -86,7 +93,10 @@ limited subsets. The experimental `.yrf` inspector can save edited copies or cre
 new files; these have not been validated with the vendor renderer.
 
 - Opens a React project without running it, then explains what was found.
-- Shows real screens and reusable components in a local preview after approval.
+- Opens up to three page/component tabs; tab switches preserve selection, inspector and zoom.
+- Selects logical compound controls (`Form.Field`, date/range) and supports
+  Cmd/Ctrl+click multi-selection with one-step group movement.
+- Shows real screens and reusable components after one explicit Start local preview click.
 - Adds, copies, moves, aligns, edits, and deletes supported visual objects.
 - Saves supported changes directly to normal JSX/TSX and keeps one safe Undo step.
 - Keeps business screens in Pages and shows only reusable visual items in Components.
@@ -95,7 +105,7 @@ new files; these have not been validated with the vendor renderer.
 ```mermaid
 flowchart LR
   A[Open project] --> B[Read the report]
-  B --> C[Approve preview]
+  B --> C[Start local preview]
   C --> D[Select or add an object]
   D --> E[Edit, move, align, or delete]
   E --> F[Source is checked and saved]
@@ -152,9 +162,10 @@ Do not select Next.js for creation in this release.
 **Open Existing Project** accepts a native directory picker where available, or an
 absolute path. The first analysis is read-only: framework/routes, source elements,
 component and import evidence, literal props, behavior, styling, editability, Git
-state, scan coverage, and limitations. **Inspect Only** executes no application code.
+state, scan coverage, and limitations. Analysis never executes application code.
 
-The approved preview supports conventional Vite/React applications with
+Clicking **Start local preview** is the single approval action; there is no second modal.
+The preview supports conventional Vite/React applications with
 an `index.html` entry. It adds source metadata in memory, without editing the project.
 It deliberately bypasses target scripts and dynamic Vite/PostCSS configuration.
 Common tsconfig/jsconfig and literal Vite/Webpack aliases are read statically;
@@ -182,9 +193,11 @@ runtime source selection is not implemented. See the
   destructuring defaults. It can add literal string/number/boolean props, constrain
   union values, and bind declared callback events to existing in-scope functions.
   React methods and new handler logic remain source-owned.
-- Supported visual edits write directly to the source directory. Every write still
-  checks the analyzed hash/path and keeps one conflict-checked Undo checkpoint.
-  Review the resulting files with Git before pushing; no commit or push is automatic.
+- Supported visual edits stage in a non-blocking draft; **Changes** lists the affected
+  objects and follows Undo/Redo. **Save** commits the draft with
+  analyzed hash/path checks and conflict-aware history; **Save & Build** additionally runs
+  the project build. Review the resulting files with Git before pushing; no commit or
+  push is automatic.
 
 ![Reusable project components and friendly visual elements](docs/screenshots/component-palette.png)
 
@@ -196,6 +209,10 @@ runtime source selection is not implemented. See the
 | **Interactive guide** | **Visual editing** |
 | ![Interactive guide](docs/screenshots/user-guide.png) | ![Canvas and Inspector](docs/screenshots/canvas-inspector.png) |
 
+| Report launcher | Report editing |
+| --- | --- |
+| ![Report Studio launcher](docs/screenshots/report-start.png) | ![Report Studio canvas](docs/screenshots/report-studio.png) |
+
 English/Indonesian and light/dark/system settings are available in the header. Studio
 theme changes do not rewrite application CSS. All help links open bundled local docs.
 
@@ -204,8 +221,8 @@ theme changes do not rewrite application CSS. All help links open bundled local 
 The controller binds only to `127.0.0.1` and checks session authorization, Host, and
 Origin. Analysis does not run project code or inspect excluded secret files. Preview
 executes app source after approval. Isolated component Design redirects fetch/XHR
-service requests to an empty local mock; App preview and Interact can call real
-backends. Other mount effects are not sandboxed.
+service requests to an empty local mock; other mount effects and application network
+calls are not sandboxed. Preview runs only after an explicit Start local preview click.
 Use trusted test projects. There is no telemetry, auto-commit, push, or deployment.
 Read [SECURITY.md](SECURITY.md) before changing the local trust model.
 
@@ -228,8 +245,8 @@ Review [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for recorded verific
 
 ## Roadmap
 
-Next runtime adapter, broader component-library schemas, provider-aware user Boards,
-Storybook argument import, global-token edits, richer history, visual regression,
+Next runtime adapter, broader component-library schemas, route discovery for page tabs,
+zero-reload draft sync, Storybook argument import, global-token edits, visual regression,
 and a thin VS Code extension remain follow-up work. They are not shipped claims.
 
 ## Inspiration & Credits

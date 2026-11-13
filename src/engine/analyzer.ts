@@ -996,6 +996,60 @@ export async function analyzeProject(
       ts.forEachChild(n, findComponents);
     }
     findComponents(sf);
+    function compoundProps(node: ts.Node): ComponentInfo["props"] {
+      const findFunction = (value: ts.Node): ts.FunctionLikeDeclaration | undefined => {
+        if (ts.isArrowFunction(value) || ts.isFunctionExpression(value) || ts.isFunctionDeclaration(value)) return value;
+        if (ts.isParenthesizedExpression(value)) return findFunction(value.expression);
+        if (ts.isCallExpression(value) && value.arguments[0]) {
+          const callee = value.expression;
+          const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : "";
+          if (["memo", "forwardRef"].includes(name)) return findFunction(value.arguments[0]);
+        }
+        return undefined;
+      };
+      const fn = findFunction(node);
+      const parameter = fn?.parameters[0];
+      if (!parameter || !ts.isObjectBindingPattern(parameter.name)) return [];
+      return parameter.name.elements.flatMap((element) => {
+        if (!ts.isBindingElement(element)) return [];
+        const name = element.propertyName && ts.isIdentifier(element.propertyName)
+          ? element.propertyName.text
+          : ts.isIdentifier(element.name) ? element.name.text : "";
+        return name ? [{ name, type: "string", optional: true }] : [];
+      });
+    }
+
+    function findCompoundComponents(n: ts.Node) {
+      if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) &&
+        ts.isIdentifier(n.left.expression) &&
+        hasJsx(n.right)
+      ) {
+        const base = n.left.expression.text;
+        const name = `${base}.${n.left.name.text}`;
+        const props = compoundProps(n.right);
+        if (!report.components.some((candidate) => candidate.id === `${file}#${name}`)) {
+          report.components.push({
+            id: `${file}#${name}`,
+            name,
+            source: location(sf, n, file),
+            exported: true,
+            defaultExported: false,
+            props,
+            events: [],
+            callables: [],
+            behavior: [],
+            references: [],
+            confidence: "medium",
+            editability: "LIMITED",
+          });
+        }
+      }
+      ts.forEachChild(n, findCompoundComponents);
+    }
+    findCompoundComponents(sf);
     function findElements(n: ts.Node, parentId: string | null) {
       const open = jsxOpen(n);
       let nextParent = parentId;

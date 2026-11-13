@@ -243,3 +243,53 @@ test("report ancestor paths preserve Windows drive and UNC roots", async () => {
     "/reports", "/reports/alias",
   ]);
 });
+
+
+test("yrf save-source overwrites the original in place and rejects stale hashes", async () => {
+  await withYrf(async (call, file) => {
+    const opened = await call("yrf/open", { path: file });
+    assert.equal(opened.status, 200, JSON.stringify(opened.data));
+    const source = String(opened.data.source).replace("Kop Halaman", "Kop Halaman Asli");
+    const saved = await call("yrf/save-source", {
+      path: file,
+      expectedHash: opened.data.hash,
+      source,
+      approved: true,
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.data));
+    assert.match(await readFile(file, "utf8"), /Kop Halaman Asli/);
+    const backups = (await readdir(path.dirname(file))).filter((name) => name.includes(".yrf.bak-"));
+    assert.equal(backups.length, 0);
+
+    const stale = await call("yrf/save-source", {
+      path: file,
+      expectedHash: opened.data.hash,
+      source,
+      approved: true,
+    });
+    assert.equal(stale.status, 409, JSON.stringify(stale.data));
+
+    const withoutApproval = await call("yrf/save-source", {
+      path: file,
+      expectedHash: saved.data.hash,
+      source,
+      approved: false,
+    });
+    assert.equal(withoutApproval.status, 403);
+  });
+});
+
+
+test("moveYrfObject changes paint order without reformatting object bodies", async () => {
+  const { moveYrfObject } = await import("../../src/reports/formats/yrf/patch.js");
+  const source = await readFile(path.resolve("fixtures/reports/synthetic/yrf/minimal.yrf"), "utf8");
+  const moved = moveYrfObject(source, "layout.pages[0].bands[1].objects[0]", "front");
+  const before = JSON.parse(source).layout.pages[0].bands[1].objects;
+  const after = JSON.parse(moved.text).layout.pages[0].bands[1].objects;
+  assert.equal(after[after.length - 1].name, before[0].name);
+  assert.equal(after.length, before.length);
+  assert.match(moved.text, /"Kop Halaman"/);
+  assert.equal(moved.objectPath, "layout.pages[0].bands[1].objects[1]");
+  const unchanged = moveYrfObject(source, "layout.pages[0].bands[1].objects[0]", "back");
+  assert.equal(unchanged.text, source);
+});

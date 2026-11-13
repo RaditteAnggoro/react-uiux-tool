@@ -66,11 +66,11 @@ dark, or system theme; this affects only Studio.
 | --- | --- |
 | Home | Front User Guide, New Project, Open Existing Project, recent projects |
 | Project Check | What was found, scan coverage, readiness, editing status, warnings |
-| Left rail/panel | Pages, Components, Tree, Files, Boards |
-| Canvas | Approved real preview, Design/Interact, viewport width, zoom |
+| Left rail/panel | Pages, Components, Tree, Files |
+| Canvas | Approved real preview, Design/Code, viewport width, zoom |
 | Inspector | Props, Style, Layout, Events, Data, A11y |
-| Bottom panel | Analysis, Problems, Changes, Console, Scenarios |
-| Source workflow | Direct conflict-checked writes, one-session Undo, Git review before push |
+| Bottom panel | Analysis, Problems, Changes, Console |
+| Source workflow | Draft-first: edits stay in memory; **Save** writes conflict-checked source; **Save & Build** runs the project build; **Changes** lists changed objects; Git review before push |
 
 Panel separators support dragging and keyboard arrows. Inspection remains useful
 at smaller widths, but this is a desktop editor, not a full mobile design app.
@@ -92,12 +92,12 @@ so use a disposable branch or fixture when learning and review with Git before p
 flowchart LR
   A[Open trusted project] --> B[Read-only analysis]
   B --> C{Start preview?}
-  C -- Inspect only --> D[Browse Pages and Source]
-  C -- Approve --> E[Design preview]
-  E --> F[Select exact object]
-  F --> G[Edit props, events, layout, or structure]
-  G --> H[Validate and save source]
-  H --> I[Undo if needed]
+  C -- Start local preview (one click) --> E[Design preview]
+  E --> D[Open up to three page tabs]
+  D --> F[Select a logical object or group]
+  F --> G[Edit props, events, layout, or structure in the draft]
+  G --> H[Save or Save & Build]
+  H --> I[Undo/Redo if needed]
   H --> J[Review and test with Git]
 ```
 
@@ -183,11 +183,11 @@ to that component's isolated design, which lets menu-driven screens be inspected
 without logging in. Use **App preview** to return to the normal entry. Elements with
 unavailable mapping remain uneditable.
 
-**Interact** enables normal application events and may perform real network requests.
-A separate component Design redirects fetch/XMLHttpRequest service calls to an empty
-local response so a menu screen can open without its backend. App preview, Interact,
-WebSocket/EventSource, and other actions that run when a page opens can still affect
-real systems. Use a trusted development environment for your own applications.
+Design intercepts application events; runtime interaction is limited to the controlled
+preview. Isolated component Design redirects fetch/XMLHttpRequest service calls to an
+empty local response so a menu screen can open without its backend. WebSocket/EventSource
+and other actions that run when a page opens can still affect real systems. Use a trusted
+development environment for your own applications.
 
 **Code** displays source without editing it. In Props, click the source location
 to open that file in Code; ordinary manual editing in VS Code is
@@ -199,15 +199,29 @@ always possible. After an external edit, re-analyze. A stale patch cannot be app
 
 ![Read-only source explanation](screenshots/unsupported.png)
 
-## 7. Component Boards and scenarios
+## 7. Pages, tabs and multi-selection
 
-Boards is currently an experimental session-only area, not the primary editing flow.
-It does not yet import any project scenario or keep Board configuration after restart.
-For existing projects, use Pages → Components → Inspector. Provider-aware arbitrary
-Boards, configurable response fixtures, and Storybook scenario import remain future
-work.
+- **Start local preview** is the single approval click. There is no second approval
+  dialog; switching tabs or editing the draft does not re-ask.
+- Routes open as page tabs, at most **three**. Opening an existing route activates its
+  tab; a fourth route evicts a clean tab or asks you to close a dirty one. A dot marks
+  unsaved draft changes. Closing a dirty tab offers **Save & close / Discard & close / Stay**.
+- Clicking a label, input or icon inside a compound control such as `Form.Field` selects
+  the logical owner, not just the inner input. The inspector shows its source path.
+- **⌘+click** on macOS or **Ctrl+click** on Windows/Linux adds or removes a logical object
+  from the selection. One drag or keyboard nudge of a multi-selection is recorded as a
+  single draft step. Align is disabled when the selected geometry cannot be measured.
+- A date/range component is one logical unit: clicking its input, text or calendar trigger
+  selects the owner rather than a detached inner control.
+- Dragging a selection updates the canvas immediately and does **not** reload the preview;
+  the Change list records the moved objects. Structural edits (insert/remove/text) still
+  sync the preview.
+- Switching to **Code** with an object selected opens that object's file and scrolls to its
+  line. The **Console** keeps warnings/errors, including errors shown as popups.
 
-![Button Board with deterministic local scenarios](screenshots/boards.png)
+![Canvas selection and source-aware inspector](screenshots/canvas-inspector.png)
+
+![Reusable component palette and visual primitives](screenshots/component-palette.png)
 
 ## 8. Props, styles, events, data, and change range
 
@@ -416,7 +430,7 @@ To add a native object, click its palette button or drag it onto an eligible ban
 
 1. Choose **YRF (.yrf)** and select a folder, then choose a file from the list; manual path entry is a fallback.
 2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** initially displays source read-only. Choose **Edit source** to edit a draft, then **Apply & save copy** to write a copy. Inspection does not execute vendor scripts.
-3. Edit available caption/geometry values and choose **Preview change**. **Save** updates the original without a backup; **Save copy** creates a separate file. Structural and source changes currently require Save copy. Creating a new `.yrf` requires acknowledging that output is experimental.
+3. Edit supported values and choose **Save**. It updates the opened original in place with a hash conflict check and no backup; structural and source changes use the same path. Creating a new `.yrf` requires acknowledging that output is experimental.
 
 When objects are added or removed, **Preview change** compares the affected bands'
 object lists before and after the draft. Vendor rendering remains unverified.
@@ -566,7 +580,7 @@ or query builder in this screen. Page size, orientation, and margins are in Page
 ### Practice opening and changing a `.yrf`
 
 The first editable text object is selected when a file opens. Click another object on
-the page or in Structure, change **Caption** on the right, then choose **Save copy**.
+the page or in Structure, change **Caption** on the right, then choose **Save**.
 Double-clicking an editable text object focuses that field. For a textbox with an
 existing `dataField` property, **Data field** changes that existing binding name.
 Lines stored as endpoints can be selected and moved. Textbox and binding edits are
@@ -575,7 +589,7 @@ experimental and must be checked in the vendor runtime.
 In the left **Palette**, click **Text**, **Field**, **Box**, or **Line** to add to
 the selected object's band, or drag a button onto a band on the page. Select an
 object to edit its text, position, size, binding, and existing string/number/boolean properties
-on the right. Use **Code** for structured values. Select **Save copy** when finished;
+on the right. Use **Code** for structured values. Select **Save** when finished;
 new objects and their appearance still need verification in WaiReport.
 To delete an object, select it and click **Remove object**; the change is written
 when you save the report to a copy.
@@ -587,7 +601,7 @@ when you save the report to a copy.
    and resized with eight handles; **Caption** and `left`, `top`, `width`, `height`
    remain available for exact values. Geometry uses unverified raw vendor units, not
    mm. Unsupported objects stay read-only.
-3. Click **Preview change**, check before/after, then **Save copy**. The original
+3. Click **Save**. The original
    is not overwritten and later edits continue from the saved copy. **Code** shows the
    source inertly; **Edit source** enables a validated draft and **Apply & save copy**
    writes a new sibling copy. Unapplied drafts trigger Save / Discard / Cancel when
@@ -636,14 +650,19 @@ Open **Report Studio** from Home. Use **Report guide** in either the native or Y
    same Styles row, and applying one writes the matching style patch to source. Existing
    `.yrf` files also expose a Styles palette and style controls (bold/italic/underline,
    size, colour, alignment) that edit the vendor `style` string and update the approximate
-   canvas; select several objects with Shift/Cmd-click to align them, then **Save copy**.
-   New templates **Credit pre-analysis** and **Approval memo** add summary pages,
+   canvas; select several objects with Shift/Cmd-click to align them, then **Save**.
+   Edits no longer ask for confirmation one by one: change anything, then **Save** to
+   finalize (or **Save & Build** to also run the project's `npm run build`). Undo/Redo are
+   icon buttons (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z); Preview draft and Discard live under **⋯**.
+   Leaving the workspace with a draft opens Save & leave / Discard & leave / Stay.
+   Report panels can be resized and toggled; `.yrf` objects expose Layers (Front/Back/Up/
+   Down) and labelled Text/Fill/Border colours. New templates **Credit pre-analysis** and **Approval memo** add summary pages,
    two-level table headers, highlighted rows, narrative and signature areas. In Structure
    use ↑/↓ to reorder sections and **Page break before** to start a new page. The report
    header has an explicit **Exit** button. Remove/Delete actions are filled red.
 6. `.yrf` opens in the same studio. Design is explicitly approximate, Code is editable and
    validated. **Save** replaces the opened file for supported caption, data-field and
-   geometry edits without a backup; structural and Code changes use **Save copy**.
+   geometry, structural and Code changes with no backup; unsupported vendor edits are refused.
    Creation stays experimental and labelled.
 7. **Formats** lists which actions each format supports; unsupported formats such as
    JRXML, RDL and `.rpt` are never converted silently.
@@ -672,7 +691,7 @@ flowchart LR
   L --> D[Design: select, drag, resize]
   D --> A[Palette: add objects]
   A --> O[Properties: change values]
-  O --> W[Save or Save copy]
+  O --> W[Save in place]
   W --> T[Check output and data]
 ```
 

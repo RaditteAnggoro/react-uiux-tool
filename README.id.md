@@ -7,7 +7,7 @@ didukung, dan edit visual tervalidasi langsung ke source untuk direview melalui 
 [English user guide](docs/USER_GUIDE_EN.md) · [Compatibility](COMPATIBILITY_MATRIX.md) ·
 [Batasan](KNOWN_LIMITATIONS.md) · [Benchmark](BENCHMARKS.md) ·
 [Lisensi](LICENSE) · [Lisensi pihak ketiga](THIRD_PARTY_NOTICES.md) ·
-[Inspirasi & kredit](INSPIRATION.md) ·
+[Changelog](CHANGELOG.md) · [Inspirasi & kredit](INSPIRATION.md) ·
 [GitHub](https://github.com/RaditteAnggoro/react-uiux-tool)
 
 Versi **0.1.0**, disiapkan untuk pengujian lokal. Paket belum dipublikasikan ke npm.
@@ -22,17 +22,20 @@ biasa dan dapat diedit lewat VS Code.
 membuka folder laporan yang sudah ada. Kamu juga bisa membukanya melalui **Reports**
 dari project React. Semua pekerjaan berlangsung lokal pada file yang kamu pilih.
 
-![Alur Report Studio: pilih folder, edit laporan, lalu periksa hasil](docs/screenshots/report-workflow-id.svg)
+![Launcher Report Studio: Open existing atau Create new](docs/screenshots/report-start.png)
+
+![Kanvas desain dan properti Report Studio](docs/screenshots/report-studio.png)
 
 ```mermaid
 flowchart LR
-  Home[Home: Report Studio] --> Folder[Pilih folder laporan]
+  Home[Home: Report Studio] --> Start[Open existing atau Create new]
+  Start --> Folder[Pilih folder laporan]
   Folder --> Open[Buka laporan existing]
   Folder --> New[Buat dari template]
   Open --> Design[Design: pilih, drag dan resize]
   New --> Design
   Design --> Palette[Palette dan properties]
-  Palette --> Save[Simpan laporan atau salinan]
+  Palette --> Save[Simpan in-place]
   Save --> Check[Preview dan periksa hasil]
 ```
 
@@ -56,12 +59,14 @@ flowchart LR
 4. Gunakan **Code** untuk melihat atau mengedit source yang didukung, dan **Preview**
    untuk memeriksa hasil native dengan data contoh. Simpan sebelum keluar.
 5. Untuk laporan native, pilih **Save** dan bila perlu ekspor PDF, HTML, CSV, XLSX,
-   atau DOCX. Untuk `.yrf`, pilih **Save copy** lalu periksa salinannya di WaiReport.
+   atau DOCX. Untuk `.yrf`, **Simpan** memperbarui file asli yang dibuka untuk caption,
+   data field, geometri, style, struktur dan source yang didukung, dengan cek konflik hash
+   dan **tanpa backup atau salinan `.edited`**.
 
 | Format | Yang bisa dilakukan | Yang perlu diperiksa |
 | --- | --- | --- |
 | Native `.report.json` | Buat dan buka desain; edit teks, field, tabel, dan objek lain yang didukung; preview dan ekspor. | Setiap format ekspor memiliki batas berbeda; periksa warning, baris, dan total. |
-| WaiReport `.yrf` | Buka file existing; edit nilai objek yang tersedia, pindahkan/resize objek yang didukung, gunakan palette eksperimental, dan simpan salinan. | Design bersifat perkiraan; file hasil belum diverifikasi dengan renderer vendor. Periksa di WaiReport sebelum digunakan untuk bisnis. |
+| WaiReport `.yrf` | Buka file existing; edit nilai, gaya, struktur dan source draft yang didukung; satu Simpan menulis file asli. | Simpan in-place dengan cek konflik dan tanpa backup; objek scripted/unsupported ditolak. Desain perkiraan; render vendor belum terverifikasi. |
 | PDF, HTML, CSV, XLSX, DOCX | Ekspor laporan native ke format ini. | Ini file output, bukan format desain yang otomatis dapat diedit kembali; hasil tiap format berbeda. |
 
 Baca [panduan Report Studio langkah demi langkah](docs/USER_GUIDE_ID.md#14-report-studio-membuat-dan-mengubah-laporan),
@@ -135,7 +140,9 @@ dan `npm run dev` sendiri ketika siap. Starter Next.js belum tersedia.
 **Buka Project yang Sudah Ada**: gunakan folder picker jika tersedia atau masukkan
 absolute path. Analisis awal bersifat read-only dan menunjukkan framework/route,
 component, source element, props, behavior, styling, editability, Git state, cakupan
-scan, dan warning. **Inspect Only** tidak mengeksekusi kode aplikasi.
+scan, dan warning. Analisis tidak mengeksekusi kode aplikasi.
+
+Klik **Start local preview** adalah satu-satunya persetujuan; tidak ada modal kedua.
 
 Preview yang disetujui memakai mesin Vite internal untuk project React dengan
 `index.html`. Penanda source hanya di memori, tidak mengubah file project. Script dan
@@ -180,9 +187,9 @@ Baca [matrix](COMPATIBILITY_MATRIX.md).
 | ![Panduan interaktif](docs/screenshots/user-guide.png) | ![Canvas dan Inspector](docs/screenshots/canvas-inspector.png) |
 - Controller hanya di `127.0.0.1`, memakai session authorization serta pemeriksaan
   Host/Origin. Tidak ada telemetry, auto-commit, push GitHub, atau deploy.
-- Preview menjalankan kode aplikasi setelah persetujuan. Isolated Design mengarahkan
-  request service fetch/XHR ke mock lokal kosong; App preview dan Interact tetap bisa
-  memanggil backend. Efek mount lain tidak di-sandbox.
+- Preview menjalankan kode aplikasi setelah satu klik Start local preview. Isolated
+  Design mengarahkan request service fetch/XHR ke mock lokal kosong; efek mount dan
+  panggilan jaringan lain tidak di-sandbox.
 
 Bahasa EN/ID dan theme light/dark/system ada di header. Theme Studio tidak menulis
 ulang CSS target. Bantuan membuka panduan lokal. Baca [SECURITY.md](SECURITY.md).
@@ -202,8 +209,8 @@ Engine ada di `src/engine`, controller dan preview di `src/server`, generator di
 `src/templates`, UI di `studio/src`, dan contoh lokal di `fixtures/demo`. Hasil
 verifikasi dicatat di [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
-Adapter runtime Next, user Board dengan provider, adapter component library,
-Storybook import, global token editing, history lebih panjang, visual regression,
+Adapter runtime Next, adapter component library, route discovery untuk tab halaman,
+zero-reload draft sync, Storybook import, global token editing, visual regression,
 dan extension VS Code masih rencana lanjutan.
 
 ## Inspirasi & kredit
@@ -223,4 +230,4 @@ yang dikunci. Implementasi asli berlisensi **MIT © 2026 RA**.
 
 ### Panduan workspace
 
-Baca [panduan Indonesia](docs/USER_GUIDE_ID.md) atau [English guide](docs/USER_GUIDE_EN.md) untuk alur bergambar edit React, desain laporan, palette, data, penyimpanan, dan troubleshooting. Report Studio mendukung laporan native serta edit salinan `.yrf` eksperimental; baca [batasan format](KNOWN_LIMITATIONS.md) sebelum menggunakan hasil vendor.
+Baca [panduan Indonesia](docs/USER_GUIDE_ID.md) atau [English guide](docs/USER_GUIDE_EN.md) untuk alur bergambar edit React, desain laporan, palette, data, penyimpanan, dan troubleshooting. Report Studio mendukung laporan native serta edit `.yrf` eksperimental secara in-place; baca [batasan format](KNOWN_LIMITATIONS.md) sebelum menggunakan hasil vendor.

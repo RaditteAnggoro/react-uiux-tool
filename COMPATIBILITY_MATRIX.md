@@ -62,7 +62,7 @@ Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support clai
 | Report browsing and entry | Tested subset | Home opens Report Studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths are skipped. The project rail does not contain a report shortcut. |
 | Native table editing and PDF cells | Tested subset | Configure columns, static rows or dataset binding, numeric format, header and border; PDF draws individual cells and warns on estimated text clipping. Complex merged cells and vendor parity are not covered. |
 | Native Code tab | Tested subset | JSON draft is validated through `/api/reports/validate`; invalid text is rejected without touching the draft |
-| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry can be edited; the palette adds objects and static table/form layouts. Save replaces the original for supported caption, data-field and geometry changes, with a hash check and no backup; structural and source changes require Save copy. Creation and edits are **not vendor-validated** |
+| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry can be edited; the palette adds objects and static table/form layouts. A single Save replaces the opened original for supported caption, data-field, geometry, style, structure and source changes with a content-hash conflict check and no backup; unsupported/scripted vendor edits are refused with the draft preserved. Creation and edits are **not vendor-validated** |
 
 React Style includes a basic formatting property selector for supported inline JSX
 styles; report presets and automatic list creation are not shared with React or `.yrf`.
@@ -73,6 +73,83 @@ Native A4 canvas has zoom, visual grid and rulers; the YRF canvas uses a separat
 
 Native tested subset: multi-page rows and repeated/optional headings, multi-level headers, body merges in HTML, multiple conditional row rules, dedicated flowing simple narrative, and basic conditional colors for text/fields. Vendor-rendered YRF parity remains unverified.
 
+Seamless UX Phase D slice (13 November 2026): drag gestures are measured—five pointer
+moves produce **zero** `/api/draft/edit*` requests and zero `/api/build` requests; pointer-up
+produces exactly one draft command and the preview refreshes once. The canvas still uses a
+cache-busted iframe reload for draft sync because a synthetic Vite `js-update` was not
+accepted reliably by the React adapter (attempted and reverted). The blocking preview
+"starting" overlay is no longer used for draft refresh; inline draft status remains.
+Not achieved: zero-reload editing, targeted HMR, incremental per-file analysis and
+p50/p95 frame/latency benchmarks. Tab switch still navigates the shared preview route.
+
+Seamless UX Phase C (13 November 2026): route-based page tabs are capped at three,
+activate an existing route instead of duplicating, persist per-tab selection/inspector/zoom,
+show an unsaved dot derived from the shared draft file set, evict the least-recently-used
+clean tab for a fourth route, and guard closing a dirty tab with Save & close /
+Discard & close / Stay. Exit lists all open tabs with dirty/clean state. The draft remains
+a single shared ledger (per the spec's allowed shared-workspace option), so Save commits
+all draft files; there are no three independent drafts. Playwright injects three routes to
+verify the cap, duplicate activation, dirty dot and dirty-close dialog. Boundaries: route
+discovery currently comes from the analyzer (Vite projects expose one route), tabs do not
+suspend/reload-free switch canvases, and crash recovery is not per-tab.
+
+Group movement: a Playwright fixture with two plain `<button>` objects verifies one drag
+applies `marginLeft` to both selected objects in a single draft operation, not only
+compound/date/combo controls.
+
+Seamless UX Phase B (13 November 2026): analyzer discovers compound member
+components assigned as `Form.Field = ...` (props from destructuring) and resolves usages
+to that contract; clicking an inner input/select maps through its component usage to the
+nearest compound ancestor, so the inspector shows the logical owner (e.g. `Form.Field`)
+with the real source location. Root `<App/>` usages are excluded from remapping so normal
+controls still select themselves. The preview selection outline/hover/drag uses the
+nearest wrapper containing a label and control where available. Platform hint shows
+⌘+click on macOS and Ctrl+click elsewhere; multi-select/group move still uses the shared
+draft edit-group path. Playwright covers logical owner selection, outline presence and a
+two-group modifier selection. Boundaries: the outline wrapper is a DOM heuristic, not a
+source-declared group; compound contract resolution covers statically assigned members,
+not arbitrary HOC/dynamic definitions; per-tab drafts and no-reload editing remain open.
+
+Seamless UX Phase A (13 November 2026): React Studio now keeps only Pages/Components
+navigation and Design/Code modes, starts the controlled Vite preview with one explicit
+click (no second approval modal, no Inspect-only destination), and exposes a single
+top-right Help. The footer defaults to the Changes view; Scenarios UI is removed from
+reach. Undo/Redo are icon controls with Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z shortcuts outside
+text fields. Playwright covers the simplified navigation, one-click preview, no-prompt
+edits and exit save/discard; one long fixture journey remains timing-sensitive under full
+suite load. Not implemented in this increment: max-three menu tabs with per-tab drafts,
+logical compound-control grouping (`Form.Field`), and removal of draft-preview reloads.
+
+Editing UX increment (12 November 2026): per-edit browser confirmations for shared
+components, delete and event removal were removed at the user's request, so shared edits
+apply to every usage without a prompt (undo remains available). Exit with a draft now
+offers Save & leave / Discard & leave / Stay; header actions are Save, Save & Build,
+icon Undo/Redo and a More menu. Report panels toggle on desktop and resize with persisted
+widths. `.yrf` exposes object paint-order controls and labelled text/fill/border colours.
+Coverage: Playwright journeys for no-prompt edits, exit choices, panel toggle/resize and
+YRF code overwrite.
+
+Recovery/build/YRF increment (12 November 2026): draft state survives a browser reload
+through `/api/draft/state` and a best-effort 0600 temp snapshot keyed by project root
+(unit-tested round trip; Playwright reload-and-save journey). `Save & Build` commits the
+draft and then runs the project's declared `npm run build` through a fixed, shell-free
+runner; the build result is reported separately from the save (unit-tested success,
+failure and missing-script paths). `.yrf` structural/source edits can overwrite the opened
+original in place after a fresh hash check; no backup or sibling copy is written (API tests plus Playwright code-tab journey). Report and `.yrf` panels
+support pointer and arrow-key resizing with widths persisted in localStorage (Playwright
+resize check). Boundaries: cross-file Save remains best-effort rollback, snapshots are
+local temp data, and full React/YRF Layers parity is still absent.
+
+Draft-first React editor increment (12 November 2026): the browser suite was converted
+from direct-write expectations to draft commits and is green for the exercised fixtures
+(36 studio scenarios plus report scenarios). Draft edits now debounce an explicit preview
+overlay refresh, the preview iframe reload is cache-busted, pending refresh timers are
+cancelled on Save/Discard, and selection maps survive the refresh. Ctrl/Meta/Shift-click
+multi-select and mouse-drag marquee selection (native report canvas and React preview)
+select multiple objects; native report style presets and React style presets apply to the
+whole selection. Coverage: Playwright and unit tests; repeated component instances still
+collapse to one source element, and vendor/OS coverage is unchanged.
+
 Advanced-table and pagination increment: the native inspector supports header matrices, body merges and multiple row rules; `pageBreakBefore` starts a new page, and sections can be renamed and reordered. HTML and PDF use page-relative merge coordinates and keep a merge together when it fits. PDF still simplifies some styling; PDF/XLSX/DOCX warn about advanced-table fidelity. Coverage is limited to synthetic fixtures; no WaiReport comparison exists.
 
 Native images support horizontal and vertical positioning within the frame for contain/cover in Design, HTML and PDF. A freeform crop rectangle is not supported; YRF image rendering remains unverified against WaiReport.
@@ -82,6 +159,29 @@ section as an undoable draft. Synthetic HTML/PDF checks verify drawing in object
 cross-section and vendor YRF stacking are not verified.
 
 YRF in-place Save supports bounded caption/geometry patches with hash-conflict detection
-and no backup. Structural and raw source changes still require explicit Save copy.
+and no backup. Structural and raw source changes use the same in-place Save path.
 
 Native report parameter definitions can be edited, with defaults and sample overrides resolved for field bindings and expressions in HTML/PDF. Missing required values and incorrect types generate warnings, not blocks; parameter support across other formats is not verified.
+
+
+## Release readiness — 13 November 2026
+
+Local/dev scope assessed on commit `a35d997` + uncommitted seamless-UX changes.
+Evidence: 205 unit tests, 112 Playwright tests, 109 docs links, 80 notices. Decision:
+ready for the assessed local/dev scope, **not** for a public release (Windows untested,
+large-project performance unmeasured, route discovery limited, draft preview still
+reloads, shared draft ledger). See `docs/RELEASE_READINESS_2026-11-13.md`.
+
+
+## Seamless UX polish — 13 November 2026
+
+- Header draft/recovered badges removed; draft state is exposed by the fingerprint
+  `data-draft-count` for tests and by the footer **Changes** tab.
+- Changes list shows object type + action + file for draft edits (no heavy diff required).
+- Logical grouping extended to date/range component owners; clicking inner input or
+  calendar trigger selects the owner.
+- Drag moves keep the local transform and skip the preview refresh; structural edits still
+  refresh. Resize/nudge and HMR-based zero-reload remain unverified.
+- Code mode loads the selected object's file and scrolls to its line.
+- Console persists warnings/errors per project in localStorage (bounded) and shows popup
+  errors as `[error]` entries.
