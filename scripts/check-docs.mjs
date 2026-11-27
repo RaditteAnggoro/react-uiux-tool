@@ -14,6 +14,7 @@ const files = [
   "THIRD_PARTY_NOTICES.md",
   "docs/USER_GUIDE_EN.md",
   "docs/USER_GUIDE_ID.md",
+  "docs/FEATURE_AUDIT_AND_CODE_REFERENCES.md",
 ];
 const missing = [];
 let checked = 0;

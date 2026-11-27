@@ -97,10 +97,37 @@ test("static table rows render without a dataset and bound data takes precedence
   table.bindings = { path: "" };
   assert.match(renderReportHtml(document, { data: {} }), /STATIC_ROW/);
   assert.match(Buffer.from(exportReport(document, "pdf", {}).bytes).toString("latin1"), /STATIC_ROW/);
+  assert.match(exportCsv(document), /STATIC_ROW/);
+  assert.match(readZipEntry(Buffer.from(exportReport(document, "xlsx").bytes), "xl/worksheets/sheet1.xml"), /STATIC_ROW/);
+  assert.match(readZipEntry(Buffer.from(exportReport(document, "docx").bytes), "word/document.xml"), /STATIC_ROW/);
   table.bindings = { path: "lines" };
   const output = renderReportHtml(document, { data: { lines: [{ description: "BOUND_ROW" }] } });
   assert.match(output, /BOUND_ROW/);
   assert.doesNotMatch(output, /STATIC_ROW/);
+});
+
+test("objects hidden from output stay in the document and are omitted by every export", () => {
+  const document = buildTemplate("invoice");
+  const band = document.bands.find(candidate => candidate.elements.some(element => element.type === "table"))!;
+  const table = band.elements.find(element => element.type === "table")!;
+  table.props.staticRows = [{ description: "HIDDEN_OUTPUT_SENTINEL" }];
+  table.bindings = { path: "" };
+  const bytes = (format: Parameters<typeof exportReport>[1]) => Buffer.from(exportReport(document, format).bytes);
+  assert.match(bytes("csv").toString(), /HIDDEN_OUTPUT_SENTINEL/);
+  assert.match(readZipEntry(bytes("docx"), "word/document.xml"), /HIDDEN_OUTPUT_SENTINEL/);
+  table.props.outputHidden = true;
+  const visibleTable = { ...structuredClone(table), id: "visible-table" };
+  visibleTable.props.outputHidden = false;
+  visibleTable.props.staticRows = [{ description: "VISIBLE_OUTPUT_SENTINEL" }];
+  band.elements.push(visibleTable);
+  for (const result of [renderReportHtml(document), bytes("html").toString(), bytes("pdf").toString("latin1"),
+    bytes("csv").toString(), readZipEntry(bytes("xlsx"), "xl/worksheets/sheet1.xml"),
+    readZipEntry(bytes("docx"), "word/document.xml")]) {
+    assert.match(result, /VISIBLE_OUTPUT_SENTINEL/);
+    assert.doesNotMatch(result, /HIDDEN_OUTPUT_SENTINEL/);
+  }
+  assert.equal(table.props.outputHidden, true);
+  assert.equal(table.props.staticRows?.[0]?.description, "HIDDEN_OUTPUT_SENTINEL");
 });
 
 test("PDF warns when rich formatting cannot be rendered", () => {
@@ -110,7 +137,31 @@ test("PDF warns when rich formatting cannot be rendered", () => {
   title.props.rotation = 5;
   title.props.list = "number";
   const result = exportReport(document, "pdf");
-  assert.ok(result.warnings.some((warning) => /underline.*rotation/.test(warning)));
+  assert.ok(result.warnings.some(warning => /underline.*lists/.test(warning)));
+  assert.ok(result.warnings.every(warning => !/rotation/.test(warning)));
+});
+
+test("PDF rotates around the box center and restores drawing state for the next object", () => {
+  const document = buildTemplate("blank");
+  const elements = document.bands[0]!.elements;
+  elements.push(
+    { id: "turned-empty", type: "barcode", box: { x: 5, y: 5, width: 20, height: 12 },
+      props: { barcodeKind: "code128", rotation: 30 }, bindings: { path: "items.code" } },
+    { id: "turned", type: "text", box: { x: 50, y: 20, width: 20, height: 8 },
+      props: { text: "ROTATED-TEXT", rotation: 90 } },
+    { id: "ordinary", type: "text", box: { x: 5, y: 40, width: 25, height: 8 },
+      props: { text: "ORDINARY-TEXT" } },
+  );
+  const pdf = Buffer.from(exportReport(document, "pdf").bytes).toString("latin1");
+  assert.match(pdf, /cm\nQ\nq 0\.0000000 -1\.0000000 1\.0000000 0\.0000000 [-\d. ]+ cm/);
+  const match = /q (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) cm\nq [\d. ]+ rg\nBT .*?\(ROTATED-TEXT\) Tj ET\nQ\nQ\nq [\d. ]+ rg\nBT .*?\(ORDINARY-TEXT\) Tj ET/.exec(pdf);
+  assert.ok(match);
+  const [a, b, c, d, dx, dy] = match.slice(1).map(Number) as [number, number, number, number, number, number];
+  const mm = 72 / 25.4;
+  const cx = (document.page.margins.left + 60) * mm;
+  const cy = (document.page.height - document.page.margins.top - 24) * mm;
+  assert.ok(Math.abs(a * cx + c * cy + dx - cx) < 0.01);
+  assert.ok(Math.abs(b * cx + d * cy + dy - cy) < 0.01);
 });
 
 test("box fill and border colors render in both PDF and HTML", () => {
@@ -269,11 +320,27 @@ test("PDF places each band at its paginated vertical position", () => {
   assert.ok(sorted[0]! - sorted[sorted.length - 1]! > 5, "bands span multiple baselines");
 });
 
-test("exports report dropped fidelity explicitly", () => {
+test("PDF renders bar, line and pie charts and reports oversized graphics", () => {
   const document = buildTemplate("dashboard");
-  const pdf = exportReport(document, "pdf", {});
-  assert.ok(pdf.warnings.some((warning) => /chart elements are not rendered/.test(warning)));
+  const chart = document.bands.flatMap(band => band.elements).find(element => element.type === "chart")!;
+  chart.props.title = "Chart evidence";
+  chart.bindings = { path: "monthly" };
+  delete chart.props.series;
+  const sample = { monthly: [{ label: "January", value: 20 }, { label: "February", value: 8 }] };
+  for (const [type, drawing] of [["bar", / rg .* re f Q/], ["line", / RG 1 w .* l S Q/], ["pie", / l h f Q/]] as const) {
+    chart.props.chartType = type;
+    const pdf = exportReport(document, "pdf", sample);
+    const output = Buffer.from(pdf.bytes).toString("latin1");
+    assert.match(output, /\(Chart evidence\)/);
+    assert.match(output, drawing);
+    if (type !== "pie") assert.match(output, /\(January\)/);
+    assert.ok(pdf.warnings.every(warning => !warning.includes("chart or crosstab")));
+  }
+  chart.box.height = 4;
+  assert.ok(exportReport(document, "pdf", sample).warnings.some(warning => /frame or data limit/.test(warning)));
+});
 
+test("XLSX and DOCX export every report table", () => {
   const multiTable = buildTemplate("statement");
   multiTable.bands = multiTable.bands.map((band) =>
     band.id === "band-footer"
@@ -292,7 +359,13 @@ test("exports report dropped fidelity explicitly", () => {
       : band,
   );
   const xlsx = exportReport(multiTable, "xlsx", {});
-  assert.ok(xlsx.warnings.some((warning) => /only the first table/.test(warning)));
+  assert.ok(!xlsx.warnings.some((warning) => /only the first table/.test(warning)));
+  const xlsxZip = Buffer.from(xlsx.bytes);
+  assert.match(readZipEntry(xlsxZip, "xl/workbook.xml"), /name="Report 2"/);
+  assert.match(readZipEntry(xlsxZip, "xl/worksheets/sheet2.xml"), /<t xml:space="preserve">A<\/t>/);
+  const docx = exportReport(multiTable, "docx", {});
+  assert.ok(!docx.warnings.some((warning) => /first table/.test(warning)));
+  assert.equal((readZipEntry(Buffer.from(docx.bytes), "word/document.xml").match(/<w:tbl>/g) ?? []).length, 2);
 });
 
 test("unsupported export formats fail loudly", () => {
@@ -370,7 +443,17 @@ test("PDF keeps Latin-1 accents and flags characters it cannot represent", () =>
   const pdf = Buffer.from(result.bytes).toString("latin1");
   assert.match(pdf, /Café/);
   assert.match(pdf, /\?/);
-  assert.ok(result.warnings.some((warning) => /Latin-1|latin-1/.test(warning)));
+  assert.ok(result.warnings.some((warning) => /unsupported character/.test(warning)));
+});
+
+test("PDF preserves Euro and typographic punctuation through WinAnsi", () => {
+  const document = buildTemplate("blank");
+  document.bands[0]!.elements.push({ id: "win-ansi", type: "text", box: { x: 0, y: 0, width: 60, height: 8 },
+    props: { text: "“Rp” — €… Ω" } });
+  const exported = exportReport(document, "pdf");
+  const bytes = Buffer.from(exported.bytes).toString("latin1");
+  assert.ok(bytes.includes("\x93Rp\x94 \x97 \x80\x85 ?"));
+  assert.ok(exported.warnings.some(warning => /1 unsupported character/i.test(warning)));
 });
 
 test("PDF warns for unsupported characters in rendered field and table data", () => {

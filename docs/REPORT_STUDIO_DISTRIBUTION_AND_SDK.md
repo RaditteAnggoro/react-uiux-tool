@@ -25,7 +25,6 @@ Explicitly deferred, with reasons:
    and audit policy. The native document keeps `schemaVersion` only.
 4. **ZPL / ESC-POS output** — must be validated on real hardware before any claim; no
    hardware was available, so it is not offered.
-5. **Vendor-rendered goldens** — unchanged gate from the `.yrf` track.
 
 ## P8 — embedded SDK
 
@@ -62,7 +61,9 @@ Deferred for P8:
 
 1. **Framework component packages** (React/Next wrappers) — a thin wrapper needs its own
    build and peer-dependency policy.
-2. **Java Spring Boot integration** — requires a separate runtime, schema parity tests and
-   distribution decisions.
-3. **Published package** — the repository is not published to npm; the subpath export is
+2. **Published package** — the repository is not published to npm; the subpath export is
    exercised from the built `dist` only via unit tests.
+
+The Java Spring Boot idea describes a backend calling a report service with a template ID and data,
+then receiving a PDF or a validation error. The existing SDK runs in JavaScript. The project has no
+agreed Java consumer, transport, authentication scheme, or endpoint contract.

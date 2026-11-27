@@ -4,11 +4,14 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
+  applyYrfChanges,
+  setYrfObjectScalar,
   collectStringSpans,
   parseYrfPath,
   previewYrfPatch,
 } from "../../src/reports/formats/yrf/patch.js";
-import { inspectYrf } from "../../src/reports/formats/yrf/inspect.js";
+import { yrfRichText } from "../../src/reports/formats/yrf/rich-text.js";
+import { inspectYrf, yrfPageLayout } from "../../src/reports/formats/yrf/inspect.js";
 import { createYrfFromNative } from "../../src/reports/formats/yrf/create.js";
 import { buildTemplate } from "../../src/reports/index.js";
 
@@ -29,7 +32,7 @@ test("inspection is read-only and reports structure without executing scripts", 
   assert.equal(inspection.pages[0]!.bands.length, 3);
   assert.equal(inspection.objectCount, 5);
   assert.ok(inspection.warnings.some((warning) => /units are unverified/.test(warning)));
-  assert.ok(inspection.warnings.some((warning) => /saves a copy/.test(warning)));
+  assert.ok(inspection.warnings.some((warning) => /Save copy keeps the original/.test(warning)));
 });
 
 test("unknown object kinds and script fields are surfaced, never run", async () => {
@@ -53,6 +56,86 @@ test("unknown object kinds and script fields are surfaced, never run", async () 
 test("rejects files that are not WaiReport JSON", () => {
   assert.equal(inspectYrf("not json").ok, false);
   assert.equal(inspectYrf(JSON.stringify({ hello: "world" })).ok, false);
+});
+
+test("the inspector distinguishes opaque corpus capabilities and preserves BOM compatibility", async () => {
+  const document = JSON.parse(await fixture());
+  const objects = document.layout.pages[0].bands[0].objects;
+  const kinds = ["AR.DataControl", "AR.XML", "AR.Barcode", "rtf", "subReport"];
+  objects.push(...kinds.map(type => ({ type, vendor: { unknown: true } })));
+  const result = inspectYrf("\uFEFF" + JSON.stringify(document)).inspection!;
+  assert.deepEqual(result.pages[0]!.bands[0]!.objects.slice(-5).map(({ supported, capability }) => [supported, capability]),
+    [[false, "data-control"], [false, "xml"], [false, "barcode"], [false, "rich-text"], [false, "subreport"]]);
+});
+
+test("local YRF layout handles distinct pages and preserves everything outside approved slots", async () => {
+  const document = JSON.parse(await fixture());
+  const box = { left: 10, top: 12, width: 120, height: 40 };
+  document.layout.pages.push({ bands: [{ type: "detail", height: 4000, objects: [
+    { ...box, type: "AR.DataControl", visible: "0", lockType: "1" },
+    { ...box, type: "AR.XML", visible: "0", fileURL: "leave.xml", recordsetPattern: "/records/row" },
+    { ...box, type: "AR.Barcode", text: "opaque payload", 0: "x" },
+    { ...box, type: "rtf", data: "First\nSecond" },
+    { ...box, type: "subReport", reportName: "detail.yrf" },
+    { ...box, type: "rtf", data: "Keep", onBeforePrint: "fixture hook" },
+  ] }] });
+  const text = "\uFEFF" + JSON.stringify(document, null, 2).replaceAll("\n", "\r\n");
+  const layout = inspectYrf(text).inspection!;
+  assert.equal(yrfPageLayout(layout, 0).placements[0]?.band.type, "reportHeader");
+  const second = yrfPageLayout(layout, 1);
+  assert.deepEqual(second.placements.map(({ band, top }) => [band.type, top]), [["detail", 0], ["reportFooter", 4000]]);
+  assert.equal(second.overflow, true);
+  const refs = second.placements[0]!.band.objects;
+  assert.deepEqual(refs.map(item => item.editableGeometry), [false, false, true, true, true, false]);
+  assert.equal(refs[3]?.localPreviewText, "First\nSecond");
+  assert.equal(refs[4]?.localPreviewText, "detail.yrf");
+
+  const at = (index: number) => `layout.pages[1].bands[0].objects[${index}]`;
+  const result = applyYrfChanges(text, [{ objectPath: at(2), field: "left", expected: 10, value: 18 }]);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const [{ start, end }] = result.changes as [{ start: number; end: number }];
+  assert.equal(result.text, text.slice(0, start) + "18" + text.slice(end));
+  const changed = setYrfObjectScalar(result.text, at(3), "data", "Updated Ω");
+  assert.equal(inspectYrf(changed).inspection!.pages[1]?.bands[0]?.objects[3]?.localPreviewText, "Updated Ω");
+  assert.throws(() => setYrfObjectScalar(changed, at(1), "fileURL", "elsewhere.xml"), /Unsupported/);
+  assert.throws(() => setYrfObjectScalar(changed, at(3), "data", "<img src=x>"), /Unsupported/);
+  assert.throws(() => setYrfObjectScalar(changed, at(4), "reportName", "../detail.yrf"), /Unsupported/);
+  assert.throws(() => setYrfObjectScalar(changed, at(5), "data", "Do not edit"), /script/);
+});
+
+test("the YRF writer and inspector share explicit Code 128 and QR values", () => {
+  const doc = buildTemplate("blank");
+  doc.bands[0]!.elements.push(
+    { id: "bars", type: "barcode", box: { x: 10, y: 8, width: 40, height: 8 },
+      props: { barcodeKind: "code128", barcodeValue: "STOCK-001" } },
+    { id: "qr", type: "barcode", box: { x: 80, y: 8, width: 20, height: 20 },
+      props: { barcodeKind: "qrcode", barcodeValue: "Ω" }, bindings: { path: "stock.code" } },
+  );
+  const created = createYrfFromNative(doc);
+  assert.equal(created.ok, true);
+  const text = created.text!;
+  const objects = inspectYrf(text).inspection!.pages[0]!.bands[0]!.objects;
+  assert.deepEqual(objects.map(({ barcodeKind, localFields }) => [barcodeKind, localFields.value]),
+    [["code128", "STOCK-001"], ["qrcode", "Ω"]]);
+  const changed = setYrfObjectScalar(text, objects[0]!.path, "value", "STOCK-002");
+  assert.equal(changed, text.replace("STOCK-001", "STOCK-002"));
+  assert.throws(() => setYrfObjectScalar(text, objects[0]!.path, "value", "Ω"), /Unsupported/);
+  assert.throws(() => setYrfObjectScalar(text, objects[0]!.path, "formatType", "ean13"), /Unsupported/);
+  assert.match(text, /"dataField": "stock.code"/);
+});
+
+test("rich text previews only bounded RTF text and supported character styling", () => {
+  const rtf = "{\\rtf1\\ansi\\ansicpg1252{\\fonttbl{\\f0 Hidden font;}}" +
+    "Plain {\\b Bold {\\i Both}\\b0 italics off} \\ul under\\ulnone\\par " +
+    "\\uc1\\u937? \\'e9 \\{literal\\}{\\pict 123}{\\*\\destination hidden}}";
+  const runs = yrfRichText(rtf)!;
+  assert.equal(runs.map(run => run.text).join(""), "Plain Bold Bothitalics off under\nΩ é {literal}");
+  assert.ok(runs.some(run => run.text === "Both" && run.bold && run.italic));
+  assert.ok(runs.some(run => run.text === "under" && run.underline));
+  assert.equal(yrfRichText("{\\rtf1 malformed"), null);
+  assert.equal(yrfRichText("{\\rtf1\\ansicpg65001 unsupported}"), null);
+  assert.equal(yrfRichText("{\\rtf1 " + "A".repeat(16_000) + "}"), null);
 });
 
 test("patch changes exactly one span and preserves everything else", async () => {
@@ -196,7 +279,7 @@ test("duplicate JSON keys are refused instead of guessed", async () => {
     caption: "Baru",
   });
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.error, /Duplicate property/);
+  if (!result.ok) assert.match(result.error, /Duplicate JSON key/);
 });
 
 test("unknown vendor fields survive a patch", async () => {
@@ -263,6 +346,32 @@ test("YRF image data can be added or replaced without changing other objects", a
   assert.equal(inspectYrf(updated).inspection?.pages[0]?.bands[0]?.objects[1]?.imageData, data);
   assert.equal(updated.replace(`,\"data\":${JSON.stringify(data)}`, ""), inserted.text);
   assert.throws(() => setYrfObjectScalar(updated, inserted.objectPath, "data", "x".repeat(5000)));
+});
+
+test("native YRF conversion records hidden objects, static table fidelity, paper and line endpoints", () => {
+  const report = buildTemplate("invoice");
+  report.page.size = "custom";
+  const detail = report.bands.find(band => band.kind === "detail")!;
+  detail.elements.push(
+    { id: "draw-line", type: "line", box: { x: 2, y: 4, width: 20, height: 1 }, props: {} },
+    { id: "embedded-image", type: "image", box: { x: 2, y: 6, width: 10, height: 10 },
+      props: { src: "data:image/png;base64,iVBORw0KGgo=" } },
+    { id: "hidden-label", type: "text", box: { x: 2, y: 8, width: 10, height: 10 },
+      props: { text: "HIDDEN_CONVERSION_SENTINEL", outputHidden: true } },
+  );
+  const result = createYrfFromNative(report);
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some(warning => /hidden from output/.test(warning)));
+  assert.ok(result.warnings.some(warning => /static column labels/.test(warning)));
+  assert.doesNotMatch(result.text!, /HIDDEN_CONVERSION_SENTINEL/);
+  const raw = JSON.parse(result.text!);
+  assert.equal(raw.pageSetting.paper.type, "custom");
+  assert.equal(raw.layout.reportHeader.type, "reportHeader");
+  const band = raw.layout.pages[0].bands.find((band: { name: string }) => band.name === detail.id);
+  const line = band.objects.find((entry: { name: string }) => entry.name === "draw-line");
+  assert.deepEqual([line.x1, line.y1, line.x2, line.y2], [22, 44, 242, 44]);
+  const image = band.objects.find((entry: { name: string }) => entry.name === "embedded-image");
+  assert.equal(image.data, "data:image/png;base64,iVBORw0KGgo=");
 });
 
 test("YRF endpoint line geometry and other object scalars preserve unrelated source", async () => {

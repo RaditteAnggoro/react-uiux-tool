@@ -16,15 +16,18 @@ test("only the native project format is editable", () => {
   );
 });
 
-test("the vendor YRF format is read-only and never rewritten", () => {
+test("the vendor YRF format advertises experimental editing without vendor fidelity", () => {
   const descriptor = getFormat("yrf");
   assert.ok(descriptor);
-  assert.equal(descriptor.operations.open, "readonly");
-  assert.match(descriptor.notes, /original is never rewritten/);
-  assert.equal(descriptor.operations.edit, "unsupported");
-  assert.equal(descriptor.operations.create, "unsupported");
+  assert.equal(descriptor.operations.open, "experimental");
+  assert.match(descriptor.notes, /hash check/);
+  assert.equal(descriptor.operations.edit, "experimental");
+  assert.equal(descriptor.operations.create, "experimental");
   assert.equal(descriptor.operations.export, "unsupported");
-  assert.equal(capabilityOf("yrf", "edit"), "unsupported");
+  assert.equal(capabilityOf("yrf", "edit"), "experimental");
+  assert.equal(capabilityOf("csv", "open"), "readonly");
+  assert.equal(capabilityOf("pdf", "open"), "readonly");
+  assert.equal(capabilityOf("xlsx", "open"), "readonly");
 });
 
 test("rendered and tabular outputs are not advertised as editable sources", () => {

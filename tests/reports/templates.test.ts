@@ -1,10 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createYrfFromNative } from "../../src/reports/formats/yrf/create.js";
+import { inspectYrf, yrfPageLayout } from "../../src/reports/formats/yrf/inspect.js";
 import {
   STYLE_FAMILIES,
   TEMPLATE_CATALOG,
   buildTemplate,
   getTemplate,
+  renderReportHtml,
+  exportReport,
   serializeReport,
   validateReportDocument,
 } from "../../src/reports/index.js";
@@ -22,7 +26,7 @@ test("every catalog template builds a valid document", () => {
 test("the catalog covers core business, dashboard, thermal and label templates", () => {
   assert.deepEqual(
     TEMPLATE_CATALOG.map((template) => template.id),
-    ["blank", "invoice", "loanSchedule", "statement", "dashboard", "aging", "allocation", "voucher", "collection", "thermalReceipt", "label", "receipt", "preAnalysis", "approvalMemo"],
+    ["blank", "invoice", "loanSchedule", "statement", "dashboard", "aging", "allocation", "voucher", "collection", "thermalReceipt", "label", "receipt", "preAnalysis", "approvalMemo", "vehicleCollateral"],
   );
   assert.equal(getTemplate("nope"), null);
 });
@@ -72,6 +76,23 @@ test("template rendering is deterministic across builds", () => {
   const first = serializeReport(buildTemplate("statement"));
   const second = serializeReport(buildTemplate("statement"));
   assert.equal(first, second);
+});
+
+test("vehicle collateral form binds editable fields in native output and generated YRF", () => {
+  const document = buildTemplate("vehicleCollateral");
+  assert.equal(buildTemplate("vehicleCollateral", undefined, "en-US").title, "Vehicle collateral form");
+  const data = { collateral: { applicationNumber: "APP-001", chassisNumber: "FRAME-TEST-001", reviewer: "Test reviewer" } };
+  const html = renderReportHtml(document, { data });
+  const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+  assert.match(pdf, /FRAME-TEST-001/);
+  assert.match(pdf, /\/Type \/Pages\b[^>]*\/Count 1\b/);
+  for (const value of ["APP-001", "FRAME-TEST-001", "Test reviewer", "Tanda tangan pemeriksa"]) assert.ok(html.includes(value), value);
+  const converted = createYrfFromNative(document);
+  assert.equal(converted.ok, true);
+  const source = inspectYrf(converted.text!).inspection!;
+  const view = yrfPageLayout(source, 0);
+  assert.equal(view.overflow, false);
+  assert.ok(view.placements.flatMap(({ band }) => band.objects).some(object => object.dataField === "collateral.chassisNumber"));
 });
 
 test("unknown templates fail loudly instead of returning a blank report", () => {

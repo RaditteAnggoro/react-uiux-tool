@@ -5,7 +5,11 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
+  rmdir,
   rm,
+  stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -13,6 +17,14 @@ import os from "node:os";
 import { createConnection } from "node:net";
 import { startStudio } from "../src/server/index.js";
 import { designModulePath } from "../src/server/preview.js";
+import { vscodeSourceUrl } from "../studio/src/source-location.js";
+
+test("VS Code source handoff escapes spaces and Unicode and rejects parent paths", () => {
+  assert.equal(vscodeSourceUrl("C:\\Workspace\\Report Ω", "src/表.tsx", 42),
+    "vscode://file/C:/Workspace/Report%20%CE%A9/src/%E8%A1%A8.tsx:42:1");
+  assert.equal(vscodeSourceUrl("/local/Blank Project", "Dockerfile", 0), "vscode://file/local/Blank%20Project/Dockerfile");
+  assert.equal(vscodeSourceUrl("C:\\Workspace", "..\\external.tsx", 1), undefined);
+});
 
 test("design preview uses Vite-style module IDs on Windows and Unix", () => {
   assert.equal(designModulePath('C:\\Users\\tester\\project'), 'C:/Users/tester/project/__uiux_design.jsx');
@@ -25,7 +37,7 @@ test("controller draft keeps source unchanged until save and retains it after a 
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "draft", dependencies: { react: "19", vite: "7" } }));
     const file = path.join(root, "src/App.jsx");
-    const original = "export default function App(){return <main><button>Old</button></main>}";
+    const original = "// before\r\nexport default function App(){return <main><button>Old</button></main>}\r\n// after\r\n";
     await writeFile(file, original);
     await withStudio(async (base) => {
       const { token } = await (await fetch(`${base}/api/session`)).json() as { token: string };
@@ -46,12 +58,31 @@ test("controller draft keeps source unchanged until save and retains it after a 
       await rm(otherProject, { recursive: true, force: true });
       assert.equal((await post("draft/undo", { expectedProject })).value.count, 0);
       assert.equal((await post("draft/redo", { expectedProject })).value.count, 1);
-      await writeFile(file, original + "// external");
+      const overlapping = original.replace(">Old<", ">External<");
+      await writeFile(file, overlapping);
       assert.equal((await post("draft/commit", { expectedProject, approved: true })).status, 409);
-      assert.equal(await readFile(file, "utf8"), original + "// external");
-      await writeFile(file, original);
-      assert.equal((await post("draft/commit", { expectedProject, approved: true })).status, 200);
-      assert.match(await readFile(file, "utf8"), />New<\/button>/);
+      assert.equal(await readFile(file, "utf8"), overlapping);
+      await writeFile(file, original.replace("// before", "// external header").replace("// after", "// external footer"));
+      const saved = await post("draft/commit", { expectedProject, approved: true });
+      assert.equal(saved.status, 200);
+      assert.deepEqual(saved.value.rebased, ["src/App.jsx"]);
+      const combined = original.replace("// before", "// external header")
+        .replace(">Old<", ">New<").replace("// after", "// external footer");
+      assert.equal(await readFile(file, "utf8"), combined);
+      const recentButton = saved.value.analysis.elements.find((element: any) => element.tag === "button");
+      const identical = await post("draft/edit", { expectedProject, file: recentButton.source.file, elementId: recentButton.id,
+        expectedHash: recentButton.hash, operation: "text", value: "Agreed", scope: "instance" });
+      assert.equal(identical.status, 200, JSON.stringify(identical.value));
+      const separateDisk = "// external prefix\r\n" + combined.replace(">New<", ">Agreed<") + "// external EOF";
+      await writeFile(file, separateDisk);
+      const preservedTime = new Date("2025-01-01T00:00:00Z");
+      await utimes(file, preservedTime, preservedTime);
+      const beforeCommit = await stat(file);
+      const reconciled = await post("draft/commit", { expectedProject, approved: true });
+      assert.equal(reconciled.status, 200, JSON.stringify(reconciled.value));
+      assert.equal(reconciled.value.count, 0);
+      assert.equal(await readFile(file, "utf8"), separateDisk);
+      assert.equal((await stat(file)).mtimeMs, beforeCommit.mtimeMs);
     });
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
@@ -93,6 +124,96 @@ test("successive insert, prop and event edits retain prior writes on success and
       const stale = await post("edit", { expectedProject: project, file: paragraph.source.file, elementId: paragraph.id, expectedHash: paragraph.hash, operation: "prop", name: "title", value: "Stale", scope: "instance" });
       assert.notEqual(stale.status, 200);
       assert.equal(await readFile(sourcePath, "utf8"), afterEvent);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("discard removes the recoverable draft across controller restarts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-discard-restart-"));
+  const draftDirectory = path.join(root, "snapshots");
+  const project = path.join(root, "project");
+  const file = path.join(project, "src/App.jsx");
+  const original = "export default function App(){return <button>Original</button>}";
+  await mkdir(path.dirname(file), { recursive: true });
+  await mkdir(draftDirectory);
+  await writeFile(path.join(project, "package.json"), JSON.stringify({ name: "discard-restart", dependencies: { react: "19", vite: "8" } }));
+  await writeFile(file, original);
+  const secondFile = path.join(project, "src/Second.jsx");
+  await writeFile(secondFile, "export default function Second(){return <p>Second original</p>}");
+  const withProject = async (run: (post: (endpoint: string, data?: object, status?: number) => Promise<any>, opened: any) => Promise<void>) => {
+    const studio = await startStudio({ draftDirectory, recentDirectory: path.join(root, "recent") });
+    try {
+      const { token } = await (await fetch(`${studio.url}/api/session`)).json() as { token: string };
+      const headers = { "content-type": "application/json", origin: studio.url, "x-uiux-token": token };
+      const send = (endpoint: string, data: object) => fetch(`${studio.url}/api/${endpoint}`, { method: "POST", headers, body: JSON.stringify(data) });
+      const opened = await (await send("open", { path: project })).json() as any;
+      assert.ok(opened.projectRoot);
+      await run(async (endpoint, data = {}, status = 200) => {
+        const response = await send(endpoint, { ...data, expectedProject: opened.projectRoot });
+        const value = await response.json();
+        assert.equal(response.status, status, JSON.stringify(value));
+        return value;
+      }, opened);
+    } finally {
+      await studio.close();
+    }
+  };
+  try {
+    await withProject(async (post, opened) => {
+      const button = opened.elements.find((element: any) => element.tag === "button");
+      const edited = await post("draft/edit", { file: button.source.file, elementId: button.id, expectedHash: button.hash, operation: "text", value: "Draft", scope: "instance" });
+      assert.equal(edited.count, 1);
+      assert.deepEqual(edited.files, ["src/App.jsx"]);
+    });
+    await withProject(async post => {
+      const recovered = await post("draft/state");
+      assert.equal(recovered.count, 1);
+      assert.deepEqual(recovered.history.applied.map(({ action, file, object, anchor }: any) => ({ action, file, object, line: anchor.line })),
+        [{ action: "text", file: "src/App.jsx", object: "button", line: 1 }]);
+      const [snapshotName] = await readdir(draftDirectory);
+      const snapshot = path.join(draftDirectory, snapshotName!);
+      const savedSnapshot = snapshot + ".saved";
+      await rename(snapshot, savedSnapshot);
+      await mkdir(snapshot);
+      assert.match((await post("draft/discard", {}, 400)).error, /Could not remove the local draft snapshot/);
+      assert.equal((await post("draft/state")).count, 1);
+      await rmdir(snapshot);
+      await rename(savedSnapshot, snapshot);
+      await post("draft/discard");
+      assert.deepEqual(await post("draft/state"), { open: false });
+    });
+    await withProject(async post => assert.deepEqual(await post("draft/state"), { open: false }));
+    assert.deepEqual(await readdir(draftDirectory), []);
+    assert.equal(await readFile(file, "utf8"), original);
+
+    await withProject(async (post, opened) => {
+      for (const [tag, value] of [["button", "Saved from one tab"], ["p", "Other tab stays pending"]]) {
+        const element = opened.elements.find((entry: any) => entry.tag === tag);
+        await post("draft/edit", { file: element.source.file, elementId: element.id, expectedHash: element.hash,
+          operation: "text", value, scope: tag === "p" ? "shared" : "instance", confirmScope: tag === "p" });
+      }
+      const saved = await post("draft/commit", { approved: true, file: "src/App.jsx" });
+      assert.deepEqual(saved.files, ["src/Second.jsx"]);
+      assert.equal(saved.count, 1);
+      assert.match(await readFile(file, "utf8"), /Saved from one tab/);
+      assert.match(await readFile(secondFile, "utf8"), /Second original/);
+    });
+    await withProject(async (post, opened) => {
+      const recovered = await post("draft/state");
+      assert.deepEqual(recovered.files, ["src/Second.jsx"]);
+      const button = opened.elements.find((entry: any) => entry.tag === "button");
+      await post("draft/edit", { file: button.source.file, elementId: button.id, expectedHash: button.hash,
+        operation: "text", value: "Discard me", scope: "instance" });
+      const discarded = await post("draft/discard", { file: "src/App.jsx" });
+      assert.deepEqual(discarded.files, ["src/Second.jsx"]);
+      assert.equal(discarded.count, 1);
+    });
+    await withProject(async post => {
+      assert.deepEqual((await post("draft/state")).files, ["src/Second.jsx"]);
+      assert.match(await readFile(file, "utf8"), /Saved from one tab/);
+      await post("draft/discard");
     });
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

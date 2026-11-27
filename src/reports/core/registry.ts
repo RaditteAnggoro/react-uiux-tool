@@ -1,5 +1,6 @@
 export type FeatureState =
   | "editable"
+  | "experimental"
   | "readonly"
   | "export-only"
   | "unsupported"
@@ -44,13 +45,13 @@ const FORMATS: readonly FormatDescriptor[] = [
     phase: "P2",
     fidelity: "approximate",
     operations: {
-      create: "unsupported",
-      open: "readonly",
-      edit: "unsupported",
+      create: "experimental",
+      open: "experimental",
+      edit: "experimental",
       export: "unsupported",
     },
     notes:
-      "Read-only inspector shipped. Only label/textbox captions can be patched into a sibling copy; the original is never rewritten and creation stays blocked.",
+      "Create, inspect and edit supported objects in draft, then explicitly save to the opened file with a hash check. Vendor layout and runtime fidelity remain unverified.",
   },
   {
     id: "csv",
@@ -60,12 +61,12 @@ const FORMATS: readonly FormatDescriptor[] = [
     fidelity: "not-supported",
     operations: {
       create: "unsupported",
-      open: "unsupported",
+      open: "readonly",
       edit: "unsupported",
       export: "export-only",
     },
     notes:
-      "Data export available (P3). Import is planned P4. Data only; no page geometry.",
+      "Import as sample data or export table data. CSV and TSV carry rows and columns.",
   },
   {
     id: "xlsx",
@@ -75,12 +76,12 @@ const FORMATS: readonly FormatDescriptor[] = [
     fidelity: "not-supported",
     operations: {
       create: "unsupported",
-      open: "unsupported",
+      open: "readonly",
       edit: "unsupported",
       export: "export-only",
     },
     notes:
-      "XLSX export available (P4 partial). Not a page-design source; no lossless round trip claim.",
+      "Import one worksheet as sample data or export one worksheet per table.",
   },
   {
     id: "pdf",
@@ -95,7 +96,7 @@ const FORMATS: readonly FormatDescriptor[] = [
       export: "export-only",
     },
     notes:
-      "PDF export available (P3, native engine). Existing PDFs are never converted into editable templates.",
+      "Import up to six pages as images or export native report pages.",
   },
   {
     id: "html",

@@ -2,13 +2,10 @@
 
 Status: **rencana kerja; belum seluruhnya diterapkan**. Sasaran adalah semua skenario yang secara eksplisit didukung lulus pemeriksaan, dan setiap skenario yang belum dapat dibuktikan aman ditolak dengan alasan yang bisa ditindaklanjuti. Tidak ada tes yang dapat membuktikan nol bug untuk semua project, dependensi, data, browser, dan perilaku React yang mungkin.
 
-Review 25 issue dan daftar pending 9 November tersedia di [Issue review 2026-11-09](ISSUE_REVIEW_2026-11-09.md). Prioritas pertama adalah integritas hasil insert (ISS-013); status sebagian dan belum direproduksi belum dianggap selesai. Issue Report Studio dicatat juga agar tidak hilang dari antrean.
-
-Pembaruan berikutnya menangani style origin, pengelompokan peringatan encoding,
-format insert multiline, dan sebagian review project/BUSY/lokalisasi. ISS-006 tetap
-sebagian: pemakaian literal React.lazy terindeks pada fixture, sementara cakupan screen
-yang dipanggil dinamis lain belum terbukti; jangan melepas
-konfirmasi perubahan shared hanya berdasarkan nama folder atau jumlah referensi nol.
+Cakupan yang sudah diperiksa tersedia di [matriks kompatibilitas](../COMPATIBILITY_MATRIX.md).
+Fixture menguji insert multiline, style origin, peringatan encoding dan impor literal
+React.lazy. Konfirmasi perubahan bersama mengikuti identitas dan bukti penggunaan
+komponen.
 
 ## Ukuran dan cakupan
 

@@ -62,7 +62,10 @@ flowchart LR
 **Try it in five steps:**
 
 1. Choose **Report Studio** on Home, then **Open existing report** or **Create new report**.
-2. Choose your report folder and select a report from the list, or choose a template.
+2. **Open existing report** opens the system folder dialog. After selecting a folder,
+   pick a report from the list. For **Create new report**, use **Choose report folder**
+   in the sidebar to change the destination, then choose a template. The initial
+   location is the last folder you chose or `Documents/React UIUX Reports`.
 3. In **Design**, select an object. Use the left palette to add objects by click or
    drag-and-drop, and the right inspector to change supported values and dimensions.
 4. Use **Code** to inspect or edit supported source, and **Preview** to check native
@@ -153,11 +156,10 @@ node dist/cli.js --help
 
 ## New and existing projects
 
-**New Project** creates a Vite + React + TypeScript application in a chosen empty
+**New Project** creates a Vite React or Next.js App Router TypeScript application in a chosen empty
 folder. Templates: Blank, Business Dashboard, Data Entry/Form, and Operations Console.
 Styling: plain CSS, CSS Modules, or Tailwind v4. Review the file/dependency plan first.
 Creation writes files only; run `npm install` and `npm run dev` yourself when ready.
-Do not select Next.js for creation in this release.
 
 **Open Existing Project** accepts a native directory picker where available, or an
 absolute path. The first analysis is read-only: framework/routes, source elements,
@@ -171,9 +173,10 @@ It deliberately bypasses target scripts and dynamic Vite/PostCSS configuration.
 Common tsconfig/jsconfig and literal Vite/Webpack aliases are read statically;
 selecting a discovered component opens a separate Design view and finds direct
 local context providers used through hooks. Dynamic aliases, custom plugins, nested
-runtime setup, assets, or environment variables may still need manual setup. Next.js
-App/Pages projects support static inspection; Next
-runtime source selection is not implemented. See the
+runtime setup, assets, or environment variables may still need manual setup.
+**Start Next.js runtime** runs the installed project's dev server on loopback.
+The runtime loads saved source and accepts concrete paths for dynamic routes.
+Visual source selection and draft overlays use the Vite adapter. See the
 [matrix](COMPATIBILITY_MATRIX.md).
 
 ## Editing boundaries

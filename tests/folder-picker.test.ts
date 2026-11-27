@@ -20,3 +20,19 @@ test("native picker distinguishes selection, cancellation and failure", async ()
   }), { path: "", unavailable: false });
   assert.deepEqual(await pickDirectory("win32", async () => ({ stdout: "" })), { path: "", unavailable: false });
 });
+
+test("Windows picker uses the Explorer folder dialog and preserves Unicode paths", async () => {
+  const selected = "C:\\Reports Ω";
+  const result = await pickDirectory("win32", async (command, args, options) => {
+    assert.equal(command, "powershell.exe");
+    assert.ok(args.includes("-STA"));
+    assert.equal(options.windowsHide, true);
+    assert.equal(options.env?.UIUX_PICKER_INITIAL_DIRECTORY, selected);
+    const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1]!, "base64").toString("utf16le");
+    assert.match(script, /PickFolders \| ForceFileSystem/);
+    assert.match(script, /dialog\.Show\(owner\.Handle\)/);
+    assert.doesNotMatch(script, /Ω/);
+    return { stdout: selected + "\r\n" };
+  }, selected);
+  assert.deepEqual(result, { path: selected, unavailable: false });
+});

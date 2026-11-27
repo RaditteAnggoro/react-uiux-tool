@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { inspectYrf, type YrfInspection, type YrfObjectRef } from "../../../../src/reports/formats/yrf/inspect";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { inspectYrf, yrfPageLayout, type YrfInspection, type YrfObjectRef } from "../../../../src/reports/formats/yrf/inspect";
 import { appendYrfObject, applyYrfChanges, moveYrfObject, parseYrfPath, removeYrfObject, setYrfObjectScalar, valueAtPath, type YrfChange } from "../../../../src/reports/formats/yrf/patch";
+import { hasYrfScriptField, isYrfLocalField } from "../../../../src/reports/formats/yrf/capabilities";
 import "./yrf-inspector.css";
 import ReportHelp from "./ReportHelp";
 import CanvasRulers from "./CanvasRulers";
+import ReportDialog from "./ReportDialog";
+import { revealJsonObject } from "./code-location";
+
+const BarcodePreview = lazy(() => import("./BarcodePreview"));
 
 interface YrfInspectorProps {
   token: string;
@@ -184,36 +189,44 @@ const dict = {
     preview: "Preview change",
     saveCopy: "Save copy",
     saveOriginal: "Save",
+    undoDraft: "Undo YRF draft change",
+    redoDraft: "Redo YRF draft change",
     saveToOriginal: "Save original",
     resizeLeftPanel: "Resize .yrf structure panel",
     resizeRightPanel: "Resize .yrf properties panel",
     overwriteConfirm: "Overwrite the original .yrf file? A timestamped .bak file is written beside it.",
     updatedOriginal: "Original updated",
     savedOriginal: "Saved original",
-    saveOriginalLimited: "Save supports caption, data field and geometry changes. Structural and source edits still require Save copy.",
+    saveOriginalLimited: "This save path supports scalar edits only.",
+    saveDraftHint: "Write this draft to the opened original.",
     before: "Before",
     after: "After",
     saved: "Copy saved",
     created: "Created",
     readonlyNote:
-      "Save updates the original for supported caption, data field and geometry changes. Other changes use Save copy. Creation is experimental and unverified.",
+      "Save updates the opened original after checking its hash. WaiReport rendering and creation remain experimental.",
     empty: "Choose a .yrf file to inspect. Nothing is executed.",
     experimental: "Experimental write",
     designApprox: "Design (approximate)",
     codeReadonly: "Code",
+    codeLine: "Selected object · line {line}",
     unsavedTitle: "Unsaved YRF changes",
-    unsavedHint: "Save them to a copy, discard them, or cancel.",
+    unsavedHint: "Save to the opened file, discard the changes, or cancel.",
     discard: "Discard changes",
-    codeHint: "Vendor source is never executed. Editing saves a copy, never the original.",
+    codeHint: "Vendor source is displayed as text.",
     editSource: "Edit source",
     applySource: "Apply & save copy",
     sourceNote:
-      "Applying validates JSON and the WaiReport structure, then writes a sibling .edited copy.",
+      "Save updates the opened file. Save copy creates a separate .edited file with the same validation.",
     folder: "Folder",
     noFiles: "No .yrf files in this folder.",
     chooseFolder: "Choose folder",
     manualPath: "Enter path manually",
-    unsupported: "Limited visual controls: unverified vendor object",
+    unsupported: "Protected format properties",
+    localPage: "Design page",
+    openLinkedYrf: "Open linked YRF",
+    barcodeValueMissing: "Barcode value unavailable in Design",
+    pageOverflow: "Sections exceed the paper height in this preview.",
     noChanges: "No changes to save",
   },
   id: {
@@ -295,36 +308,44 @@ const dict = {
     preview: "Pratinjau perubahan",
     saveCopy: "Simpan salinan",
     saveOriginal: "Simpan",
+    undoDraft: "Urungkan perubahan draft YRF",
+    redoDraft: "Ulangi perubahan draft YRF",
     saveToOriginal: "Simpan ke asli",
     resizeLeftPanel: "Ubah lebar panel struktur .yrf",
     resizeRightPanel: "Ubah lebar panel properti .yrf",
     overwriteConfirm: "Timpa file .yrf asli? File .bak bertanda waktu akan ditulis di sampingnya.",
     updatedOriginal: "File asli diperbarui",
     savedOriginal: "File asli tersimpan",
-    saveOriginalLimited: "Simpan mendukung perubahan caption, data field dan geometri. Perubahan struktur dan source masih memerlukan Simpan salinan.",
+    saveOriginalLimited: "Jalur simpan ini hanya mendukung edit nilai skalar.",
+    saveDraftHint: "Tulis draft ini ke file asli yang dibuka.",
     before: "Sebelum",
     after: "Sesudah",
     saved: "Salinan tersimpan",
     created: "Dibuat",
     readonlyNote:
-      "Simpan memperbarui file asli untuk perubahan caption, data field dan geometri yang didukung. Perubahan lain memakai Simpan salinan. Pembuatan bersifat eksperimental.",
+      "Simpan memperbarui file asli yang dibuka setelah pemeriksaan hash. Hasil render WaiReport dan pembuatan file masih eksperimental.",
     empty: "Pilih file .yrf untuk diperiksa. Tidak ada yang dieksekusi.",
     experimental: "Tulis eksperimental",
     designApprox: "Desain (perkiraan)",
     codeReadonly: "Kode",
+    codeLine: "Objek terpilih · baris {line}",
     unsavedTitle: "Perubahan YRF belum disimpan",
-    unsavedHint: "Simpan ke salinan, buang, atau batal.",
+    unsavedHint: "Simpan ke file yang dibuka, buang perubahan, atau batal.",
     discard: "Buang perubahan",
-    codeHint: "Sumber vendor tidak pernah dieksekusi. Edit menyimpan salinan, bukan file asli.",
+    codeHint: "Sumber vendor ditampilkan sebagai teks.",
     editSource: "Edit sumber",
     applySource: "Terapkan & simpan salinan",
     sourceNote:
-      "Penerapan memvalidasi JSON dan struktur WaiReport, lalu menulis salinan .edited.",
+      "Simpan memperbarui file yang dibuka. Simpan salinan membuat file .edited terpisah dengan validasi yang sama.",
     folder: "Folder",
     noFiles: "Tidak ada file .yrf di folder ini.",
     chooseFolder: "Pilih folder",
     manualPath: "Masukkan path manual",
-    unsupported: "Kontrol visual terbatas: objek vendor belum terverifikasi",
+    unsupported: "Properti format dilindungi",
+    localPage: "Halaman desain",
+    openLinkedYrf: "Buka YRF tertaut",
+    barcodeValueMissing: "Nilai barcode belum tersedia di Desain",
+    pageOverflow: "Bagian laporan melebihi tinggi kertas pada pratinjau ini.",
     noChanges: "Tidak ada perubahan untuk disimpan",
   },
 } as const;
@@ -349,6 +370,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const [filePath, setFilePath] = useState("");
   const [report, setReport] = useState<OpenResult | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [narrowPanel, setNarrowPanel] = useState<"canvas" | "palette" | "properties">("canvas");
   const [showGrid, setShowGrid] = useState(false);
   const [showRuler, setShowRuler] = useState(false);
   const [selected, setSelected] = useState<YrfObjectRef | null>(null);
@@ -386,6 +408,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  const [pageIndex, setPageIndex] = useState(0);
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -412,22 +435,89 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const [panel, setPanel] = useState<"design" | "code">("design");
   const [codeDraft, setCodeDraft] = useState<string | null>(null);
   const [codeEditing, setCodeEditing] = useState(false);
+  const codeArea = useRef<HTMLTextAreaElement>(null);
+  const [codeLine, setCodeLine] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const path = selected?.path;
+    setCodeLine(panel === "code" && path && codeArea.current ? revealJsonObject(codeArea.current, { path }) : null);
+  }, [panel, report?.source, selected?.path]);
   const [codeError, setCodeError] = useState("");
   const [geometryChanges, setGeometryChanges] = useState<Record<string, Box>>({});
   const [draftChanges, setDraftChanges] = useState<Record<string, ChangeInput>>({});
   const [structuralDraft, setStructuralDraft] = useState<string | null>(null);
+  const [history, setHistory] = useState<{ past: ReturnType<typeof snapshotDraft>[]; future: ReturnType<typeof snapshotDraft>[] }>({ past: [], future: [] });
+  const editingDraftField = useRef<string | null>(null);
   const imageTarget = useRef({ file: "", path: "" });
   imageTarget.current = { file: report?.file ?? "", path: selected?.path ?? "" };
   const imageUpdate = useRef<(value: string) => void>(() => {});
   const [leaveAction, setLeaveAction] = useState<{ run: () => void } | null>(null);
   const gestureRef = useRef<{
+    pointerId: number;
     mode: "move" | "resize";
     path: string;
     handle?: YrfHandle;
     startX: number;
     startY: number;
     box: Box;
+    latest: Box;
+    before: ReturnType<typeof snapshotDraft>;
   } | null>(null);
+
+  function snapshotDraft() {
+    return { report, selected, selectedPaths, caption, dataField, geometry, draftChanges, geometryChanges, structuralDraft };
+  }
+
+  const restoreDraft = (state: ReturnType<typeof snapshotDraft>) => {
+    setReport(state.report);
+    setSelected(state.selected);
+    setSelectedPaths(state.selectedPaths);
+    setCaption(state.caption);
+    setDataField(state.dataField);
+    setGeometry(state.geometry);
+    setDraftChanges(state.draftChanges);
+    setGeometryChanges(state.geometryChanges);
+    setStructuralDraft(state.structuralDraft);
+    setPending([]);
+    setError("");
+    setMessage("");
+  };
+  const pushHistory = (before = snapshotDraft()) =>
+    setHistory(current => ({ past: [...current.past, before].slice(-20), future: [] }));
+  const resetHistory = () => {
+    setHistory({ past: [], future: [] });
+    editingDraftField.current = null;
+  };
+  const changeDraftField = (name: string, change: () => void) => {
+    if (editingDraftField.current !== name) {
+      pushHistory();
+      editingDraftField.current = name;
+    }
+    change();
+  };
+  const finishDraftField = () => { editingDraftField.current = null; };
+  const stepHistory = (redo: boolean) => {
+    if (busy || panel !== "design" || gestureRef.current || leaveAction) return;
+    const target = (redo ? history.future : history.past).at(-1);
+    if (!target) return;
+    const current = snapshotDraft();
+    setHistory(redo
+      ? { past: [...history.past, current], future: history.future.slice(0, -1) }
+      : { past: history.past.slice(0, -1), future: [...history.future, current] });
+    restoreDraft(target);
+    finishDraftField();
+  };
+
+  useEffect(() => {
+    const onHistoryKey = (event: KeyboardEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.key.toLowerCase() !== "z") return;
+      if (event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable]")) return;
+      if (panel !== "design" || leaveAction || busy || !(event.shiftKey ? history.future.length : history.past.length)) return;
+      event.preventDefault();
+      stepHistory(event.shiftKey);
+    };
+    window.addEventListener("keydown", onHistoryKey);
+    return () => window.removeEventListener("keydown", onHistoryKey);
+  });
 
   const loadBrowse = async () => {
     try {
@@ -465,16 +555,19 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPath]);
 
-  const open = async (target = filePath.trim()) => {
+  const open = async (target = filePath.trim(), sibling?: string) => {
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      const result = await post<OpenResult>(token, "reports/yrf/open", { path: target });
+      const result = await post<OpenResult>(token, "reports/yrf/open", { path: target, sibling });
+      resetHistory();
       setReport(result);
       setFilePath(result.file);
-      const first = result.inspection.pages.flatMap((page) => page.bands.flatMap((band) => band.objects)).find((object) => object.editableCaption);
-      const firstBand = result.inspection.pages.flatMap((page) => page.bands).find((band) => band.objects.some((object) => object.path === first?.path));
+      const firstPage = result.inspection.pages[0]?.bands ?? [];
+      const firstBand = firstPage.find(band => band.objects.some(object => object.editableCaption));
+      const first = firstBand?.objects.find(object => object.editableCaption);
+      setSelectedPaths([]);
       setExpandedBands(firstBand ? new Set([firstBand.path]) : new Set());
       setSelected(first ?? null);
       setCaption(first?.caption ?? "");
@@ -490,7 +583,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       setStructuralDraft(null);
     } catch (caught) {
       setError((caught as Error).message);
-      setReport(null);
+      if (!sibling) setReport(null);
     } finally {
       setBusy(false);
     }
@@ -508,13 +601,11 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     }
     if (selected && selected.path !== object.path) flushCurrentChanges();
     setSelectedPaths(nextPaths);
-    const focusPath = additive && !nextPaths.includes(object.path) ? nextPaths[nextPaths.length - 1]! : object.path;
     if (additive && !nextPaths.includes(object.path)) return;
     const focused = nextPaths.includes(object.path) ? object : null;
-    if (!focused) return;
+    if (!focused || selected?.path === focused.path) return;
     const target = focused;
     setSelected(target);
-    void focusPath;
     const value = (field: string, fallback: string | number) =>
       draftChanges[`${target.path}.${field}`]?.value ?? fallback;
     const box = draftBox(target);
@@ -535,13 +626,10 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     return { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
   };
 
-  const layerGroups = useMemo(() => {
-    if (!report) return [];
-    return [
-      ...report.inspection.pages.flatMap((page) => page.bands),
-      ...report.inspection.sideBands,
-    ].filter((band) => band.objects.length > 0);
-  }, [report]);
+  const pageLayout = report ? yrfPageLayout(report.inspection, pageIndex) : null;
+  const bands = pageLayout?.placements.map(({ band }) => band) ?? [];
+  const layerGroups = bands.filter(band => band.objects.length > 0);
+  useEffect(() => { setPageIndex(0); }, [report?.file]);
 
   const changes = useMemo(() => {
     if (!selected) return [];
@@ -553,7 +641,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     if (selected.dataField !== null && (dataField !== selected.dataField || draftChanges[`${selected.path}.dataField`])) {
       list.push({ objectPath: selected.path, field: "dataField", expected: selected.dataField, value: dataField });
     }
-    for (const [field, original, next] of geometryFields(selected, { x: geometry.left, y: geometry.top, width: geometry.width, height: geometry.height })) {
+    const box = { x: geometry.left, y: geometry.top, width: geometry.width, height: geometry.height };
+    for (const [field, original, next] of selected.editableGeometry ? geometryFields(selected, box) : []) {
       if (Number.isFinite(next) && (next !== original || draftChanges[`${selected.path}.${field}`] || geometryChanges[selected.path])) {
         list.push({ objectPath: selected.path, field, expected: original, value: next });
       }
@@ -577,7 +666,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         const after = inspectYrf(result?.ok ? result.text : structuralDraft).inspection;
         if (!before || !after) throw new Error("Unable to compare report structure");
         const bands = (inspection: YrfInspection) => [...inspection.pages.flatMap((page) => page.bands), ...inspection.sideBands];
-        const describe = (object: YrfObjectRef) => `${object.kind} · ${object.name}${object.caption !== null ? ` · ${object.caption.slice(0, 256)}` : ""}${object.dataField ? ` · ${object.dataField.slice(0, 256)}` : ""} · (${object.box.x}, ${object.box.y}, ${object.box.width}, ${object.box.height})${object.style ? ` · ${object.style.slice(0, 256)}` : ""}`;
+        const describe = (object: YrfObjectRef) => `${object.kind} · ${object.name}${object.caption !== null ? ` · ${object.caption.slice(0, 256)}` : ""}${object.dataField ? ` · ${object.dataField.slice(0, 256)}` : ""} · (${object.box.x}, ${object.box.y}, ${object.box.width}, ${object.box.height})${object.style ? ` · ${object.style.slice(0, 256)}` : ""}${Object.entries(object.localFields).map(([key, value]) => ` · ${key}=${value.slice(0, 256)}`).join("")}`;
         const previous = new Map(bands(before).map((band) => [band.path, band.objects.map(describe).join("\n")]));
         const current = new Map(bands(after).map((band) => [band.path, band.objects.map(describe).join("\n")]));
         const structureChanges = [...new Set([...previous.keys(), ...current.keys()])].flatMap((path) => {
@@ -634,7 +723,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   );
 
   const alignSelected = (mode: "left" | "right" | "centerH" | "top" | "bottom" | "middleV") => {
-    if (!report || selectedObjects.length < 2) return;
+    if (!report || selectedObjects.length < 2 || selectedObjects.some(object => !object.editableGeometry)) return;
+    pushHistory();
     const boxes = selectedObjects.map((object) => draftBox(object));
     const minX = Math.min(...boxes.map((box) => box.x));
     const maxRight = Math.max(...boxes.map((box) => box.x + box.width));
@@ -677,8 +767,8 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     try {
       const object = valueAtPath(JSON.parse((structuralDraft ?? report.source).replace(/^\uFEFF/, "")), parseYrfPath(selected.path));
       if (!object || typeof object !== "object" || Array.isArray(object)) return [];
-      const skip = new Set(["type", "caption", "text", "dataField", "left", "top", "width", "height", ...(selected.kind === "image" ? ["data"] : [])]);
-      return Object.entries(object).filter(([key, value]) => !skip.has(key) && !/scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key) && /^[A-Za-z_$][\w$-]*$/.test(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")) as Array<[string, string | number | boolean]>;
+      const skip = new Set(["type", "caption", "dataField", "left", "top", "width", "height", ...(selected.kind !== "AR.Barcode" ? ["text"] : []), ...(selected.kind === "image" ? ["data"] : [])]);
+      return Object.entries(object).filter(([key, value]) => !skip.has(key) && !hasYrfScriptField(key) && /^[A-Za-z_$][\w$-]*$/.test(key) && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")) as Array<[string, string | number | boolean]>;
     } catch { return []; }
   }, [selected, report, structuralDraft]);
 
@@ -697,6 +787,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const discardDrafts = () => {
+    resetHistory();
     setDraftChanges({});
     setGeometryChanges({});
     if (structuralDraft && report?.source) {
@@ -715,7 +806,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     }
   };
 
-  const saveSourceToOriginal = async (): Promise<boolean> => {
+  const saveSourceDraft = async (asCopy = false): Promise<boolean> => {
     if (!report?.source) return false;
     const base = codeEditing && codeDraft !== null ? codeDraft : structuralDraft ?? report.source;
     const patched = !codeEditing && pendingAll.length
@@ -728,18 +819,20 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     }
     setBusy(true);
     setError("");
+    setCodeError("");
+    setMessage("");
     try {
       const result = await post<{
         file: string;
         hash: string;
         source: string;
         inspection: YrfInspection;
-      }>(token, "reports/yrf/save-source", {
+      }>(token, asCopy ? "reports/yrf/source" : "reports/yrf/save-source", {
         path: report.file,
         expectedHash: report.hash,
-        source: patched.text,
-        approved: true,
+        ...(asCopy ? { text: patched.text } : { source: patched.text, approved: true }),
       });
+      resetHistory();
       setReport({
         file: result.file,
         hash: result.hash,
@@ -753,13 +846,21 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       setPending([]);
       setCodeEditing(false);
       setCodeDraft(null);
-      setSelected(null);
-      setSelectedPaths([]);
+      const nextSelected = selected && findObject(result.inspection, selected.path);
+      setSelected(nextSelected);
+      setSelectedPaths(nextSelected ? [nextSelected.path] : []);
+      if (nextSelected) {
+        setCaption(nextSelected.caption ?? "");
+        setDataField(nextSelected.dataField ?? "");
+        const { x, y, width, height } = nextSelected.box;
+        setGeometry({ left: x, top: y, width, height });
+      }
       setPanel("design");
-      setMessage(`${tr.updatedOriginal}: ${result.file}`);
+      setMessage(`${asCopy ? tr.saved : tr.updatedOriginal}: ${result.file}`);
       return true;
     } catch (caught) {
       setError((caught as Error).message);
+      if (codeEditing) setCodeError((caught as Error).message);
       return false;
     } finally {
       setBusy(false);
@@ -767,7 +868,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const saveAll = async (): Promise<boolean> => {
-    return saveSourceToOriginal();
+    return saveSourceDraft();
   };
 
   const addObject = (kind: "label" | "textbox" | "shape" | "line" | "image" | "table" | "form", bandPath?: string, position?: { x: number; y: number }) => {
@@ -777,7 +878,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const patched = pendingAll.length ? applyYrfChanges(base, pendingAll as YrfChange[]) : null;
       if (patched && !patched.ok) throw new Error(patched.error);
       const source = patched?.ok ? patched.text : base;
-      const target = bandPath ?? selected?.path.replace(/\.objects\[\d+\]$/, "") ?? report.inspection.pages[0]?.bands[0]?.path;
+      const target = bandPath ?? selected?.path.replace(/\.objects\[\d+\]$/, "") ?? report.inspection.pages[pageIndex]?.bands[0]?.path;
       if (!target) throw new Error("No report band is available");
       const names = new Set(report.inspection.pages.flatMap((page) => page.bands.flatMap((band) => band.objects.map((object) => object.name))).concat(report.inspection.sideBands.flatMap((band) => band.objects.map((object) => object.name))));
       const left = Math.max(0, Math.round(position?.x ?? 80)), top = Math.max(0, Math.round(position?.y ?? 40));
@@ -801,6 +902,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       }
       const inspected = inspectYrf(result.text, report.hash);
       if (!inspected.inspection) throw new Error(inspected.error ?? "Invalid report");
+      pushHistory();
       setStructuralDraft(result.text);
       setReport({ ...report, inspection: inspected.inspection });
       const added = findObject(inspected.inspection, result.objectPath);
@@ -813,7 +915,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   };
 
   const setObjectProperty = (field: string, value: string | number | boolean) => {
-    if (!report?.source || !selected?.supported || /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(field)) return;
+    if (!report?.source || !selected || selected.hasScript || hasYrfScriptField(field)) return;
     try {
       const base = structuralDraft ?? report.source;
       const patched = pendingAll.length ? applyYrfChanges(base, pendingAll as YrfChange[]) : null;
@@ -822,6 +924,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const inspected = inspectYrf(next, report.hash);
       if (!inspected.inspection) throw new Error(inspected.error ?? "Invalid report");
       const updated = findObject(inspected.inspection, selected.path);
+      pushHistory();
       setStructuralDraft(next); setReport({ ...report, inspection: inspected.inspection }); setSelected(updated);
       if (updated) {
         setCaption(updated.caption ?? ""); setDataField(updated.dataField ?? "");
@@ -854,6 +957,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const result = moveYrfObject(patched?.ok ? patched.text : base, selected.path, position);
       const inspected = inspectYrf(result.text, report.hash);
       if (!inspected.ok || !inspected.inspection) throw new Error(inspected.error ?? "Invalid YRF structure");
+      pushHistory();
       setStructuralDraft(result.text);
       setReport({ ...report, inspection: inspected.inspection });
       const updated = findObject(inspected.inspection, result.objectPath);
@@ -883,6 +987,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       const inspected = inspectYrf(next, report.hash);
       if (!inspected.inspection) throw new Error(inspected.error ?? "Invalid report");
       const first = inspected.inspection.pages.flatMap((page) => page.bands.flatMap((band) => band.objects)).find((object) => object.editableCaption) ?? null;
+      pushHistory();
       setStructuralDraft(next); setReport({ ...report, inspection: inspected.inspection }); setSelected(first);
       setCaption(first?.caption ?? ""); setDataField(first?.dataField ?? "");
       setGeometry({ left: first?.box.x ?? 0, top: first?.box.y ?? 0, width: first?.box.width ?? 0, height: first?.box.height ?? 0 });
@@ -890,110 +995,16 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     } catch (caught) { setError((caught as Error).message); }
   };
 
-  const saveCopy = async (inPlace = false): Promise<boolean> => {
-    if (!report) return false;
-    if (inPlace && structuralDraft) { setError(tr.saveOriginalLimited); return false; }
-    if (pendingAll.length === 0 && !structuralDraft) return false;
-    setBusy(true);
-    setError("");
-    try {
-      const draftResult = structuralDraft && pendingAll.length ? applyYrfChanges(structuralDraft, pendingAll as YrfChange[]) : null;
-      if (draftResult && !draftResult.ok) throw new Error(draftResult.error);
-      const text = structuralDraft ? (draftResult?.ok ? draftResult.text : structuralDraft) : null;
-      const result = await post<{
-        file: string;
-        hash: string;
-        source: string;
-        inspection: YrfInspection;
-        changes: ChangeView[];
-      }>(token, inPlace ? "reports/yrf/save" : text !== null ? "reports/yrf/source" : "reports/yrf/save-copy", {
-        path: report.file,
-        expectedHash: report.hash,
-        ...(inPlace ? { approved: true } : {}),
-        ...(text !== null ? { text } : { changes: pendingAll }),
-      });
-      const previousPath = selected?.path;
-      setReport({
-        file: result.file,
-        hash: result.hash,
-        inspection: result.inspection,
-        source: result.source,
-      });
-      setFilePath(result.file);
-      const nextSelected = previousPath ? findObject(result.inspection, previousPath) : null;
-      setSelected(nextSelected);
-      if (nextSelected) {
-        setCaption(nextSelected.caption ?? "");
-        setDataField(nextSelected.dataField ?? "");
-        setGeometry({
-          left: nextSelected.box.x,
-          top: nextSelected.box.y,
-          width: nextSelected.box.width,
-          height: nextSelected.box.height,
-        });
-      }
-      setDraftChanges({});
-      setGeometryChanges({});
-      setStructuralDraft(null);
-      setPending(result.changes ?? []);
-      setMessage(`${inPlace ? tr.savedOriginal : tr.saved}: ${result.file}`);
-      return true;
-    } catch (caught) {
-      setError((caught as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const applySource = async (): Promise<boolean> => {
-    if (!report || codeDraft === null) return false;
-    setBusy(true);
-    setError("");
-    setCodeError("");
-    try {
-      const result = await post<{
-        file: string;
-        hash: string;
-        source: string;
-        inspection: YrfInspection;
-      }>(token, "reports/yrf/source", {
-        path: report.file,
-        expectedHash: report.hash,
-        text: codeDraft,
-      });
-      setReport({
-        file: result.file,
-        hash: result.hash,
-        inspection: result.inspection,
-        source: result.source,
-      });
-      setFilePath(result.file);
-      setCodeEditing(false);
-      setCodeDraft(null);
-      setPanel("design");
-      setSelected(null);
-      setPending([]);
-      setMessage(`${tr.saved}: ${result.file}`);
-      return true;
-    } catch (caught) {
-      setCodeError((caught as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const scaleFor = (source: YrfInspection) =>
     source.paper.width > 0 ? 640 / source.paper.width * zoom : 0.25 * zoom;
 
   const beginGesture = (
     object: YrfObjectRef,
-    event: React.MouseEvent,
+    event: React.PointerEvent,
     mode: "move" | "resize",
     handle?: YrfHandle,
   ) => {
-    if (!object.supported || !object.editableGeometry || !report) return;
+    if (!object.editableGeometry || !report || !event.isPrimary || event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
     if (selected?.path !== object.path) selectObject(object);
@@ -1007,20 +1018,23 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           height: Number(draftChanges[`${object.path}.height`]?.value ?? previousBox.height),
         };
     gestureRef.current = {
+      pointerId: event.pointerId,
       mode,
       path: object.path,
       handle,
       startX: event.clientX,
       startY: event.clientY,
       box: { ...box },
+      latest: box,
+      before: snapshotDraft(),
     };
 
   };
 
   useEffect(() => {
-    const move = (event: MouseEvent) => {
+    const move = (event: PointerEvent) => {
       const gesture = gestureRef.current;
-      if (!gesture || !report) return;
+      if (!gesture || gesture.pointerId !== event.pointerId || !report) return;
       const scale = scaleFor(report.inspection);
       if (!scale) return;
       const dx = (event.clientX - gesture.startX) / scale;
@@ -1047,35 +1061,36 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           box.height = gesture.box.y + gesture.box.height - box.y;
         }
       }
+      gesture.latest = box;
       setGeometryChanges((current) => ({ ...current, [gesture.path]: box }));
       setGeometry({ left: box.x, top: box.y, width: box.width, height: box.height });
     };
-    const up = () => {
-      gestureRef.current = null;
-    };
-    const cancel = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+    const up = (event: PointerEvent) => {
       const gesture = gestureRef.current;
-      if (!gesture) return;
+      if (gesture?.pointerId !== event.pointerId) return;
       gestureRef.current = null;
-      setGeometryChanges((current) => {
-        const next = { ...current };
-        delete next[gesture.path];
-        return next;
-      });
-      setGeometry({
-        left: gesture.box.x,
-        top: gesture.box.y,
-        width: gesture.box.width,
-        height: gesture.box.height,
-      });
+      if (gesture && (gesture.latest.x !== gesture.box.x || gesture.latest.y !== gesture.box.y ||
+        gesture.latest.width !== gesture.box.width || gesture.latest.height !== gesture.box.height)) {
+        pushHistory(gesture.before);
+      } else if (gesture && gesture.latest !== gesture.box) {
+        restoreDraft(gesture.before);
+      }
     };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    const cancel = (event: KeyboardEvent | PointerEvent) => {
+      if ("key" in event && event.key !== "Escape") return;
+      const gesture = gestureRef.current;
+      if (!gesture || ("pointerId" in event && gesture.pointerId !== event.pointerId)) return;
+      gestureRef.current = null;
+      restoreDraft(gesture.before);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", cancel);
     return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown", cancel);
     };
   }, [report, geometryChanges, zoom]);
@@ -1084,16 +1099,19 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
     setBusy(true);
     setError("");
     try {
-      const result = await post<{ file: string; hash: string; source: string; inspection: YrfInspection }>(
+      const result = await post<{ file: string; hash: string; source: string; inspection: YrfInspection; warnings: string[] }>(
         token,
         "reports/yrf/create",
         {
           templateId: createTemplate,
+          locale: language === "id" ? "id-ID" : "en-US",
           file: createPath.trim(),
           acknowledge: acknowledged,
         },
       );
-      setReport({ file: result.file, hash: result.hash, source: result.source, inspection: result.inspection });
+      resetHistory();
+      setReport({ file: result.file, hash: result.hash, source: result.source,
+        inspection: { ...result.inspection, warnings: [...new Set(result.warnings)] } });
       setFilePath(result.file);
       setSelected(null);
       setPending([]);
@@ -1109,13 +1127,6 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
   const inspection = report?.inspection;
   const scale = inspection ? scaleFor(inspection) : 0.25 * zoom;
   const rulerStep = inspection ? Math.max(1, Math.round(inspection.paper.width / 1000) * 100) : 100;
-  const bands = inspection
-    ? [
-        ...inspection.sideBands.filter((band) => band.path.endsWith("reportHeader")),
-        ...(inspection.pages[0]?.bands ?? []),
-        ...inspection.sideBands.filter((band) => band.path.endsWith("reportFooter")),
-      ]
-    : [];
   useEffect(() => {
     const band = bands.find((item) => item.objects.some((object) => object.path === selected?.path));
     if (band) setExpandedBands((current) => current.has(band.path) ? current : new Set([...current, band.path]));
@@ -1164,15 +1175,32 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
             {tr.codeReadonly}
           </button>
         </div>
+        {inspection && panel === "design" && <>
+          <button className="yrf-ghost" aria-label={tr.undoDraft} title={tr.undoDraft} disabled={busy || history.past.length === 0} onClick={() => stepHistory(false)}>↶</button>
+          <button className="yrf-ghost" aria-label={tr.redoDraft} title={tr.redoDraft} disabled={busy || history.future.length === 0} onClick={() => stepHistory(true)}>↷</button>
+        </>}
         <button className="yrf-ghost" onClick={() => setCreating((value) => !value)}>
           {tr.create}
         </button>
         {inspection && (
-          <button className="yrf-primary" disabled={busy || !dirty} title={tr.saveOriginalLimited} onClick={() => void saveAll()}>
+          <button className="yrf-primary" disabled={busy || !dirty} title={tr.saveDraftHint} onClick={() => void saveAll()}>
             {tr.saveOriginal}
           </button>
         )}
       </header>
+      {inspection && panel === "design" && (
+        <nav className="yrf-panel-controls" aria-label={language === "id" ? "Panel editor" : "Editor panels"}>
+          <button className="yrf-ghost" aria-pressed={narrowPanel === "canvas"} onClick={() => setNarrowPanel("canvas")}>
+            {language === "id" ? "Kanvas" : "Canvas"}
+          </button>
+          <button className="yrf-ghost" aria-pressed={narrowPanel === "palette"} onClick={() => setNarrowPanel("palette")}>
+            {language === "id" ? "Palet dan struktur" : "Palette and structure"}
+          </button>
+          <button className="yrf-ghost" aria-pressed={narrowPanel === "properties"} onClick={() => setNarrowPanel("properties")}>
+            {language === "id" ? "Properti" : "Properties"}
+          </button>
+        </nav>
+      )}
 
       {error && <div className="yrf-alert bad">{error}</div>}
       {message && <div className="yrf-alert ok">{message}</div>}
@@ -1185,10 +1213,10 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
             <label className="yrf-field">
               <span>{tr.template}</span>
               <select value={createTemplate} onChange={(event) => setCreateTemplate(event.target.value)}>
-                {["invoice", "statement", "receipt", "loanSchedule", "aging", "collection", "voucher"].map(
+                {["invoice", "blank", "statement", "receipt", "loanSchedule", "aging", "collection", "voucher", "vehicleCollateral"].map(
                   (template) => (
                     <option key={template} value={template}>
-                      {template}
+                      {template === "vehicleCollateral" ? language === "id" ? "Formulir agunan kendaraan" : "Vehicle collateral form" : template}
                     </option>
                   ),
                 )}
@@ -1252,7 +1280,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
       {inspection && panel === "code" ? (
         <div className="yrf-code">
           <div className="yrf-code-head">
-            <span>{tr.codeHint}</span>
+            <span>{tr.codeHint} {codeLine !== null && <strong>{tr.codeLine.replace("{line}", String(codeLine))}</strong>}</span>
             <div className="yrf-actions">
               {!codeEditing ? (
                 <button
@@ -1279,9 +1307,9 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   <button
                     className="yrf-primary"
                     disabled={busy || codeDraft === null || codeDraft === report?.source}
-                    onClick={() => void saveSourceToOriginal()}
+                    onClick={() => void saveSourceDraft(true)}
                   >
-                    {tr.saveOriginal}
+                    {tr.saveCopy}
                   </button>
                 </>
               )}
@@ -1289,11 +1317,16 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           </div>
           <textarea
             className="yrf-code-area"
+            ref={codeArea}
+            wrap="off"
             readOnly={!codeEditing}
             spellCheck={false}
             value={codeDraft ?? report?.source ?? ""}
             aria-label={tr.codeReadonly}
-            onChange={(event) => setCodeDraft(event.target.value)}
+            onChange={(event) => {
+              setCodeDraft(event.target.value);
+              setCodeLine(null);
+            }}
           />
           {codeError && <p className="yrf-hint" style={{ color: "var(--error)" }}>{codeError}</p>}
           <p className="yrf-hint">{tr.sourceNote}</p>
@@ -1306,7 +1339,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         </div>
       ) : (
         <div
-          className="yrf-body"
+          className={`yrf-body yrf-panel-${narrowPanel}`}
           style={{
             ["--yrf-left-width" as string]: `${leftWidth}px`,
             ["--yrf-right-width" as string]: `${rightWidth}px`,
@@ -1403,6 +1436,18 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
           <main className="yrf-canvas-wrap">
             <div className="yrf-note">{tr.selectHint} {tr.readonlyNote}</div>
             <div className="yrf-view-controls"><button type="button" className="yrf-ghost" aria-label="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, Math.round((value - 0.1) * 10) / 10))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" className="yrf-ghost" aria-label="Zoom in" disabled={zoom >= 1.6} onClick={() => setZoom((value) => Math.min(1.6, Math.round((value + 0.1) * 10) / 10))}>+</button><button type="button" className="yrf-ghost" aria-pressed={showGrid} onClick={() => setShowGrid((value) => !value)}>{tr.grid}</button><button type="button" className="yrf-ghost" aria-pressed={showRuler} onClick={() => setShowRuler((value) => !value)}>{tr.ruler}</button></div>
+            {inspection.pages.length > 1 && <label className="yrf-page-selector">{tr.localPage}
+              <select value={pageIndex} onChange={event => {
+                flushCurrentChanges();
+                setPageIndex(Number(event.target.value));
+                setSelected(null);
+                setSelectedPaths([]);
+                setPending([]);
+              }}>
+                {inspection.pages.map(page => <option key={page.path} value={page.index}>{page.index + 1}</option>)}
+              </select>
+            </label>}
+            {pageLayout?.overflow && <p className="yrf-note" role="status">{tr.pageOverflow}</p>}
             {selectedPaths.length > 1 && (
               <div className="yrf-align-bar">
                 <span>{tr.multiSelected.replace("{count}", String(selectedPaths.length))}</span>
@@ -1416,7 +1461,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                     ["bottom", tr.alignBottom],
                   ] as const
                 ).map(([mode, label]) => (
-                  <button key={mode} onClick={() => alignSelected(mode)}>
+                  <button key={mode} disabled={selectedObjects.some(object => !object.editableGeometry)} onClick={() => alignSelected(mode)}>
                     {label}
                   </button>
                 ))}
@@ -1432,12 +1477,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
               }}
             >
               {showRuler && <CanvasRulers width={inspection.paper.width} height={inspection.paper.height} scale={scale} step={rulerStep} unit={tr.rawUnits} />}
-              {(() => {
-                let cursor = 0;
-                return bands.map((band) => {
-                  const top = cursor;
-                  cursor += band.height;
-                  return (
+              {pageLayout?.placements.map(({ band, top }) => (
                     <div
                       key={band.path}
                       className="yrf-band"
@@ -1458,7 +1498,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                             key={object.path}
                             className={`yrf-object kind-${object.kind
                               .replace(/[^A-Za-z0-9-]/g, "-")
-                              .toLowerCase()} ${selectedPaths.includes(object.path) ? "on" : ""} ${object.supported && object.editableGeometry ? "movable" : ""}`}
+                              .toLowerCase()} ${selectedPaths.includes(object.path) ? "on" : ""} ${object.editableGeometry ? "movable" : ""}`}
                             style={(() => {
                               const declarations = parseStyleDeclarations(
                                 String(draftChanges[`${object.path}.style`]?.value ?? object.style ?? ""),
@@ -1482,16 +1522,22 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                                 fontSize,
                               };
                             })()}
-                            onMouseDown={(event) => beginGesture(object, event, "move")}
+                            onPointerDown={(event) => beginGesture(object, event, "move")}
                             onClick={(event) => selectObject(object, event.shiftKey || event.metaKey || event.ctrlKey)}
                             onDoubleClick={() => { selectObject(object); if (object.editableCaption) requestAnimationFrame(() => captionRef.current?.focus()); }}
                             title={`${object.kind} ${object.name}`}
                           >
+                            {object.barcodeKind ? <Suspense fallback={null}>
+                              <BarcodePreview kind={object.barcodeKind} value={object.localFields.value ?? ""} missing={tr.barcodeValueMissing} />
+                            </Suspense> : !object.supported && object.capability !== "visual" &&
+                              <span className="yrf-local-preview">{object.localRichText?.map((run, index) => <span className="yrf-rich-run" key={index}
+                                style={{ fontWeight: run.bold ? 700 : undefined, fontStyle: run.italic ? "italic" : undefined,
+                                  textDecoration: run.underline ? "underline" : undefined }}>{run.text}</span>) ?? (object.localPreviewText || object.kind)}</span>}
                             {object.kind === "image" && object.imageData ? <img src={object.imageData} alt="" draggable={false} /> : (object.caption !== null || (object.path === selected?.path && object.editableCaption)) && <span>{object.path === selected?.path ? caption : String(draftChanges[`${object.path}.${object.textField ?? "caption"}`]?.value ?? object.caption ?? "")}</span>}
                           </button>
                         );
                       })}
-                      {selected && selectedPaths.length === 1 && selected.supported && selected.editableGeometry &&
+                      {selected && selectedPaths.length === 1 && selected.editableGeometry &&
                         band.objects.some((object) => object.path === selected.path) &&
                         (() => {
                           const box = geometryChanges[selected.path] ?? selected.box;
@@ -1510,7 +1556,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                                   key={handle}
                                   className={`yrf-handle ${handle}`}
                                   data-yrf-handle={handle}
-                                  onMouseDown={(event) =>
+                                  onPointerDown={(event) =>
                                     beginGesture(selected, event, "resize", handle)
                                   }
                                 />
@@ -1519,9 +1565,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                           );
                         })()}
                     </div>
-                  );
-                });
-              })()}
+              ))}
             </div>
           </main>
           <div
@@ -1546,10 +1590,15 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                 <p className="yrf-meta">
                   {selected.kind} · {selected.name}
                 </p>
+                {report && selected.kind === "subReport" && /\.yrf$/i.test(selected.localFields.reportName ?? "") &&
+                  <button type="button" className="yrf-ghost" disabled={busy}
+                    onClick={() => attemptLeave(() => void open(report.file, selected.localFields.reportName))}>
+                    {tr.openLinkedYrf}
+                  </button>}
                 {selected.kind === "image" && <label className="yrf-field"><span>{tr.importImage}</span><input aria-label={tr.importImage} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { importImage(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} /><small className="yrf-hint">{tr.imageHint}</small></label>}
-                {!selected.supported && (
+                {!selected.supported && !selected.hasScript && (
                   <p className="yrf-hint">
-                    {tr.unsupported}: {selected.kind}
+                    {tr.unsupported} · {selected.kind}
                   </p>
                 )}
                 {!selected.editableGeometry && <p className="yrf-hint">{tr.noGeometry}</p>}
@@ -1560,11 +1609,13 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                       <span>{field}</span>
                       <input
                         type="number"
-                        disabled={!selected.supported || !selected.editableGeometry}
+                        disabled={!selected.editableGeometry}
                         value={geometry[field]}
-                        onChange={(event) =>
-                          setGeometry((current) => ({ ...current, [field]: Number(event.target.value) }))
-                        }
+                        onChange={event => {
+                          const value = Number(event.target.value);
+                          changeDraftField(field, () => setGeometry(current => ({ ...current, [field]: value })));
+                        }}
+                        onBlur={finishDraftField}
                       />
                     </label>
                   ))}
@@ -1576,13 +1627,14 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                     rows={3}
                     value={caption}
                     disabled={!selected.supported || !selected.editableCaption}
-                    onChange={(event) => setCaption(event.target.value)}
+                    onChange={event => changeDraftField("caption", () => setCaption(event.target.value))}
+                    onBlur={finishDraftField}
                   />
                 </label>
                 {selected.dataField !== null && (
                   <label className="yrf-field">
                     <span>{tr.dataField}</span>
-                    <input value={dataField} onChange={(event) => setDataField(event.target.value)} />
+                    <input value={dataField} disabled={!selected.supported} onChange={event => changeDraftField("dataField", () => setDataField(event.target.value))} onBlur={finishDraftField} />
                   </label>
                 )}
                 {selected && (
@@ -1702,15 +1754,20 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                 {scalarProperties.length > 0 && <>
                   <h3>{tr.objectProperties}</h3>
                   <p className="yrf-hint">{tr.objectPropertiesHint}</p>
-                  {scalarProperties.map(([key, value]) => (
-                    <label className="yrf-field" key={`${selected.path}.${key}.${value}`}>
+                  {scalarProperties.map(([key, value]) => {
+                    const editable = selected.supported || !selected.hasScript && isYrfLocalField(selected.kind, key, value, selected.barcodeKind);
+                    const readValue = (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+                      const next = typeof value === "number" ? Number(event.currentTarget.value) : event.currentTarget.value;
+                      if (next !== value) setObjectProperty(key, next);
+                    };
+                    return <label className="yrf-field" key={`${selected.path}.${key}.${value}`}>
                       <span>{key}</span>
-                      {typeof value === "boolean" ? <select disabled={!selected.supported} aria-label={key} value={String(value)} onChange={(event) => setObjectProperty(key, event.target.value === "true")}><option value="true">true</option><option value="false">false</option></select> : <input disabled={!selected.supported} aria-label={key} type={typeof value === "number" ? "number" : "text"} defaultValue={String(value)} onBlur={(event) => {
-                        const next = typeof value === "number" ? Number(event.currentTarget.value) : event.currentTarget.value;
-                        if (next !== value) setObjectProperty(key, next);
-                      }} />}
-                    </label>
-                  ))}
+                      {typeof value === "boolean" ? <select disabled={!editable} aria-label={key} value={String(value)} onChange={event => setObjectProperty(key, event.target.value === "true")}><option value="true">true</option><option value="false">false</option></select>
+                        : editable && key === "visible" && !selected.supported ? <select aria-label={key} value={String(value)} onChange={event => setObjectProperty(key, event.target.value)}><option value="0">0</option><option value="1">1</option></select>
+                        : selected.kind === "rtf" && key === "data" ? <textarea readOnly={!editable} aria-label={key} rows={3} maxLength={4000} defaultValue={String(value)} onBlur={readValue} />
+                        : <input disabled={!editable} aria-label={key} type={typeof value === "number" ? "number" : "text"} defaultValue={String(value)} onBlur={readValue} />}
+                    </label>;
+                  })}
                 </>}
                 <button className="yrf-remove" disabled={!selected.supported || selected.hasScript} title={selected.hasScript ? tr.scriptProtected : !selected.supported ? tr.unsupported : undefined} onClick={removeObject}>{tr.removeObject}</button>
 
@@ -1734,12 +1791,11 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
         </div>
       )}
       {leaveAction && (
-        <div className="yrf-modal" role="dialog" aria-modal="true" aria-label={tr.unsavedTitle}>
-          <div className="yrf-modal-card">
+        <ReportDialog className="yrf-modal-card" label={tr.unsavedTitle} onCancel={() => { if (!busy) setLeaveAction(null); }}>
             <h3>{tr.unsavedTitle}</h3>
             <p>{tr.unsavedHint}</p>
             <div className="yrf-actions">
-              <button onClick={() => setLeaveAction(null)}>{tr.cancel}</button>
+              <button autoFocus disabled={busy} onClick={() => setLeaveAction(null)}>{tr.cancel}</button>
               <button
                 onClick={() => {
                   const run = leaveAction.run;
@@ -1765,8 +1821,7 @@ export default function YrfInspector({ token, language, onBack, onExit, initialP
                   {tr.saveOriginal}
               </button>
             </div>
-          </div>
-        </div>
+        </ReportDialog>
       )}
     </div>
   );

@@ -15,7 +15,8 @@
   border-bottom: 1px solid var(--border);
 }
 .yrf-path {
-  flex: 1;
+  flex: 1 1 200px;
+  min-width: min(100%, 180px);
   max-width: 460px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -556,6 +557,9 @@
 }
 .yrf-object.kind-image img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .yrf-view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; align-self: flex-start; }
+.yrf-page-selector { align-self: flex-start; display: flex; align-items: center; gap: 8px; }
+.yrf-object .yrf-local-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.yrf-object .yrf-rich-run { display: inline; white-space: inherit; }
 .yrf-object.on { outline: 2px solid #635bff; outline-offset: 1px; box-shadow: none; }
 
 .yrf-danger {
@@ -580,7 +584,11 @@
   background: color-mix(in srgb, var(--accent) 24%, transparent);
   outline: none;
 }
+.yrf-panel-controls { display: none; }
+.yrf-object, .yrf-handle { touch-action: none; }
 @media (max-width: 1100px) {
+  .yrf-panel-controls { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; }
+  .yrf-panel-controls [aria-pressed="true"] { background: var(--surface2); }
   .yrf-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -589,6 +597,10 @@
   .yrf-right {
     display: none;
   }
+  .yrf-panel-palette .yrf-left,
+  .yrf-panel-properties .yrf-right { display: block; }
+  .yrf-panel-palette .yrf-canvas-wrap,
+  .yrf-panel-properties .yrf-canvas-wrap { display: none; }
 }
 
 .yrf-layer-actions {

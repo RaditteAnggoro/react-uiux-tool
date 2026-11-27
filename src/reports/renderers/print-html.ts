@@ -5,10 +5,11 @@ import { tableCellText, tableColumnWidths, tableHeaderGroups, tableHeaderTextCol
 import type { ReportBand, ReportDocumentV1, ReportElement } from "../core/types.js";
 import { evaluateExpression } from "../core/expressions.js";
 import { toDecimalString } from "../core/decimal.js";
-import { datasetRows, resolvePath } from "../core/data.js";
+import { resolvePath } from "../core/data.js";
 import { paginateReport, type PlacedBand } from "../core/pagination.js";
-import { renderChartSvg, type ChartSeries } from "./chart.js";
-import { parseDecimal, add } from "../core/decimal.js";
+import { renderChartSvg, reportChartOptions } from "./chart.js";
+import { summarizeCrosstab } from "../core/crosstab.js";
+import { reportBarcode } from "../core/barcode.js";
 
 export interface RenderOptions {
   /** Synthetic rows keyed by dataset id, used instead of live data. */
@@ -139,71 +140,19 @@ function boxStyle(element: ReportElement, extra = ""): string {
 }
 
 
-interface CrosstabCell {
-  row: string;
-  column: string;
-  value: string;
-}
-
 function renderCrosstab(
   document: ReportDocumentV1,
   element: ReportElement,
   data: Record<string, unknown> | undefined,
   style: string,
 ): string {
-  const binding = typeof element.bindings?.path === "string" ? element.bindings.path : "";
-  const rows = datasetRows(data, binding) as Array<Record<string, unknown>>;
-  const rowKey = String(element.props.rowKey ?? "row");
-  const columnKey = String(element.props.columnKey ?? "column");
-  const valueKey = String(element.props.valueKey ?? "value");
-  const aggregate = element.props.aggregate === "count" ? "count" : "sum";
-  const rowNames: string[] = [];
-  const columnNames: string[] = [];
-  const cells = new Map<string, CrosstabCell>();
-  for (const row of rows) {
-    const rowName = String(row?.[rowKey] ?? "");
-    const columnName = String(row?.[columnKey] ?? "");
-    if (!rowNames.includes(rowName)) rowNames.push(rowName);
-    if (!columnNames.includes(columnName)) columnNames.push(columnName);
-    const key = `${rowName}\u0000${columnName}`;
-    const cell = cells.get(key) ?? { row: rowName, column: columnName, value: "0" };
-    const raw = Number(row?.[valueKey] ?? 0) || 0;
-    cell.value =
-      aggregate === "count"
-        ? String(Number(cell.value) + 100)
-        : add(parseDecimal(cell.value, 2), parseDecimal(String(raw), 2)).units.toString();
-    cells.set(key, cell);
-  }
-  const asNumber = (value: string) => Number(value) / 100;
-  const columnTotals = new Map<string, number>();
-  const rowTotals = new Map<string, number>();
-  let grand = 0;
-  const format = (value: number) =>
-    new Intl.NumberFormat(document.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
-  const header = `<tr><th>${escapeHtml(element.props.rowLabel ?? rowKey)}</th>${columnNames
-    .map((name) => `<th style="text-align:right">${escapeHtml(name)}</th>`)
-    .join("")}<th style="text-align:right">Total</th></tr>`;
-  const body = rowNames
-    .map((rowName) => {
-      let rowTotal = 0;
-      const cellsHtml = columnNames
-        .map((columnName) => {
-          const cell = cells.get(`${rowName}\u0000${columnName}`);
-          const value = cell ? asNumber(cell.value) : 0;
-          rowTotal += value;
-          columnTotals.set(columnName, (columnTotals.get(columnName) ?? 0) + value);
-          return `<td style="text-align:right">${escapeHtml(format(value))}</td>`;
-        })
-        .join("");
-      rowTotals.set(rowName, rowTotal);
-      grand += rowTotal;
-      return `<tr><th style="text-align:left">${escapeHtml(rowName)}</th>${cellsHtml}<td style="text-align:right"><strong>${escapeHtml(format(rowTotal))}</strong></td></tr>`;
-    })
-    .join("");
-  const footer = `<tr><th style="text-align:left">Total</th>${columnNames
-    .map((name) => `<th style="text-align:right">${escapeHtml(format(columnTotals.get(name) ?? 0))}</th>`)
-    .join("")}<th style="text-align:right">${escapeHtml(format(grand))}</th></tr>`;
-  return `<div class="el el-crosstab" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}"><table><thead>${header}</thead><tbody>${body}</tbody><tfoot>${footer}</tfoot></table></div>`;
+  const matrix = summarizeCrosstab(element, data, document.locale);
+  const renderRow = (row: string[], heading = false) => `<tr>${row.map((value, index) => {
+    const tag = heading || index === 0 ? "th" : "td";
+    return `<${tag} style="text-align:${index === 0 ? "left" : "right"}">${escapeHtml(value)}</${tag}>`;
+  }).join("")}</tr>`;
+  const limit = matrix.limited ? '<p>Only the first 100 rows and columns are shown. Totals cover displayed data.</p>' : "";
+  return `<div class="el el-crosstab" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}">${limit}<table><thead>${renderRow(matrix.header, true)}</thead><tbody>${matrix.rows.map(row => renderRow(row)).join("")}</tbody><tfoot>${renderRow(matrix.footer, true)}</tfoot></table></div>`;
 }
 
 function renderElement(
@@ -252,38 +201,16 @@ function renderElement(
       }
       return `<div class="el el-image el-image-empty" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)}" role="img" aria-label="${alt}"></div>`;
     }
+    case "barcode": {
+      const code = reportBarcode(element, scopedOptions.data);
+      if (!code) return `<div class="el" data-id="${escapeHtml(element.id)}" style="${boxStyle(element, style)}">Barcode value unavailable</div>`;
+      const rectangles = code.rects.map(({ x, y, width, height }) => `<rect x="${x}" y="${y}" width="${width}" height="${height}"/>`).join("");
+      return `<div class="el el-barcode" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)};background:white"><svg style="width:100%;height:100%" role="img" aria-label="${code.kind === "qrcode" ? "QR Code" : "Code 128"}" viewBox="0 0 ${code.width} ${code.height}" preserveAspectRatio="${code.kind === "qrcode" ? "xMidYMid meet" : "none"}" shape-rendering="crispEdges" fill="black">${rectangles}</svg></div>`;
+    }
     case "table":
       return "";
     case "chart": {
-      const chartType = props.chartType === "line" ? "line" : props.chartType === "pie" ? "pie" : "bar";
-      const rows = binding ? datasetRows(options.data, binding) : [];
-      const categoryKey = String(props.categoryKey ?? "label");
-      const valueKey = String(props.valueKey ?? "value");
-      const labels = rows.length
-        ? rows.map((row) => String((row as Record<string, unknown>)?.[categoryKey] ?? ""))
-        : Array.isArray(props.labels)
-          ? (props.labels as unknown[]).map(String)
-          : [];
-      const series: ChartSeries[] = Array.isArray(props.series)
-        ? (props.series as ChartSeries[])
-        : [
-            {
-              label: String(props.seriesLabel ?? "Value"),
-              values: rows.length
-                ? rows.map((row) => Number((row as Record<string, unknown>)?.[valueKey]) || 0)
-                : Array.isArray(props.values)
-                  ? (props.values as unknown[]).map((value) => Number(value) || 0)
-                  : [],
-            },
-          ];
-      const svg = renderChartSvg({
-        type: chartType,
-        labels,
-        series,
-        width: Math.max(20, element.box.width),
-        height: Math.max(15, element.box.height),
-        title: typeof props.title === "string" ? props.title : undefined,
-      });
+      const svg = renderChartSvg(reportChartOptions(element, scopedOptions.data));
       return `<div class="el el-chart" data-id="${escapeHtml(element.id)}" style="${boxStyle(element)}">${svg}</div>`;
     }
     case "crosstab": {

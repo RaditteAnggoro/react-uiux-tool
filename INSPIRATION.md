@@ -41,5 +41,8 @@ small validated source-span replacements.
 - Links point to the upstream owner so readers can verify current authorship,
   trademarks, source, and license terms there.
 
+See [feature audit and code references](docs/FEATURE_AUDIT_AND_CODE_REFERENCES.md)
+for the current implementation, upstream patterns, and verification backlog.
+
 If a credit is missing or inaccurate, please open a repository issue with the
 upstream source and the correction needed.

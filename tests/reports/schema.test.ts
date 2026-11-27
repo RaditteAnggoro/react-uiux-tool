@@ -14,6 +14,15 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+test("duplicate JSON properties are rejected before native validation", () => {
+  const input = '{"title":"first","titl\\u0065":"second","container":{"name":1}}';
+  const duplicate = parseReport(input);
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.errors[0]?.message ?? "", /Duplicate.*title/i);
+  const nestedDuplicate = parseReport('{"container":{"name":1,"name":2}}');
+  assert.match(nestedDuplicate.errors[0]?.message ?? "", /Duplicate.*name/i);
+});
+
 test("a template document validates and round trips through JSON", () => {
   const document = buildTemplate("invoice");
   const validation = validateReportDocument(document);

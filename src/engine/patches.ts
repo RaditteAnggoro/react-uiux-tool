@@ -3,6 +3,7 @@ import ts from "typescript";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { stat, open, rename, unlink } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   analyzeProject,
   parseSource,
@@ -10,6 +11,7 @@ import {
   PRIMITIVE_PROPS,
   jsxOpen,
 } from "./analyzer.js";
+import { allowedCssTokenValue, cssTokenDeclarations } from "./css-tokens.js";
 import { hashSource, readProjectFile, resolveProjectPath } from "./safety.js";
 import type {
   PatchRequest,
@@ -1069,6 +1071,7 @@ export async function createPatch(
           ]
         : [],
     operation: request.operation,
+    object: element.tag,
     state: "PATCH_PREVIEW",
   };
 }
@@ -1236,6 +1239,12 @@ export async function createMultiStylePatch(
     state: "PATCH_PREVIEW",
   };
 }
+export class InstalledPatchError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
 async function atomicWrite(
   root: string,
   file: string,
@@ -1254,6 +1263,7 @@ async function atomicWrite(
     `.${path.basename(full)}.uiux-${randomUUID()}.tmp`,
   );
   let handle;
+  let installed = false;
   try {
     handle = await open(temp, "wx", info.mode);
     await handle.writeFile(next, "utf8");
@@ -1261,20 +1271,53 @@ async function atomicWrite(
     await handle.sync();
     await handle.close();
     handle = undefined;
-    await resolveProjectPath(root, file);
-    if (hashSource(await readProjectFile(root, file)) !== expectedHash)
-      fail("Source conflict during apply; no file was changed.");
-    await rename(temp, full);
+    for (let attempt = 0; ; attempt++) {
+      await resolveProjectPath(root, file);
+      if (hashSource(await readProjectFile(root, file)) !== expectedHash)
+        fail("Source conflict during apply; no file was changed.");
+      try {
+        await rename(temp, full);
+        installed = true;
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== "win32" || attempt >= 4 || (code !== "EPERM" && code !== "EBUSY")) throw error;
+        await delay(30 * (attempt + 1));
+      }
+    }
     if (hashSource(await readProjectFile(root, file)) !== hashSource(next))
       fail(
         "Source changed immediately after writing. Re-analyze; external changes were not overwritten.",
       );
   } catch (error) {
-    await handle?.close();
+    await handle?.close().catch(() => undefined);
     await unlink(temp).catch(() => {});
+    if (installed) throw new InstalledPatchError(error);
     throw error;
   }
 }
+export async function createCssTokenPatch(root: string, file: string, name: string, expectedHash: string, input: string): Promise<SourcePatch> {
+  const value = input.trim();
+  if (!file.endsWith(".css") || !/^--[\w-]+$/.test(name) || !allowedCssTokenValue(value))
+    fail("Choose a CSS token and enter a supported value.");
+  const report = await analyzeProject(root);
+  const matches = report.styleTokens.filter(token => token.name === name);
+  const token = matches[0];
+  if (!report.coverage.complete || matches.length !== 1 || !token?.editable || token.source.file !== file)
+    fail("This token must have exactly one indexed declaration in a top-level :root rule.");
+  const before = await readProjectFile(root, file);
+  if (hashSource(before) !== expectedHash) fail("Source conflict: external edits detected; no file was changed.");
+  const declaration = cssTokenDeclarations(before).find(item => item.start === token.source.start && item.name === name);
+  if (!declaration?.editable || declaration.value === value) fail("Enter a different value for the selected CSS token.");
+  const after = before.slice(0, declaration.valueStart) + value + before.slice(declaration.valueEnd);
+  const usageFiles = [...new Set(token.consumers)];
+  return { id: randomUUID(), file, before, after, beforeHash: expectedHash, afterHash: hashSource(after),
+    diff: unifiedDiff(before, after, file), scope: "token", operation: "style", object: name, state: "PATCH_PREVIEW",
+    warnings: [`:root · ${name}. Values can inherit or resolve through CSS aliases and fallbacks at runtime.`],
+    impact: { knownUsages: usageFiles.length, files: [file], usageFiles, analysisComplete: false,
+      warning: "Usage files are static matches. Check all themes affected by this root value." } };
+}
+
 export async function applyPatch(
   root: string,
   patch: SourcePatch,
@@ -1287,8 +1330,13 @@ export async function applyPatch(
     hashSource(patch.after) !== patch.afterHash
   )
     fail("Patch integrity check failed.");
-  if (parseErrors(parseSource(patch.file, patch.after)).length)
+  if (patch.scope === "token") {
+    const value = cssTokenDeclarations(patch.after).find(item => item.name === patch.object)?.value;
+    const checked = await createCssTokenPatch(root, patch.file, patch.object ?? "", patch.beforeHash, value ?? "");
+    if (checked.after !== patch.after) fail("The CSS token patch no longer matches its reviewed declaration.");
+  } else if (parseErrors(parseSource(patch.file, patch.after)).length) {
     fail("Invalid syntax; patch was not applied.");
+  }
   await atomicWrite(root, patch.file, patch.beforeHash, patch.after);
   return {
     id: patch.id,

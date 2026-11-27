@@ -35,12 +35,13 @@ export interface ParsedCsv {
 }
 
 /** RFC-4180-ish CSV parser: quoted fields, escaped quotes, CRLF, BOM. No network. */
-export function parseCsv(text: string, maxRows = 5000): ParsedCsv {
+export function parseCsv(text: string, maxRows = 5000, delimiter: "," | "\t" = ","): ParsedCsv {
   const source = text.replace(/^\uFEFF/, "");
   const rows: string[][] = [];
   let field = "";
   let row: string[] = [];
   let quoted = false;
+  let closedQuote = false;
   for (let index = 0; index < source.length; index += 1) {
     const char = source[index];
     if (quoted) {
@@ -50,20 +51,25 @@ export function parseCsv(text: string, maxRows = 5000): ParsedCsv {
           index += 1;
         } else {
           quoted = false;
+          closedQuote = true;
         }
       } else {
         field += char;
       }
       continue;
     }
+    if (closedQuote && char !== delimiter && char !== "\n" && char !== "\r") {
+      throw new Error(`Unexpected character after a quoted field in CSV record ${rows.length + 1}`);
+    }
     if (char === '"') {
       if (field.length > 0) throw new Error("Unexpected quote inside an unquoted CSV field");
       quoted = true;
       continue;
     }
-    if (char === ",") {
+    if (char === delimiter) {
       row.push(field);
       field = "";
+      closedQuote = false;
       continue;
     }
     if (char === "\n" || char === "\r") {
@@ -72,24 +78,33 @@ export function parseCsv(text: string, maxRows = 5000): ParsedCsv {
       rows.push(row);
       row = [];
       field = "";
-      if (rows.length > maxRows) throw new Error("CSV exceeds the row limit");
+      closedQuote = false;
+      if (rows.length > maxRows + 1) throw new Error("CSV exceeds the row limit");
       continue;
     }
     field += char;
   }
   if (quoted) throw new Error("Unterminated quoted CSV field");
   row.push(field);
-  if (row.some((cell) => cell !== "") || rows.length === 0) rows.push(row);
+  if (rows.length === 0 || !/[\r\n]$/.test(source)) rows.push(row);
   const headers = (rows.shift() ?? []).map((header) => header.trim());
   if (headers.length === 0 || headers.every((header) => header === "")) {
     throw new Error("CSV has no header row");
   }
+  if (headers.some((header) => !header)) throw new Error("CSV header names must not be empty");
+  if (new Set(headers).size !== headers.length) throw new Error("CSV contains duplicate header names");
+  if (rows.length > maxRows) throw new Error("CSV exceeds the row limit");
+  rows.forEach((dataRow, index) => {
+    if (dataRow.length !== headers.length) {
+      throw new Error(`CSV record ${index + 2} has ${dataRow.length} columns; expected ${headers.length}`);
+    }
+  });
   return { headers, rows };
 }
 
-export function csvToRecords(text: string, maxRows = 5000): Record<string, string>[] {
-  const { headers, rows } = parseCsv(text, maxRows);
+export function csvToRecords(text: string, maxRows = 5000, delimiter: "," | "\t" = ","): Record<string, string>[] {
+  const { headers, rows } = parseCsv(text, maxRows, delimiter);
   return rows.map((row) =>
-    Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
+    Object.fromEntries(headers.map((header, index) => [header, row[index]])),
   );
 }

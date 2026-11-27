@@ -53,7 +53,10 @@ flowchart LR
 **Coba dalam lima langkah:**
 
 1. Pilih **Report Studio** di Home, lalu **Open existing report** atau **Create new report**.
-2. Pilih folder laporan, lalu pilih laporan dari daftar atau pilih template.
+2. **Open existing report** membuka dialog folder. Setelah memilih folder, buka
+   laporan dari daftar. Pada **Create new report**, gunakan **Choose report folder**
+   di sidebar untuk mengubah folder tujuan, lalu pilih template. Lokasi awalnya
+   adalah folder terakhir atau `Documents/React UIUX Reports`.
 3. Di **Design**, pilih objek. Gunakan palette kiri untuk menambah objek lewat klik
    atau drag-and-drop, dan inspector kanan untuk mengubah nilai dan ukuran yang didukung.
 4. Gunakan **Code** untuk melihat atau mengedit source yang didukung, dan **Preview**
@@ -135,7 +138,7 @@ node dist/cli.js --help
 Vite + React + TypeScript. Template: Blank, Business Dashboard, Data Entry/Form, dan
 Operations Console. Styling: plain CSS, CSS Modules, atau Tailwind v4. Review daftar
 file/dependency terlebih dahulu. Creation hanya membuat file; jalankan `npm install`
-dan `npm run dev` sendiri ketika siap. Starter Next.js belum tersedia.
+dan `npm run dev` sendiri ketika siap. Wizard menyediakan starter Vite React dan Next.js App Router.
 
 **Buka Project yang Sudah Ada**: gunakan folder picker jika tersedia atau masukkan
 absolute path. Analisis awal bersifat read-only dan menunjukkan framework/route,
@@ -152,7 +155,8 @@ hasil pemeriksaan dipilih, tampilan Design terpisah dibuka dan provider
 context lokal yang dipakai langsung melalui hook dicari otomatis. Alias dinamis,
 plugin, setup runtime bertingkat, asset, atau environment khusus tetap mungkin
 memerlukan setup manual.
-Next.js App/Pages dapat dianalisis statis; runtime selection Next belum tersedia.
+Next.js App/Pages dapat dianalisis statis. **Mulai runtime Next.js** menjalankan
+server dev lokal setelah dependensi tersedia. Gunakan path konkret untuk rute dinamis.
 Baca [matrix](COMPATIBILITY_MATRIX.md).
 
 ## Batasan edit dan keamanan

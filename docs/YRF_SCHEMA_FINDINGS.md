@@ -1,7 +1,6 @@
-# YRF schema findings (read-only inspection)
+# Temuan skema YRF
 
-Status: **UNVERIFIED / inspection only**, 2026-11-06. No vendor code was executed and
-no sample content is committed to this repository. All `.yrf` editing remains locked.
+Tabel berikut mencatat inspeksi awal pada 6 November 2026. Dukungan saat ini ada di bagian terakhir.
 
 ## What was inspected
 
@@ -43,42 +42,14 @@ Object geometry keys observed: `type, name, left, top, width, height` plus optio
 
 All three files declare `paper.type: "A4"` yet use three different numeric extents
 (2320×3308, 2889×4085, 2166×3063). The aspect ratios are consistent with A4, so the
-numbers are device-relative rather than a single absolute unit. **Do not convert these
-numbers to millimetres, style them as CSS pixels, or write them back under an assumed
-scale.** Any geometry mapping needs a documented scale source plus golden output.
+numbers are device-relative rather than a single absolute unit. **Keep existing dimensions in raw units.** The local canvas scales them for display and preserves values on Save. New experimental output uses a documented approximation.
 
-## What the shipped inspector does
+## Dukungan Studio yang teruji
 
-`/api/reports/yrf/open` returns the band/object tree, raw geometry, caption text,
-unknown kinds, and script-field warnings without executing anything. Caption edits
-for `label`/`textbox` objects go through a single-span patcher that verifies every
-other string span is unchanged, then writes a sibling `*.edited.yrf` copy with hash
-conflict checks. `.yrf` creation returns `403 YRF_CREATE_BLOCKED`.
+- Design memilih halaman eksplisit dan menempatkan report header/footer di halaman pertama/terakhir. Peringatan tinggi berasal dari jumlah tinggi bagian pada skala mentah lokal. Studio tidak menghitung pengulangan data atau pagination vendor.
+- `AR.DataControl` dan `AR.XML` mengizinkan flag visibilitas yang sudah ada. `AR.XML` juga mengizinkan pola recordset. URL sumber tetap dilindungi dan Studio tidak membaca XML vendor.
+- `AR.Barcode`, `rtf` dan `subReport` mengizinkan geometri mentah yang sudah ada. Payload hex lama `AR.Barcode` tetap hanya baca. Objek eksplisit `barcode` berjenis Code 128 dan `qrcode` punya nilai literal yang dapat diedit dan dirender di Design. `rtf` dengan teks polos tetap dapat diedit. RTF standar menampilkan gaya bold, italic, dan underline secara baca-saja. `subReport` menerima nama `.rpx` atau `.yrf` satu segmen. Tombol **Buka YRF tertaut** membuka `.yrf` di folder yang sama. Pratinjau RTF mengikuti subset kontrol karakter dan baris dari dokumentasi format. [Microsoft TOM RTF](https://learn.microsoft.com/en-us/windows/win32/controls/about-text-object-model)
+- Save dan Save copy memeriksa hash, JSON dengan key unik, script dan properti format yang dilindungi. Tidak ada script vendor yang dijalankan. Pembuatan eksperimental dari native menyalin nama field sederhana ke `dataField` dan meninggalkan sumber data serta komponen lanjutan.
+- Audit baca-saja terhadap 167 file Wai mencoba 106 perubahan di memori dengan hasil SHA-256 sumber yang sama. Berkas sintetis menguji beberapa halaman serta Save dan Save copy. Akurasi cetak vendor berada di luar cakupan preview lokal.
 
-## Experimental write path
-
-Opening a `.yrf` in the inspector allows caption and geometry (`left`, `top`, `width`,
-`height`) edits for any object, applied as source-span patches that verify every other
-scalar is unchanged, then saved to a sibling copy. `.yrf` creation from a native
-template is available after an explicit acknowledgement checkbox and is derived from
-the structure of the three samples only (11 units/mm approximation). Neither path is
-validated against the vendor renderer yet.
-
-## Consequences for the product
-
-1. `.yrf` stays **read-only**: no import-to-RDM, no generic save, no guessed keys.
-2. The inspector may show raw numbers and an explicitly *approximate* canvas only.
-3. A source-span patcher, if ever built, may touch only verified literal fields with an
-   expected old value, original SHA-256, and a copy-only save.
-4. `voucher.yrf` remains blocked even for read-write experiments until its own golden
-   and financial-invariant audit exists.
-5. Scripts and `AR.XML`/`rtf` objects stay opaque and are never executed.
-
-## Open questions (evidence gates)
-
-1. What produces the differing extents for identical paper types (DPI setting, editor
-   zoom, per-file scale)? Unverified.
-2. Are `script`/`vbScript` hooks required for correct rendering, or optional? Unverified.
-3. What is the authoritative API of the shipped runtime? Not inspected; do not guess.
-4. What licence permits embedding, modification, and redistribution? See
-   `YRF_RUNTIME_LICENSE_CHECKLIST.md` — unresolved.
+Untuk lisensi dan batas distribusi runtime, lihat [YRF runtime license checklist](YRF_RUNTIME_LICENSE_CHECKLIST.md).

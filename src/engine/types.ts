@@ -85,6 +85,8 @@ export interface AnalyzedFile {
   imports: { name: string; from: string; resolved?: string; kind?: "lazy-default" }[];
   errors: string[];
 }
+export type StoryPreset = { file: string; name: string; componentId: string; args: Record<string, unknown> };
+
 export interface AnalysisReport {
   schemaVersion: 1;
   projectRoot: string;
@@ -93,6 +95,7 @@ export interface AnalysisReport {
   detected: {
     framework: "vite-react" | "nextjs" | "react" | "unknown";
     router: string;
+    nextBasePath?: string;
     typescript: boolean;
     styling: string[];
     componentLibraries: string[];
@@ -112,11 +115,14 @@ export interface AnalysisReport {
     reason: string;
   }[];
   stories: string[];
+  storyPresets?: StoryPreset[];
   styleTokens: {
     name: string;
     value: string;
     source: SourceLocation;
     consumers: string[];
+    selector?: string;
+    editable?: boolean;
   }[];
   warnings: string[];
   coverage: {
@@ -188,8 +194,16 @@ export interface SourcePatch {
   };
   warnings: string[];
   operation: PatchRequest["operation"];
+  object?: string;
   state: "PATCH_PREVIEW";
 }
+export interface BuildResult {
+  ok: boolean;
+  code: number | null;
+  output: string;
+  durationMs: number;
+}
+
 export interface Checkpoint {
   id: string;
   file: string;

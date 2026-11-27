@@ -1,6 +1,7 @@
 /** Copyright (c) 2026 RA. Report Studio API: bounded, local-first, no vendor runtime. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { projectRoot as canonicalProjectRoot, resolveProjectPath } from "../engine/safety.js";
@@ -20,17 +21,81 @@ import {
 } from "../reports/index.js";
 import type { StyleFamilyId } from "../reports/index.js";
 import { inspectYrf, YRF_MAX_BYTES } from "../reports/formats/yrf/inspect.js";
-import { applyYrfChanges, type YrfChange } from "../reports/formats/yrf/patch.js";
+import { applyYrfChanges, parseUniqueJson, type YrfChange } from "../reports/formats/yrf/patch.js";
 import { createYrfFromNative } from "../reports/formats/yrf/create.js";
+import { hasYrfScriptField, isYrfLocalField, yrfObjectCapability } from "../reports/formats/yrf/capabilities.js";
 import { parameterWarnings } from "../reports/core/parameters.js";
+import { appendReportSections, applyLinkedReportArguments, REPORT_PATH_SEGMENT } from "../reports/core/subreport.js";
 import type { ReportDocumentV1 } from "../reports/index.js";
 
 const MAX_REPORT_BODY = DEFAULT_LIMITS.maxBytes;
-const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,120}\.report\.json$/i;
+const FILE_NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{M} ._-]{0,120}\.report\.json$/iu;
+
+function protectedYrfObjects(value: unknown): Map<string, unknown> {
+  const protectedObjects = new Map<string, unknown>();
+  const visit = (entry: unknown, segments: (string | number)[]) => {
+    if (!entry || typeof entry !== "object") return;
+    if (Array.isArray(entry)) {
+      if (segments.at(-1) === "objects") {
+        const opaque = entry.filter(item => item && typeof item === "object" && typeof item.type === "string" &&
+          yrfObjectCapability(item.type) !== "visual");
+        if (opaque.length) {
+          const editableBand = segments[0] === "layout" && (
+            (segments.length === 3 && (segments[1] === "reportHeader" || segments[1] === "reportFooter")) ||
+            (segments.length === 6 && segments[1] === "pages" && typeof segments[2] === "number" &&
+              segments[3] === "bands" && typeof segments[4] === "number")
+          );
+          const protectedFields = editableBand ? opaque.map(item =>
+            Object.fromEntries(Object.entries(item).map(([key, value]) => [key,
+              isYrfLocalField(item.type, key, value, item.formatType) ? ["editable", typeof value] : ["protected", value],
+            ])),
+          ) : opaque;
+          protectedObjects.set(JSON.stringify([...segments, "opaque"]), protectedFields);
+        }
+      }
+      entry.forEach((item, index) => visit(item, [...segments, index]));
+      return;
+    }
+    const properties = Object.entries(entry);
+    const scripts = properties.filter(([key]) => hasYrfScriptField(key));
+    if (scripts.length) {
+      if (segments.at(-2) === "objects" && typeof segments.at(-1) === "number") {
+        protectedObjects.set(JSON.stringify(segments), entry);
+      } else {
+        for (const [key, script] of scripts) protectedObjects.set(JSON.stringify([...segments, key]), script);
+      }
+    }
+    for (const [key, item] of properties) visit(item, [...segments, key]);
+  };
+  visit(value, []);
+  return protectedObjects;
+}
+
+function validateYrfSourceChange(original: string, source: unknown) {
+  if (typeof source !== "string" || !source.trim()) throw new ReportApiError(400, "INVALID_SOURCE", "Source text is required");
+  if (Buffer.byteLength(source, "utf8") > YRF_MAX_BYTES) throw new ReportApiError(413, "FILE_TOO_LARGE", "Source exceeds the 5 MiB limit");
+  const inspection = inspectYrf(source);
+  if (!inspection.ok) throw new ReportApiError(422, "INVALID_YRF", inspection.error ?? "Invalid YRF structure");
+  let before: unknown;
+  let after: unknown;
+  try {
+    before = parseUniqueJson(original.replace(/^\uFEFF/, ""));
+    after = parseUniqueJson(source.replace(/^\uFEFF/, ""));
+  } catch (error) {
+    throw new ReportApiError(422, "INVALID_YRF", (error as Error).message);
+  }
+  if (!isDeepStrictEqual(protectedYrfObjects(before), protectedYrfObjects(after))) {
+    throw new ReportApiError(422, "PATCH_REJECTED", "YRF scripts, scripted objects and protected object properties must remain unchanged.");
+  }
+  return { source, inspection: inspection.inspection };
+}
 
 export interface ReportApiContext {
   currentProjectRoot: () => string | null;
   origin: () => string;
+  settingsDirectory: string;
+  defaultDirectory: string;
+  reportSettingsError: () => void;
   now?: () => Date;
 }
 
@@ -87,9 +152,8 @@ function requireString(value: unknown, label: string, max = 512): string {
 }
 
 /**
- * In-process write lock per absolute path. POSIX has no compare-and-swap for
- * files, so serialising mutations and re-checking the hash immediately before
- * rename is the strongest portable guarantee we can give here.
+ * In-process write lock per absolute path. YRF also coordinates participating
+ * Studio processes through an exclusive sibling lock.
  */
 const writeLocks = new Map<string, Promise<unknown>>();
 
@@ -110,17 +174,22 @@ async function withWriteLock<T>(key: string, task: () => Promise<T>): Promise<T>
   }
 }
 
-async function writeTempFile(full: string, text: string): Promise<string> {
+async function writeTempFile(full: string, text: string, mode = 0o644): Promise<string> {
   const temp = path.join(
     path.dirname(full),
     `.${path.basename(full)}.tmp-${randomBytes(6).toString("hex")}`,
   );
-  const handle = await fs.open(temp, "wx", 0o644);
+  const handle = await fs.open(temp, "wx", mode);
   try {
-    await handle.writeFile(text, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
+    try {
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+    throw error;
   }
   return temp;
 }
@@ -235,9 +304,41 @@ async function writeYrfCopy(file: string, text: string): Promise<string> {
   throw new ReportApiError(409, "COPY_EXISTS", "Could not allocate a save-copy name");
 }
 
-/** A filesystem rename is atomic for one path, but is not a cross-process compare-and-swap. */
-async function saveYrfInPlace(file: string, expectedHash: string, text: string): Promise<void> {
+async function withYrfWriteLock<T>(file: string, task: () => Promise<T>): Promise<T> {
   return withWriteLock(file, async () => {
+    await assertNoSymlinkAncestors(file);
+    const basename = path.basename(file);
+    const key = sha256(process.platform === "win32" ? basename.toLowerCase() : basename);
+    const lock = path.join(path.dirname(file), `.uiux-yrf-${key}.lock`);
+    const handle = await fs.open(lock, "wx", 0o600).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "EEXIST") {
+        throw new ReportApiError(409, "YRF_WRITE_LOCKED", "Another Studio may be saving this YRF. Retry when its save finishes.");
+      }
+      throw error;
+    });
+    try {
+      return await task();
+    } finally {
+      // Closing first also allows unlinking the lock on Windows.
+      await handle.close();
+      await fs.unlink(lock);
+    }
+  });
+}
+
+async function saveYrfCopy(file: string, expectedHash: string, text: string): Promise<string> {
+  return withYrfWriteLock(file, async () => {
+    const latest = await loadYrfFile(file);
+    if (latest.file !== file || latest.hash !== expectedHash) {
+      throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
+    }
+    return writeYrfCopy(file, text);
+  });
+}
+
+/** A participating Studio holds the sibling lock. External editors can still ignore it. */
+async function saveYrfInPlace(file: string, expectedHash: string, text: string): Promise<void> {
+  return withYrfWriteLock(file, async () => {
     const loaded = await loadYrfFile(file);
     if (loaded.file !== file || loaded.hash !== expectedHash) throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; the draft was not saved");
     const mode = (await fs.stat(file)).mode & 0o777;
@@ -369,14 +470,41 @@ export interface ReportApi {
   handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void>;
 }
 
-export function createReportApi(context: ReportApiContext): ReportApi {
-  let manualRoot: string | null = null;
+export async function createReportApi(context: ReportApiContext): Promise<ReportApi> {
+  const preferenceFile = path.join(context.settingsDirectory, "report-folder.json");
+  const validateSelectedRoot = async (root: string) => {
+    const canonical = await canonicalProjectRoot(root).catch(() => null);
+    return canonical === root ? root : null;
+  };
+  let reportRoot: string | null = null;
+  try {
+    const saved: unknown = JSON.parse(await fs.readFile(preferenceFile, "utf8"));
+    if (typeof saved === "string" && path.isAbsolute(saved)) {
+      reportRoot = await validateSelectedRoot(saved);
+    }
+  } catch {
+    // Missing, invalid, or no longer accessible. The launcher can use its default folder.
+  }
+  let rootSource: "manual" | "default" = "manual";
   const openedYrfFiles = new Set<string>();
 
-  const effectiveRoot = () => manualRoot ?? context.currentProjectRoot();
+  const availableRoot = () => reportRoot ? validateSelectedRoot(reportRoot) : Promise.resolve(null);
+
+  const rememberRoot = async (root: string | null) => {
+    let temp: string | undefined;
+    try {
+      await fs.mkdir(context.settingsDirectory, { recursive: true, mode: 0o700 });
+      temp = await writeTempFile(preferenceFile, JSON.stringify(root), 0o600);
+      await fs.rename(temp, preferenceFile);
+    } catch {
+      context.reportSettingsError();
+    } finally {
+      if (temp) await fs.rm(temp, { force: true }).catch(() => undefined);
+    }
+  };
 
   const requireRoot = async (): Promise<string> => {
-    const root = effectiveRoot();
+    const root = reportRoot ? await availableRoot() : context.currentProjectRoot();
     if (!root) {
       throw new ReportApiError(
         409,
@@ -384,7 +512,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         "Open a project or choose a report folder first",
       );
     }
-    return canonicalProjectRoot(root);
+    return reportRoot ? root : canonicalProjectRoot(root);
   };
 
   const listFiles = async (root: string): Promise<string[]> => {
@@ -397,12 +525,13 @@ export function createReportApi(context: ReportApiContext): ReportApi {
 
   const state = async () => {
     const contextRoot = context.currentProjectRoot();
-    const root = manualRoot;
+    const source = rootSource;
+    const root = await availableRoot();
     return {
       schemaVersion: RDM_SCHEMA_VERSION,
       root,
       context: contextRoot,
-      source: manualRoot ? "manual" : null,
+      source: root ? source : null,
       files: root ? await listFiles(root).catch(() => []) : [],
       templates: TEMPLATE_CATALOG.map((template) => ({
         id: template.id,
@@ -438,7 +567,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
       relative.startsWith("/") ||
       relative.includes("\\") ||
       segments.some((segment) => !segment || segment === "." || segment === "..") ||
-      !/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/.test(segments[segments.length - 1] ?? "")
+      !REPORT_PATH_SEGMENT.test(segments[segments.length - 1] ?? "")
     ) {
       throw new ReportApiError(
         400,
@@ -451,6 +580,57 @@ export function createReportApi(context: ReportApiContext): ReportApi {
     } catch {
       throw new ReportApiError(404, "NOT_FOUND", "Report file was not found");
     }
+  };
+
+  const resolveLinkedReports = async (document: ReportDocumentV1, expectedRoot: unknown, currentFile: unknown, sample: Record<string, unknown>) => {
+    if (!document.linkedReports?.length) return document;
+    const root = await requireRoot();
+    if (expectedRoot !== root) {
+      throw new ReportApiError(409, "REPORT_FOLDER_CHANGED", "Select the original report folder to resolve linked reports.");
+    }
+    const supplied = sample.parameters;
+    const sampleIds = supplied && typeof supplied === "object" ? Object.keys(supplied) : [];
+    const ancestors = new Set<string>();
+    if (typeof currentFile === "string" && currentFile) ancestors.add((await prepareExisting(root, currentFile)).full);
+    let count = 0;
+    let bytes = 0;
+    const visit = async (input: ReportDocumentV1, depth: number): Promise<ReportDocumentV1> => {
+      const { linkedReports, linkedReportArguments, ...report } = input;
+      let expanded = report;
+      for (const link of linkedReports ?? []) {
+        if (depth >= 4 || ++count > 16) {
+          throw new ReportApiError(422, "LINKED_REPORT_LIMIT", "Linked reports exceed the nesting or file limit.");
+        }
+        const { full } = await prepareExisting(root, link);
+        if (ancestors.has(full)) throw new ReportApiError(422, "LINKED_REPORT_CYCLE", `Linked report cycle at ${link}`);
+        const text = await readReportFile(full);
+        bytes += Buffer.byteLength(text, "utf8");
+        if (bytes > DEFAULT_LIMITS.maxBytes) {
+          throw new ReportApiError(413, "LINKED_REPORT_LIMIT", "Linked reports exceed the combined 5 MiB limit.");
+        }
+        const parsed = parseReport(text);
+        if (!parsed.ok || !parsed.document) throw new ReportApiError(422, "INVALID_LINKED_REPORT", `Linked report is invalid: ${link}`);
+        const prefix = `link-${count}`;
+        ancestors.add(full);
+        const child = await visit(parsed.document, depth + 1);
+        ancestors.delete(full);
+        try {
+          const args = linkedReportArguments?.[link];
+          const scoped = args && Object.keys(args).length ? applyLinkedReportArguments(expanded, child, prefix, args, sampleIds) : child;
+          expanded = appendReportSections(expanded, scoped, prefix);
+        } catch (error) {
+          throw new ReportApiError(422, "INVALID_LINKED_REPORT", `${link}: ${(error as Error).message}`);
+        }
+      }
+      return expanded;
+    };
+    const expanded = await visit(document, 0);
+    const validation = validateReportDocument(expanded);
+    if (!validation.ok) {
+      const issue = validation.errors[0];
+      throw new ReportApiError(422, "INVALID_LINKED_REPORT", `${issue?.path ?? "$"}: ${issue?.message ?? "Invalid combined report"}`);
+    }
+    return expanded;
   };
 
   const prepareNew = async (
@@ -488,7 +668,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
     if (req.method === "GET" && route === "browse") {
       const scope = url.searchParams.get("scope");
       const base =
-        manualRoot ??
+        await availableRoot() ??
         (scope === "context" ? context.currentProjectRoot() : null);
       if (!base) {
         throw new ReportApiError(
@@ -515,14 +695,32 @@ export function createReportApi(context: ReportApiContext): ReportApi {
 
     switch (route) {
       case "root": {
-        if (data.clear === true) {
-          manualRoot = null;
-          json(res, 200, await state());
-          return;
-        }
-        const target = requireString(data.path, "report folder", 4096);
-        manualRoot = await canonicalProjectRoot(target);
-        json(res, 200, await state());
+        const next = await withWriteLock(preferenceFile, async () => {
+          if (data.clear === true) {
+            await rememberRoot(null);
+            reportRoot = null;
+          } else if (data.useDefault === true) {
+            if (!await availableRoot()) {
+              const parent = path.dirname(context.defaultDirectory);
+              await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+              const target = path.join(await canonicalProjectRoot(parent), path.basename(context.defaultDirectory));
+              await fs.mkdir(target, { recursive: true, mode: 0o700 });
+              if ((await fs.lstat(target)).isSymbolicLink()) {
+                throw new ReportApiError(400, "UNSAFE_PATH", "The default report folder cannot be a symbolic link.");
+              }
+              reportRoot = await canonicalProjectRoot(target);
+              rootSource = "default";
+            }
+          } else {
+            const target = requireString(data.path, "report folder", 4096);
+            const selected = await canonicalProjectRoot(target);
+            await rememberRoot(selected);
+            reportRoot = selected;
+            rootSource = "manual";
+          }
+          return state();
+        });
+        json(res, 200, next);
         return;
       }
       case "create": {
@@ -569,6 +767,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         });
         json(res, 200, {
           schemaVersion: RDM_SCHEMA_VERSION,
+          root,
           file: relative,
           hash: sha256(text),
           document,
@@ -588,6 +787,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         }
         json(res, 200, {
           schemaVersion: RDM_SCHEMA_VERSION,
+          root,
           file: relative,
           hash: sha256(text),
           document: parsed.document,
@@ -598,6 +798,9 @@ export function createReportApi(context: ReportApiContext): ReportApi {
       }
       case "save": {
         const root = await requireRoot();
+        if (data.expectedRoot !== undefined && data.expectedRoot !== root) {
+          throw new ReportApiError(409, "REPORT_FOLDER_CHANGED", "The report folder changed. Select the original folder before saving.");
+        }
         const { full, relative } = await prepareExisting(root, String(data.file ?? ""));
         const expectedHash = requireString(data.expectedHash, "document hash", 64);
         const document = data.document;
@@ -629,7 +832,11 @@ export function createReportApi(context: ReportApiContext): ReportApi {
               "The report changed on disk; reopen it before saving",
             );
           }
-          await fs.rename(temp, full);
+          try {
+            await fs.rename(temp, full);
+          } finally {
+            await fs.rm(temp, { force: true });
+          }
         });
         json(res, 200, {
           schemaVersion: RDM_SCHEMA_VERSION,
@@ -647,8 +854,9 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           return;
         }
         const sampleData = data.data && typeof data.data === "object" && !Array.isArray(data.data) ? data.data as Record<string, unknown> : {};
-        const html = renderReportHtml(data.document as ReportDocumentV1, { data: sampleData });
-        json(res, 200, { html, warnings: [...validation.warnings, ...parameterWarnings(data.document as ReportDocumentV1, sampleData)] });
+        const document = await resolveLinkedReports(data.document as ReportDocumentV1, data.expectedRoot, data.file, sampleData);
+        const html = renderReportHtml(document, { data: sampleData });
+        json(res, 200, { html, warnings: [...validation.warnings, ...parameterWarnings(document, sampleData)] });
         return;
       }
       case "export": {
@@ -659,14 +867,19 @@ export function createReportApi(context: ReportApiContext): ReportApi {
             "Supported export formats: html, csv, pdf, xlsx, docx",
           );
         }
+        const validation = validateReportDocument(data.document);
+        if (!validation.ok) {
+          json(res, 422, { code: "INVALID_DOCUMENT", errors: validation.errors });
+          return;
+        }
+        const sampleData = data.data && typeof data.data === "object" && !Array.isArray(data.data) ? data.data as Record<string, unknown> : {};
+        const document = await resolveLinkedReports(data.document as ReportDocumentV1, data.expectedRoot, data.file, sampleData);
         let result: ReturnType<typeof exportReport>;
         try {
           result = exportReport(
-            data.document,
+            document,
             data.format,
-            data.data && typeof data.data === "object" && !Array.isArray(data.data)
-              ? (data.data as Record<string, unknown>)
-              : {},
+            sampleData,
           );
         } catch (error) {
           throw new ReportApiError(
@@ -685,7 +898,17 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         return;
       }
       case "yrf/open": {
-        const loaded = await loadYrfFile(data.path);
+        let target = data.path;
+        if (data.sibling !== undefined) {
+          const current = requireString(data.path, "opened yrf path", 4096);
+          const sibling = requireString(data.sibling, "linked yrf name", 165);
+          if (!openedYrfFiles.has(current)) throw new ReportApiError(403, "YRF_NOT_OPEN", "Open the parent report first");
+          if (!/\.yrf$/i.test(sibling) || !isYrfLocalField("subReport", "reportName", sibling)) {
+            throw new ReportApiError(400, "INVALID_YRF_LINK", "Linked report must be a same-folder .yrf file name");
+          }
+          target = path.join(path.dirname(current), sibling);
+        }
+        const loaded = await loadYrfFile(target);
         const result = inspectYrf(loaded.text, loaded.hash);
         if (!result.ok) {
           json(res, 422, { code: "INVALID_YRF", error: result.error });
@@ -700,22 +923,29 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         });
         return;
       }
-      case "yrf/save-source": {
-        if (data.approved !== true) throw new ReportApiError(403, "APPROVAL_REQUIRED", "Explicit overwrite approval is required");
+      case "yrf/save-source":
+      case "yrf/source": {
+        const inPlace = route === "yrf/save-source";
+        if (inPlace && data.approved !== true) throw new ReportApiError(403, "APPROVAL_REQUIRED", "Explicit overwrite approval is required");
         const loaded = await loadYrfFile(data.path);
-        if (!openedYrfFiles.has(loaded.file)) throw new ReportApiError(403, "YRF_NOT_OPEN", "Open this report before saving it");
+        if (inPlace && !openedYrfFiles.has(loaded.file)) throw new ReportApiError(403, "YRF_NOT_OPEN", "Open this report before saving it");
         const expectedHash = requireString(data.expectedHash, "yrf hash", 64);
         if (loaded.hash !== expectedHash) throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
-        const source = requireString(data.source, "yrf source", 5_000_000);
-        const inspected = inspectYrf(source);
-        if (!inspected.ok) throw new ReportApiError(422, "INVALID_YRF", inspected.error ?? "Invalid YRF structure");
-        await saveYrfInPlace(loaded.file, expectedHash, source);
+        const { source, inspection } = validateYrfSourceChange(loaded.text, inPlace ? data.source : data.text);
+        let file = loaded.file;
+        if (inPlace) {
+          await saveYrfInPlace(file, expectedHash, source);
+        } else {
+          file = await saveYrfCopy(file, expectedHash, source);
+          openedYrfFiles.add(file);
+        }
         json(res, 200, {
           ok: true,
-          file: loaded.file,
+          file,
           hash: sha256(source),
           source,
-          inspection: inspected.inspection,
+          inspection,
+          warnings: inspection?.warnings ?? [],
         });
         return;
       }
@@ -750,13 +980,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           json(res, 200, { ok: true, file: loaded.file, hash: sha256(patched.text), source: patched.text, inspection: inspected.inspection, changes: patched.changes });
           return;
         }
-        await withWriteLock(loaded.file, async () => {
-          const current = await readReportFile(loaded.file).catch(() => null);
-          if (current === null || sha256(current) !== expectedHash) {
-            throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
-          }
-        });
-        const copy = await writeYrfCopy(loaded.file, patched.text);
+        const copy = await saveYrfCopy(loaded.file, expectedHash, patched.text);
         openedYrfFiles.add(copy);
         json(res, 200, {
           ok: true,
@@ -765,54 +989,6 @@ export function createReportApi(context: ReportApiContext): ReportApi {
           source: patched.text,
           inspection: inspectYrf(patched.text).inspection,
           changes: patched.changes,
-        });
-        return;
-      }
-      case "yrf/source": {
-        const loaded = await loadYrfFile(data.path);
-        const expectedHash = requireString(data.expectedHash, "yrf hash", 64);
-        if (loaded.hash !== expectedHash) {
-          throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
-        }
-        const text = data.text;
-        if (typeof text !== "string" || text.length === 0) {
-          throw new ReportApiError(400, "INVALID_SOURCE", "Source text is required");
-        }
-        if (new TextEncoder().encode(text).length > YRF_MAX_BYTES) {
-          throw new ReportApiError(413, "FILE_TOO_LARGE", "Source exceeds the 5 MiB limit");
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text.replace(/^\uFEFF/, ""));
-        } catch (error) {
-          throw new ReportApiError(
-            422,
-            "INVALID_JSON",
-            error instanceof Error ? error.message : "Source is not valid JSON",
-          );
-        }
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          throw new ReportApiError(422, "INVALID_YRF", "Root must be a JSON object");
-        }
-        const inspection = inspectYrf(text);
-        if (!inspection.ok) {
-          throw new ReportApiError(422, "INVALID_YRF", inspection.error ?? "Invalid YRF structure");
-        }
-        await withWriteLock(loaded.file, async () => {
-          const current = await readReportFile(loaded.file).catch(() => null);
-          if (current === null || sha256(current) !== expectedHash) {
-            throw new ReportApiError(409, "CONFLICT", "YRF changed on disk; reopen it");
-          }
-        });
-        const copy = await writeYrfCopy(loaded.file, text);
-        openedYrfFiles.add(copy);
-        json(res, 200, {
-          ok: true,
-          file: copy,
-          hash: sha256(text),
-          source: text,
-          inspection: inspection.inspection,
-          warnings: inspection.inspection?.warnings ?? [],
         });
         return;
       }
@@ -828,7 +1004,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
         const templateId = requireString(data.templateId, "template id", 64);
         let document: ReportDocumentV1;
         try {
-          document = buildTemplate(templateId);
+          document = buildTemplate(templateId, undefined, typeof data.locale === "string" ? data.locale : undefined);
         } catch (error) {
           throw new ReportApiError(
             400,
@@ -861,6 +1037,7 @@ export function createReportApi(context: ReportApiContext): ReportApi {
             await fs.rm(temp, { force: true });
           }
         });
+        openedYrfFiles.add(await fs.realpath(target));
         json(res, 200, {
           ok: true,
           file: target,

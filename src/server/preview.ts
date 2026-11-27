@@ -4,6 +4,7 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import ts from "typescript";
+import react from "@vitejs/plugin-react";
 import {
   createServer,
   type HtmlTagDescriptor,
@@ -13,11 +14,13 @@ import {
 import type { AnalysisReport, SourcePatch } from "../engine/types.js";
 import { parseSource } from "../engine/analyzer.js";
 import { readProjectFile } from "../engine/safety.js";
+import { isBoardProvider, MAX_BOARD_PROVIDERS } from "../engine/board-providers.js";
 
 type DesignTarget = {
   file: string;
   componentName: string;
   defaultExported: boolean;
+  providerIds?: readonly string[];
 };
 
 /** Vite uses forward-slash module IDs on every platform. */
@@ -60,7 +63,7 @@ export function bridgeSource(parentOrigin: string): string {
     let movablePositions=[];
     const cursorMarked=new Map();
     const cursorStyle=document.createElement('style');
-    cursorStyle.textContent='[data-uiux-movable="true"], [data-uiux-movable="true"] * { cursor: move !important; }';
+    cursorStyle.textContent='[data-uiux-movable="true"], [data-uiux-movable="true"] * { cursor: move !important; touch-action: none !important; }';
     document.head.append(cursorStyle);
     const updateCursors=()=>{
       cursorMarked.forEach((previous,el)=>previous===null?el.removeAttribute('data-uiux-movable'):el.setAttribute('data-uiux-movable',previous));
@@ -93,7 +96,15 @@ export function bridgeSource(parentOrigin: string): string {
       return best;
     };
     const attach = () => { if (!outline.parentNode) document.documentElement.append(outline);if(!hoverOutline.parentNode)document.documentElement.append(hoverOutline); };
-    const show = el => { attach(); if (!el || mode !== 'design') {outline.style.display='none'; return;} const r=visualGroup(el).getBoundingClientRect();selectionLabel.style.top=r.top<26?'0px':'-24px';Object.assign(outline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'}); };
+    const show = el => {
+      attach();
+      if (!el || mode !== 'design') { outline.style.display='none'; return; }
+      const r=visualGroup(el).getBoundingClientRect();
+      const roomAbove=r.top>=26;
+      selectionLabel.style.top=roomAbove?'-24px':'calc(100% + 3px)';
+      selectionLabel.style.visibility=roomAbove||r.bottom+26<=innerHeight?'visible':'hidden';
+      Object.assign(outline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});
+    };
     const showHover = el => {attach();hovered=el;if(!el||el===selected||mode!=='design'){hoverOutline.style.display='none';return;}const r=visualGroup(el).getBoundingClientRect();Object.assign(hoverOutline.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});};
     let multiOutlines=[];
     const showMany = () => {
@@ -137,7 +148,7 @@ export function bridgeSource(parentOrigin: string): string {
       const box = document.createElement('div');
       box.style.cssText = 'position:fixed;border:1px dashed #635bff;background:rgba(99,91,255,.12);pointer-events:none;z-index:2147483646;left:0;top:0;width:0;height:0';
       document.body.appendChild(box);
-      marquee = { x: event.clientX, y: event.clientY, box, additive: event.ctrlKey || event.metaKey || event.shiftKey };
+      marquee = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, box, additive: event.ctrlKey || event.metaKey || event.shiftKey };
       event.preventDefault();
     };
     const updateMarquee = event => {
@@ -167,24 +178,41 @@ export function bridgeSource(parentOrigin: string): string {
       else if(!keepGroup)choose(el,false);
       else {selected=el;show(selected);showMany();}
       const items=(selectedMany.includes(el)?selectedMany:[el]).filter(Boolean).map(item=>{const dragEl=visualGroup(item);return {el:dragEl,transform:dragEl.style.transform,transition:dragEl.style.transition};});
-      dragState={x:event.clientX,y:event.clientY,items,moved:false,keepGroup,target:el};
-      try {event.target.setPointerCapture?.(event.pointerId);} catch {}
+      dragState={pointerId:event.pointerId,x:event.clientX,y:event.clientY,items,moved:false,keepGroup,target:el};
+    };
+    const restoreDrag = state => state.items.forEach(item=>{
+      item.el.style.transform=item.transform;item.el.style.transition=item.transition;
+    });
+    const cancelGesture = pointerId => {
+      if(marquee && (pointerId===undefined || marquee.pointerId===pointerId)){
+        marquee.box.remove();marquee=null;
+      }
+      if(dragState && (pointerId===undefined || dragState.pointerId===pointerId)){
+        restoreDrag(dragState);dragState=null;show(selected);showMany();
+      }
     };
     const block = event => {
       if(mode!=='design')return;
       if(event.type==='keydown' && !['Enter',' ','Escape'].includes(event.key))return;
-      event.preventDefault();event.stopImmediatePropagation();
+      if(event.type!=='touchstart')event.preventDefault();
+      event.stopImmediatePropagation();
       if(event.type==='pointerdown'){
+        if(!event.isPrimary||event.button!==0||dragState||marquee)return;
         const target=event.target.closest?.('[data-uiux-id]');
+        if(!target&&event.pointerType==='touch')return;
+        try {event.target.setPointerCapture?.(event.pointerId);} catch {}
         if(target) beginDrag(event,target); else startMarquee(event);
       }
-      if(event.type==='keydown'&&event.key==='Escape')choose(selected?.parentElement?.closest('[data-uiux-id]'));
+      if(event.type==='keydown'&&event.key==='Escape'){
+        if(dragState||marquee)cancelGesture();
+        else choose(selected?.parentElement?.closest('[data-uiux-id]'));
+      }
     };
     ['click','dblclick','pointerdown','mousedown','mouseup','touchstart','submit','beforeinput','change','keydown'].forEach(type=>window.addEventListener(type,block,true));
     window.addEventListener('pointermove',event=>{
       if(mode!=='design')return;
-      if(marquee){ updateMarquee(event); return; }
-      if(!dragState)return;
+      if(marquee&&marquee.pointerId===event.pointerId){ updateMarquee(event); return; }
+      if(!dragState||dragState.pointerId!==event.pointerId)return;
       const dx=Math.round(event.clientX-dragState.x),dy=Math.round(event.clientY-dragState.y);
       if(!dragState.moved&&Math.abs(dx)+Math.abs(dy)<4)return;
       event.preventDefault();event.stopImmediatePropagation();dragState.moved=true;
@@ -192,17 +220,20 @@ export function bridgeSource(parentOrigin: string): string {
       show(selected);showMany();
     },true);
     window.addEventListener('pointerup',event=>{
-      if(marquee){ finishMarquee(event); return; }
-      if(!dragState)return;
+      if(marquee&&marquee.pointerId===event.pointerId){ finishMarquee(event); return; }
+      if(!dragState||dragState.pointerId!==event.pointerId)return;
       const state=dragState;dragState=null;
       const dx=Math.round(event.clientX-state.x),dy=Math.round(event.clientY-state.y);
-      if(!(state.moved&&(dx||dy))) state.items.forEach(item=>{item.el.style.transform=item.transform;item.el.style.transition=item.transition;});
+      if(!(state.moved&&(dx||dy)))restoreDrag(state);
       show(selected);showMany();
       if(state.moved&&(dx||dy)){
         event.preventDefault();event.stopImmediatePropagation();
         parent.postMessage({type:'uiux:move',...sourcePosition(state.target),dx,dy},parentOrigin);
       } else if(state.keepGroup) choose(state.target,false);
     },true);
+    window.addEventListener('pointercancel',event=>cancelGesture(event.pointerId),true);
+    window.addEventListener('lostpointercapture',event=>cancelGesture(event.pointerId),true);
+    window.addEventListener('blur',()=>cancelGesture());
     window.addEventListener('keydown',event=>{
       if(mode!=='design')return;
       if((event.ctrlKey||event.metaKey)&&!event.shiftKey&&event.key.toLowerCase()==='z'){
@@ -255,7 +286,7 @@ export function bridgeSource(parentOrigin: string): string {
     },true);
     window.addEventListener('message',event=>{
       if(event.origin!==parentOrigin||event.source!==parent)return;
-      if(event.data?.type==='uiux:mode'){mode=event.data.mode==='interact'?'interact':'design';show(selected);showMany();showHover(null);updateCursors();}
+      if(event.data?.type==='uiux:mode'){const next=event.data.mode==='interact'?'interact':'design';if(next!==mode)cancelGesture();mode=next;show(selected);showMany();showHover(null);updateCursors();}
       if(event.data?.type==='uiux:select'){selected=findPosition(event.data);selectedMany=selected?[selected]:[];show(selected);showMany();}
       if(event.data?.type==='uiux:select-many'){
         selectedMany=(Array.isArray(event.data.selections)?event.data.selections:[]).map(findPosition).filter(Boolean);
@@ -340,9 +371,18 @@ export class ProjectPreview {
       if (existing.has(candidate)) return candidate;
     return null;
   }
-  private async designProviders(targetFile: string) {
+  private async designProviders(target: DesignTarget) {
     if (!this.report) return [];
-    const providers: { file: string; name: string }[] = [];
+    if (target.providerIds?.length) {
+      const targetId = `${target.file}#${target.componentName}`;
+      return target.providerIds.map(id => {
+        const provider = this.report?.components.find(item => item.id === id);
+        if (!provider || !isBoardProvider(provider, targetId))
+          throw new Error("Select local exported Providers with no required props besides children.");
+        return { file: provider.source.file, name: provider.name, defaultExported: !!provider.defaultExported };
+      });
+    }
+    const providers: { file: string; name: string; defaultExported: boolean }[] = [];
     const visited = new Set<string>();
     const added = new Set<string>();
     const inspect = async (file: string): Promise<void> => {
@@ -351,53 +391,51 @@ export class ProjectPreview {
       const analyzed = this.report!.files.find((item) => item.file === file);
       if (!analyzed) return;
       for (const imported of analyzed.imports) {
-        if (!/^use[A-Z]/.test(imported.name) || !imported.resolved) continue;
-        await inspect(imported.resolved);
-        const hookAnalysis = this.report!.files.find(
-          (item) => item.file === imported.resolved,
-        );
-        if (!hookAnalysis) continue;
-        const hookSource = await readProjectFile(this.root, imported.resolved);
-        const hookFile = parseSource(imported.resolved, hookSource);
-        const contexts = new Set<string>();
-        const findContexts = (node: ts.Node) => {
-          if (
-            ts.isCallExpression(node) &&
-            ts.isIdentifier(node.expression) &&
-            node.expression.text === "useContext" &&
-            node.arguments[0] &&
-            ts.isIdentifier(node.arguments[0])
-          )
-            contexts.add(node.arguments[0].text);
-          ts.forEachChild(node, findContexts);
-        };
-        findContexts(hookFile);
-        for (const contextName of contexts) {
-          const contextImport = hookAnalysis.imports.find(
-            (item) => item.name === contextName && item.resolved,
-          );
-          if (!contextImport?.resolved) continue;
-          const expected = contextName.replace(/Context$/, "Provider");
-          const candidates = this.report!.components.filter(
-            (component) =>
-              component.source.file === contextImport.resolved &&
-              component.exported &&
-              component.name.endsWith("Provider"),
-          );
-          const provider =
-            candidates.find((component) => component.name === expected) ??
-            candidates[0];
-          if (!provider || added.has(provider.id)) continue;
-          await inspect(provider.source.file);
-          added.add(provider.id);
-          providers.push({
-            file: provider.source.file,
-            name: provider.name,
-          });
+        if (/^use[A-Z]/.test(imported.name) && imported.resolved) await inspect(imported.resolved);
+      }
+      const source = parseSource(file, await readProjectFile(this.root, file));
+      const reactNames = new Set<string>();
+      const hooks = new Set<string>();
+      for (const statement of source.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== "react") continue;
+        const clause = statement.importClause;
+        if (clause?.name) reactNames.add(clause.name.text);
+        const bindings = clause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) reactNames.add(bindings.name.text);
+        if (bindings && ts.isNamedImports(bindings)) for (const binding of bindings.elements) {
+          if ((binding.propertyName ?? binding.name).text === "useContext") hooks.add(binding.name.text);
         }
       }
+      const contexts = new Set<string>();
+      const findContexts = (node: ts.Node) => {
+        if (ts.isCallExpression(node) && node.arguments[0] && ts.isIdentifier(node.arguments[0])) {
+          const callee = node.expression;
+          if ((ts.isIdentifier(callee) && hooks.has(callee.text)) ||
+              (ts.isPropertyAccessExpression(callee) && callee.name.text === "useContext" &&
+                ts.isIdentifier(callee.expression) && reactNames.has(callee.expression.text))) {
+            contexts.add(node.arguments[0].text);
+          }
+        }
+        ts.forEachChild(node, findContexts);
+      };
+      findContexts(source);
+      for (const contextName of contexts) {
+        const contextFile = analyzed.imports.find(item => item.name === contextName && item.resolved)?.resolved;
+        if (!contextFile) continue;
+        const expected = contextName.replace(/Context$/, "Provider");
+        const candidates = this.report!.components.filter(component =>
+          component.source.file === contextFile && component.exported && component.name.endsWith("Provider"),
+        );
+        const provider = candidates.find(component => component.name === expected) ??
+          (candidates.length === 1 ? candidates[0] : undefined);
+        if (!provider || added.has(provider.id)) continue;
+        await inspect(provider.source.file);
+        if (added.has(provider.id)) continue;
+        added.add(provider.id);
+        providers.push({ file: provider.source.file, name: provider.name, defaultExported: !!provider.defaultExported });
+      }
     };
-    await inspect(targetFile);
+    await inspect(target.file);
     return providers;
   }
   private async designSideEffects() {
@@ -426,21 +464,23 @@ export class ProjectPreview {
     }
     return effects;
   }
-  private async designModule() {
+  private async designModule(studioOrigin: string) {
     if (!this.designTarget) throw new Error("No design component selected.");
     const target = this.designTarget;
-    const providers = await this.designProviders(target.file);
+    const providers = await this.designProviders(target);
     const sideEffects = await this.designSideEffects();
-    const imports = sideEffects.map((file) => `import "/${file}";`);
+    const imports = sideEffects.map(file => `import ${JSON.stringify("/" + file)};`);
     providers.forEach((provider, index) =>
       imports.push(
-        `import { ${provider.name} as Provider${index} } from "/${provider.file}";`,
+        provider.defaultExported
+          ? `import Provider${index} from ${JSON.stringify("/" + provider.file)};`
+          : `import { ${provider.name} as Provider${index} } from ${JSON.stringify("/" + provider.file)};`,
       ),
     );
     imports.push(
       target.defaultExported
-        ? `import Target from "/${target.file}";`
-        : `import { ${target.componentName} as Target } from "/${target.file}";`,
+        ? `import Target from ${JSON.stringify("/" + target.file)};`
+        : `import { ${target.componentName} as Target } from ${JSON.stringify("/" + target.file)};`,
     );
     const open = providers.map((_, index) => `<Provider${index}>`).join("");
     const close = providers
@@ -452,11 +492,20 @@ ${imports.join("\n")}
 class DesignBoundary extends React.Component {
   constructor(props){super(props);this.state={error:null};}
   static getDerivedStateFromError(error){return {error};}
+  componentDidUpdate(previous){if(this.state.error && previous.children !== this.props.children) this.setState({error:null});}
   render(){return this.state.error ? <pre style={{padding:24,color:"#b42318",whiteSpace:"pre-wrap"}}>{String(this.state.error?.stack||this.state.error)}</pre> : this.props.children;}
 }
-createRoot(document.getElementById("root")).render(
-  <DesignBoundary>${open}<Target viewCd=${JSON.stringify(target.componentName)} />${close}</DesignBoundary>
-);`;
+const root = createRoot(document.getElementById("root"));
+function render(props = {}) {
+  root.render(<DesignBoundary>${open}<Target viewCd=${JSON.stringify(target.componentName)} {...props} />${close}</DesignBoundary>);
+}
+window.addEventListener("message", event => {
+  if (event.source !== window.parent || event.origin !== ${JSON.stringify(studioOrigin)} ||
+      event.data?.type !== "uiux:board-args" || event.data.component !== ${JSON.stringify(`${target.file}#${target.componentName}`)}) return;
+  const props = event.data.props;
+  if (props && typeof props === "object" && !Array.isArray(props)) render(props);
+});
+render();`;
   }
   async start(report: AnalysisReport, studioOrigin: string) {
     await this.stop();
@@ -550,7 +599,7 @@ createRoot(document.getElementById("root")).render(
         if (id === "/__uiux_design.jsx") return designModuleId;
       },
       async load(id) {
-        if (id === designModuleId) return await owner.designModule();
+        if (id === designModuleId) return await owner.designModule(studioOrigin);
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
@@ -574,7 +623,7 @@ createRoot(document.getElementById("root")).render(
             return;
           }
           if (requestPath === "/__uiux_bridge.js") {
-            res.setHeader("Content-Type", "text/javascript");
+            res.setHeader("Content-Type", "text/javascript; charset=utf-8");
             res.setHeader("Cache-Control", "no-store");
             res.end(
               (owner.designTarget ? designNetworkGuardSource() : "") +
@@ -627,7 +676,7 @@ createRoot(document.getElementById("root")).render(
         root: this.root,
         envFile: false,
         cacheDir: this.cacheDirectory,
-        plugins: [plugin],
+        plugins: [plugin, react({ exclude: [/[/\\]node_modules[/\\]/, /[/\\]__uiux_design\.jsx$/] })],
         resolve: { alias: aliases },
         css: { postcss: { plugins: [] } },
         server: {
@@ -659,14 +708,47 @@ createRoot(document.getElementById("root")).render(
     this.server.moduleGraph.invalidateAll();
     this.server.ws.send({ type: "full-reload", path: "*" });
   }
-  async draftOverlay(sources: ReadonlyMap<string, string>) {
+  async refreshStylesheet(file: string): Promise<boolean> {
+    if (!this.server || this.patch || this.draftSources.size || !file.endsWith(".css") || file.endsWith(".module.css")) return false;
+    const absolute = path.resolve(this.root, file).split(path.sep).join("/");
+    const modules = [...this.server.moduleGraph.getModulesByFile(absolute) ?? []];
+    if (modules.some(module => module.isSelfAccepting !== true || module.url.includes("?"))) return false;
+    await Promise.all(modules.map(module => this.server!.reloadModule(module)));
+    return true;
+  }
+
+  async draftOverlay(sources: ReadonlyMap<string, string>, allowHot = false): Promise<boolean> {
+    const previous = this.draftSources;
+    const legacyPatch = this.patch;
     this.patch = null;
     this.draftSources = new Map(sources);
-    if (!this.server) return;
-    // Vite's React adapter does not reliably accept a synthetic js-update for the
-    // transformed entry graph, so refresh the preview rather than leaving stale DOM.
-    this.server.moduleGraph.invalidateAll();
-    this.server.ws.send({ type: "full-reload", path: "*" });
+    const server = this.server;
+    if (!server) return false;
+
+    const changed = [...new Set([...previous.keys(), ...sources.keys()])]
+      .filter(file => previous.get(file) !== sources.get(file));
+    // A project entry module can run createRoot again when reevaluated. Live draft
+    // refresh is scoped to the selected isolated component module.
+    const target = this.designTarget?.file;
+    const mountCall = /\b(?:createRoot|hydrateRoot)\s*\(/;
+    if (allowHot && !legacyPatch && target && changed.length === 1 && changed[0] === target &&
+        /\.[jt]sx$/.test(target) && !mountCall.test(sources.get(target) ?? previous.get(target) ?? "")) {
+      const modules = changed.map(file => [...server.moduleGraph.getModulesByFile(
+        path.resolve(this.root, file).split(path.sep).join("/"),
+      ) ?? []]);
+      if (modules.every(entries => entries.length > 0 &&
+          entries.every(module => module.isSelfAccepting === true && !module.url.includes("?")))) {
+        try {
+          await Promise.all(modules.flat().map(module => server.reloadModule(module)));
+          return true;
+        } catch {
+          // Leave the same overlay in place for a full refresh.
+        }
+      }
+    }
+    server.moduleGraph.invalidateAll();
+    server.ws.send({ type: "full-reload", path: "*" });
+    return false;
   }
 
   async design(target: DesignTarget | null) {
@@ -683,20 +765,25 @@ createRoot(document.getElementById("root")).render(
         throw new Error(
           "This component is private to its source module and cannot be opened in an isolated design. Select its exported owner instead.",
         );
-      this.designTarget = {
+      const providerIds = target.providerIds ?? [];
+      if (providerIds.length > MAX_BOARD_PROVIDERS || new Set(providerIds).size !== providerIds.length)
+        throw new Error("Choose up to four distinct preview providers.");
+      const nextTarget: DesignTarget = {
         file: component.source.file,
         componentName: component.name,
         defaultExported: !!component.defaultExported,
+        providerIds,
       };
-    } else this.designTarget = null;
+      const providers = await this.designProviders(nextTarget);
+      this.designTarget = nextTarget;
+      this.server.moduleGraph.invalidateAll();
+      this.server.ws.send({ type: "full-reload", path: "*" });
+      return { target: nextTarget, providers };
+    }
+    this.designTarget = null;
     this.server.moduleGraph.invalidateAll();
     this.server.ws.send({ type: "full-reload", path: "*" });
-    return {
-      target: this.designTarget,
-      providers: this.designTarget
-        ? await this.designProviders(this.designTarget.file)
-        : [],
-    };
+    return { target: null, providers: [] };
   }
   async stop() {
     if (this.server) await this.server.close();
@@ -708,6 +795,6 @@ createRoot(document.getElementById("root")).render(
     this.url = null;
     this.cacheDirectory = null;
     if (cacheDirectory)
-      await fs.rm(cacheDirectory, { recursive: true, force: true });
+      await fs.rm(cacheDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

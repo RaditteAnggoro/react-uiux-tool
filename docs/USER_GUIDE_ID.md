@@ -72,6 +72,11 @@ memengaruhi Studio, bukan CSS aplikasi target.
 | Panel bawah | Analysis, Problems, Changes, Console |
 | Alur source | Draft-first: edit di memori; **Simpan** menulis source dengan cek konflik; **Simpan & Build** menjalankan build; **Changes** menampilkan objek yang berubah; review Git sebelum push |
 
+Saat menutup tab, pilihan **Simpan draft berkas** dan **Buang draft berkas**
+berlaku pada berkas sumber yang tercantum di dialog. Tab yang memakai berkas
+itu berbagi draft. Pilih **Tutup tab, pertahankan draft** untuk menyimpan
+perubahan di daftar **Changes**.
+
 Panel separator dapat di-drag atau diubah memakai tombol panah saat fokus. Ukuran
 layar kecil tetap berguna untuk inspeksi, tetapi editor ini ditujukan untuk desktop.
 Tombol **?** membuka panduan lokal serta informasi About/version.
@@ -120,11 +125,10 @@ flowchart TB
    dari halaman browser.
 3. Isi nama folder dan periksa full target path. Spasi/Unicode didukung; path
    separator, nama device yang reserved, dan karakter tidak aman ditolak.
-4. Pilih **Vite + React + TypeScript** dan template lokal: Blank, Business Dashboard,
-   Data Entry/Form, atau Operations Console. Starter Next.js belum tersedia.
+4. Pilih **Vite React** atau **Next.js App Router**, lalu pilih Blank, Business Dashboard,
+   Data Entry/Form, atau Operations Console.
 5. Pilih plain CSS, CSS Modules, atau Tailwind v4. Starter Tailwind menyertakan
-   dependency dan Vite plugin yang diperlukan; tidak ada download component library
-   secara diam-diam.
+   konfigurasi dan dependency yang sesuai dengan framework.
 6. Review file, dependency, dan command, lalu pilih **Buat file saja**.
 
 Creation tidak menjalankan `npm install`, lifecycle script, atau dev command. Ketika
@@ -166,10 +170,11 @@ Vite berjalan di memori dan tidak menjalankan script/config target. Custom plugi
 environment injection, atau alias dinamis mungkin belum tereproduksi. Memilih baris
 component membuka tampilan Design terpisah; provider context lokal yang digunakan
 langsung oleh hook dicari otomatis ketika hubungannya jelas. Setup provider bertingkat,
-dinamis, router, atau auth tidak dijamin.
-Next App/Pages hanya dapat diperiksa dari source; preview Next belum tersedia. Deteksi MUI/Ant
-Design/Storybook tidak otomatis berarti ada custom controls atau story import.
-Lihat [compatibility](../COMPATIBILITY_MATRIX.md).
+dinamis, router, atau auth memiliki cakupan terbatas.
+Untuk Next App/Pages, pilih **Mulai runtime Next.js** setelah dependensi proyek
+terinstal. Runtime loopback membaca source yang tersimpan. Masukkan path konkret
+seperti `/products/DEMO-01` untuk membuka rute dinamis. **Lihat source rute** membuka
+isi file saat runtime tetap berjalan. Seleksi visual dan overlay draft tersedia di editor Vite. Lihat [kompatibilitas](../COMPATIBILITY_MATRIX.md).
 
 ![Analisis project read-only sebelum menjalankan preview](screenshots/analysis.png)
 
@@ -183,6 +188,17 @@ Klik baris component untuk mengganti canvas dari app entry ke desain component i
 sehingga screen berbasis menu dapat diperiksa tanpa login. Gunakan **App preview**
 untuk kembali ke entry normal. Element dengan mapping belum jelas tidak dipaksa
 menjadi editable.
+
+Di Isolated Design, buka **Board komponen**, pilih preset Storybook literal atau
+isi JSON props, lalu pilih **Terapkan props**. Beri nama dan simpan board untuk
+dipakai lagi pada sesi tab browser, atau pindahkan preset dengan **Impor board**
+dan **Ekspor board**. Gunakan **Props terdeklarasi** untuk teks, angka, boolean, dan pilihan.
+**Pakai default** menghapus nilai itu dari preset. Gunakan **Provider preview** untuk memilih hingga empat provider
+lokal yang diekspor dan menerima children tanpa prop wajib lain. Tambahkan dari
+provider terluar ke terdalam. Untuk mengubah token CSS, buka **Style → Design token global**, pilih deklarasi `:root` yang unik,
+lalu tinjau diff sebelum menerapkan. Dari mode Code,
+**Buka source tersimpan di
+VS Code** menuju file dan baris yang ditampilkan.
 
 Design mencegat event aplikasi; interaksi runtime terbatas pada preview terkontrol.
 Isolated Design mengarahkan request service fetch/XMLHttpRequest ke jawaban lokal kosong
@@ -352,7 +368,7 @@ browser pada text input tetap bekerja saat mengetik di dalam field.
 | Menu bisnis muncul di Components | Periksa ulang project setelah update; views/pages/screens/routes berada di Pages, sedangkan Components hanya untuk component visual reusable |
 | Edit langsung ditolak | Re-analyze; periksa scope, tipe, hash, export, dan nesting |
 | Aplikasi memanggil backend | Stop preview dan gunakan fixture/environment test |
-| Board membutuhkan provider | Setup provider untuk user Board belum tersedia |
+| Board membutuhkan provider | Pilih provider lokal yang kompatibel melalui **Provider preview** |
 | RAM tinggi | Pilih package lebih kecil dan stop dev server yang tidak dipakai |
 
 Service berjalan lokal tanpa telemetry. Recent metadata hanya berisi path/nama/waktu,
@@ -399,7 +415,7 @@ Bayangkan Report Studio seperti meja kerja untuk menyusun halaman. **Folder** ad
 ### Mulai dari Home atau dari project
 
 1. Dari Home pilih **Report Studio**.
-2. Pilih **Choose report folder** dan pilih folder tujuan. Bila picker tidak terbuka, tempel path lengkap sebagai cadangan. Periksa lokasi folder yang tampil sebelum membuat file.
+2. Pilih **Create new report**, lalu **Choose report folder** untuk mengubah folder tujuan. Untuk membuka laporan yang sudah ada, pilih **Open existing report** agar dialog folder terbuka. Path lengkap juga bisa dimasukkan di **Folder laporan** lalu diterapkan lewat **Pakai folder**.
 3. Pilih template dan **Create report**, atau pilih laporan yang ada dari daftar. Kembali ke project melalui tombol kembali jika masuk dari project.
 
 Membuka project tidak berarti seluruh jenis laporan dapat diedit. `.report.json` adalah sumber laporan native; file ekspor seperti PDF bukan otomatis file desain yang dapat dibuka kembali untuk diedit.
@@ -422,18 +438,31 @@ Untuk menambah objek native, klik tombol objek atau tarik dari palette ke band y
 3. Bind tabel atau field ke dataset/kolom yang sesuai, lalu pilih **Preview**. Band detail/tabel dapat mengulang baris pada fitur yang didukung; pastikan jumlah baris dan total benar.
 4. Jika JSON salah, perbaiki error sebelum preview atau ekspor. Gunakan data sintetis untuk mencoba fitur, bukan data pelanggan sebenarnya.
 
+Aktifkan **Tinjau dan petakan kolom CSV atau TSV**, atau pilih **Impor XLSX**.
+Pilih lembar kerja jika tersedia, periksa preview, lalu sesuaikan nama kolom
+dengan field tujuan. Klik **Terapkan impor** untuk mengganti data contoh dataset itu.
+Gunakan **Aturan field dataset** untuk menentukan tipe dan field wajib. Impor yang
+gagal validasi mempertahankan data contoh sebelumnya.
+Pada **Sisipkan bagian**, impor halaman PDF sebagai gambar atau gunakan opsi
+teks PDF eksperimental untuk mengedit teks kiri-ke-kanan, termasuk yang berotasi. Gunakan **Subreport tertaut**
+dengan path relatif untuk membaca versi terbaru dari folder laporan asal.
+**Parameter laporan tertaut** menetapkan nilai literal khusus untuk tautan itu. Pilih
+**Tambah barcode** untuk Code 128 atau QR Code.
+Pilih objek agar bisa mengunci isi dan gaya di Design atau menyembunyikannya di
+Preview dan ekspor.
+
 ### Simpan, lihat Code, dan ekspor
 
 - **Save** menyimpan sumber `.report.json`; jika ada perubahan di tab Code yang belum diterapkan, pilih Apply atau buang perubahan dulu. Saat berpindah laporan, baca pilihan Save / Discard / Cancel.
 - **Preview** menunjukkan hasil renderer native dengan data contoh. **Export** membuat dokumen PDF, HTML, CSV, XLSX, atau DOCX; baca warning sebelum menggunakan hasilnya.
-- Format punya batas yang berbeda: CSV berisi data tabel; XLSX menggunakan tabel pertama; PDF belum menggambar chart/crosstab. PDF memakai font terbatas dan dapat mengganti karakter yang tidak didukung dengan `?`; warning menunjukkan jika penggantian terjadi pada teks yang dirender. Periksa hasil PDF dan total secara manual.
+- CSV berisi data tabel. XLSX membuat satu worksheet per tabel. PDF menggambar chart dan crosstab sesuai ruang yang tersedia. PDF memberi peringatan jika karakter perlu diganti dengan `?` atau konten berpotensi terpotong.
 - Ekspor bukan bukti kesamaan cetak antarformat. Review sumber dan uji hasil dengan data serta aplikasi tujuan sebelum dipakai untuk keputusan bisnis.
 
 ### Membuka `.yrf` yang sudah ada
 
 1. Pilih **YRF (.yrf)** dan pilih folder, lalu pilih file dari daftar; path manual tersedia sebagai cadangan.
-2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti; **Code** awalnya menampilkan source secara read-only. Pilih **Edit source** untuk mengubah draf, lalu **Apply & save copy** untuk menyimpan salinan. Script vendor tidak dijalankan saat inspeksi.
-3. Edit caption/geometri yang tersedia dan pilih **Simpan**. **Simpan** memperbarui file asli tanpa backup; **Simpan salinan** membuat file terpisah. Perubahan struktur dan source saat ini masih memerlukan Simpan salinan. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
+2. **Design (approximate)** menampilkan struktur dan posisi perkiraan. Pilih objek untuk memeriksa properti. Di **Code**, pilih **Edit source** untuk mengubah draft dan **Simpan** untuk memvalidasi dan menulisnya ke file asli. Script vendor tetap tidak aktif saat inspeksi.
+3. Edit report lalu pilih **Simpan** untuk memperbarui file asli setelah pemeriksaan hash. Pembuatan `.yrf` baru meminta persetujuan bahwa hasilnya eksperimental.
 
 Saat objek ditambah atau dihapus, **Simpan** membandingkan daftar objek band
 sebelum dan sesudah perubahan draft. Hasil renderer vendor belum terverifikasi.
@@ -446,8 +475,8 @@ Jika folder tidak muncul, pilih kembali folder yang benar; jika file berubah di 
 Gunakan data rekaan saat belajar. Istilah pada tombol mengikuti bahasa aplikasi;
 panduan ini juga menyertakan nama English agar mudah dicari.
 
-1. Di Home pilih **Report Studio**. Pilih **Pilih folder laporan / Choose report folder**,
-   lalu pilih folder latihan. Jika picker OS gagal, isi path folder di bagian bawah dan
+1. Di Home pilih **Report Studio**, lalu **Create new report**. Gunakan **Pilih folder
+   laporan / Choose report folder** untuk memilih folder latihan. Jika picker OS gagal, isi path di **Folder laporan** dan
    tekan **Pakai folder / Use folder**. Pastikan path yang tampil benar.
 2. Di **Template**, pilih **Invoice / factur**. Pilih **Style family**, misalnya
    Corporate Navy, isi **Nama file / File name**, lalu tekan **Buat laporan / Create report**.
@@ -579,16 +608,16 @@ orientasi, dan margin ada di panel Page seperti dijelaskan di atas.
 - Pilih format lalu tekan **Export**. PDF cocok untuk memeriksa halaman; HTML untuk
   browser; CSV untuk data tabel; XLSX untuk spreadsheet; DOCX untuk dokumen. Hasil
   ekspor adalah output, bukan sumber desain `.report.json`.
-- Baca warning: PDF belum menggambar chart dan isi crosstab; karakter di luar font
-  yang didukung dapat menjadi `?`. CSV tidak menyimpan layout; XLSX dan DOCX
-  mengekspor hanya tabel pertama. DOCX juga tidak mempertahankan chart/crosstab.
+- Baca peringatan sebelum mengunduh. PDF dapat memotong konten atau mengganti
+  karakter dengan `?`. CSV menghilangkan layout. XLSX membuat satu worksheet per
+  tabel dan DOCX memuat judul serta tabel laporan.
   Periksa angka, baris, tampilan, dan hasil cetak sendiri sebelum penggunaan bisnis.
-  Tombol **Formats** menunjukkan kemampuan tiap ekstensi; tidak semua dapat diedit.
+  Kemampuan tiap format tercantum dalam [matriks kompatibilitas](../COMPATIBILITY_MATRIX.md).
 
 ### Latihan membuka dan mengubah `.yrf`
 
 Saat file terbuka, objek teks pertama dipilih otomatis. Klik objek lain pada halaman
-atau Structure; ubah **Teks** di kanan, lalu pilih **Simpan salinan**. Double-click
+atau Structure. Ubah **Teks** di kanan, lalu pilih **Simpan**. Double-click
 objek teks juga memfokuskan kolom teks. Untuk textbox dengan properti `dataField`,
 kolom **Field data** mengubah nama binding yang sudah ada. Garis yang menyimpan
 titik ujung dapat dipilih dan dipindahkan. Perubahan
@@ -597,10 +626,10 @@ textbox/binding bersifat eksperimental dan perlu diuji di runtime vendor.
 Di **Palet** sebelah kiri, klik **Teks**, **Field**, **Kotak**, atau **Garis** untuk
 menambah ke band objek terpilih, atau tarik tombol ke band pada halaman. Pilih objek
 untuk mengubah teks, posisi, ukuran, binding, dan properti string/angka/boolean yang ada di
-panel kanan. Nilai terstruktur dapat diubah melalui **Kode**. Klik **Simpan salinan**
+panel kanan. Nilai terstruktur dapat diubah melalui **Kode**. Klik **Simpan**
 setelah selesai; objek baru dan tampilannya masih perlu diverifikasi di WaiReport.
 Untuk menghapus, pilih objek lalu klik **Hapus objek**; perubahan baru ditulis saat
-kamu menyimpan laporan ke salinan.
+kamu menyimpan laporan.
 
 1. Tekan **YRF (.yrf)**, pilih folder, lalu pilih file dari daftar; atau masukkan
    path file dan tekan **Open .yrf**. **Design (approximate)** memperlihatkan
@@ -608,16 +637,21 @@ kamu menyimpan laporan ke salinan.
 2. Pilih objek pada Structure atau canvas. Objek yang didukung bisa digeser dan
    di-resize dengan delapan handle; **Caption** dan `left`, `top`, `width`, `height`
    tetap tersedia untuk nilai tepat. Geometri memakai unit mentah vendor yang belum
-   terverifikasi, bukan mm. Objek yang tidak didukung tetap hanya baca.
-3. Tekan **Simpan**, periksa nilai sebelum/sesudah, lalu **Simpan**.
-   File asli tidak ditimpa dan pengeditan berikutnya berlanjut dari salinan. Tab
-   **Code** menampilkan source secara inert; **Edit source** mengaktifkan draf
-   tervalidasi dan **Apply & save copy** menulis salinan baru. Draf yang belum
-   diterapkan memunculkan pilihan Simpan / Buang / Batal saat keluar atau membuka file lain.
+   terverifikasi. Gunakan **Halaman desain** jika file memiliki beberapa halaman eksplisit.
+   Untuk jenis khusus, Properti mengaktifkan bidang yang didukung. Nilai eksplisit Code 128
+   dan QR memperbarui simbol di kanvas. Pilih subreport yang menunjuk `.yrf` dalam folder
+   yang sama untuk memakai tombol **Buka YRF tertaut**.
+3. Tekan **Simpan** untuk menulis ke file yang dibuka setelah pemeriksaan hash.
+   **Code** menuju entri JSON objek terpilih. Gunakan **Edit source** untuk
+   mengubah teks lalu **Simpan** untuk
+   memvalidasi dan menulisnya. **Simpan salinan** membuat file terpisah dan
+   memakai validasi yang sama untuk script dan objek vendor. Draft yang belum
+   disimpan memunculkan pilihan
+   Simpan / Buang / Batal saat keluar atau membuka file lain.
 4. **+ New .yrf** menyediakan pembuatan eksperimental dengan template dan persetujuan
-   eksplisit. Hasil maupun perubahan geometri belum divalidasi renderer WaiReport;
-   buka salinan di aplikasi vendor dan bandingkan data serta cetakan sebelum dipakai.
-   Drag/resize visual dan seluruh properti editor native tidak otomatis tersedia di `.yrf`.
+   eksplisit. **Formulir agunan kendaraan** tersedia sebagai native dan YRF eksperimental.
+   YRF menyimpan nama binding field sederhana. Sumber data vendor dan pagination cetak
+   tidak dihasilkan oleh preview lokal.
 
 ### Jika hasil belum seperti yang diharapkan
 
@@ -637,14 +671,15 @@ kamu menyimpan laporan ke salinan.
 Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native maupun YRF untuk petunjuk singkat. Buka atau tutup band Structure dengan panah; memilih objek akan membuka band-nya.
 
 1. Pilih **Open existing report** untuk memilih folder laporan dan memindainya secara
-   lokal, atau **Create new report** untuk memilih folder dan template. Root project tidak
-   pernah dipakai diam-diam; folder terpilih ditampilkan di footer workspace.
+   lokal. Pada **Create new report**, gunakan **Choose report folder** untuk mengubah
+   folder tujuan sebelum memilih template. Lokasi aktif ditampilkan dalam kolom **Folder laporan** yang bisa diedit.
 2. Sidebar menampilkan file native `.report.json` dan `.yrf` dengan badge kecil serta path
    relatif. Search dan Refresh bersifat lokal; scan tidak menulis file.
 3. Workspace memiliki **Design**, **Code**, dan **Preview**. Design mendukung geser,
    delapan handle resize, snap 1 mm (toggle atau tahan Alt), palette drag/klik untuk teks,
    field, tabel, formulir, gambar, kotak dan garis, plus properti, parameter dan band ulang.
-4. **Code** mengedit draf JSON native; JSON tidak valid tidak pernah menimpa draf valid.
+4. Pilih objek lalu buka **Code** untuk menuju entri JSON objek tersebut. Draf
+   terakhir yang valid tetap tersedia jika JSON gagal divalidasi.
    Simpan bersifat eksplisit dan ditolak selama draf Code belum diterapkan.
 5. Inspector dibuka dengan toolbar format: preset gaya (Body/Heading/List/Caption),
    tebal, miring, garis bawah, coret, daftar butir/nomor, rata kanan-kiri, tinggi baris,
@@ -667,12 +702,17 @@ Buka **Report Studio** dari Home. Gunakan **Panduan report** di workspace native
    ringkasan, header tabel dua tingkat, baris tersorot, narasi dan area tanda tangan. Di
    Structure gunakan ↑/↓ untuk mengubah urutan bagian dan **Pindah halaman sebelum** untuk
    memulai halaman baru. Header laporan punya tombol **Keluar** eksplisit. Aksi hapus berwarna merah.
-6. `.yrf` dibuka di studio yang sama. Design ditandai perkiraan, Code bisa diedit dan
-   divalidasi. **Simpan** menimpa file yang dibuka untuk perubahan caption, data field,
-   dan geometri yang didukung tanpa backup; perubahan struktur dan Code menggunakan
-   **Simpan salinan**. Pembuatan `.yrf` tetap eksperimental dan berlabel.
-7. **Formats** menampilkan aksi yang didukung tiap format; format tak didukung seperti
-   JRXML, RDL dan `.rpt` tidak pernah dikonversi diam-diam.
+6. `.yrf` dibuka di studio yang sama. Design menampilkan perkiraan, dan perubahan
+   di Kode divalidasi saat disimpan. **Urungkan** dan **Ulangi** di Design berlaku
+   untuk draft. **Simpan** memperbarui file yang dibuka setelah pemeriksaan hash.
+7. Periksa peringatan format sebelum mengunduh hasil ekspor. Pilih **Tetap unduh**
+   atau **Ganti format** setelah meninjau dampaknya. Ekspor tanpa peringatan
+   langsung diunduh.
+
+Di React Studio, pilih entri di **Changes** untuk membuka source. Untuk seleksi
+kanvas yang ambigu, lihat **Kemungkinan lokasi source**. **Tutup tab, pertahankan
+draft** menyimpan perubahan di draft proyek. **Buang draft** juga menghapus
+snapshot pemulihan proyek.
 
 Pada editor React, tab **Style** memiliki **Palet format** untuk memilih properti
 seperti font, warna, border, garis bawah, wrap dan rotation; masukkan nilai CSS lalu
@@ -707,12 +747,16 @@ container yang didukung. Di Report Studio, palette dan daftar objek dikelompokka
 buka atau tutup kelompok untuk mengurangi scroll. Klik objek pada kertas untuk
 melihat propertinya, atau pilih dari struktur di kiri. **Remove object** menghapus
 objek terpilih dari draft; **Exit** meminta keputusan jika ada perubahan belum disimpan.
-Untuk `.yrf`, Design adalah perkiraan dan Simpan membuat salinan; pastikan hasilnya
-terbuka dan tercetak dengan benar di WaiReport sebelum digunakan.
+Untuk `.yrf`, Design menampilkan perkiraan. Gunakan **Urungkan** dan **Ulangi**
+untuk mengelola draft. **Simpan** memperbarui file yang dibuka setelah pemeriksaan
+hash. Periksa hasil cetak di WaiReport sebelum digunakan.
 
 ### YRF: image and static layouts
 
-Di Design YRF, pilih band lalu **Gambar**; pilih objek gambar dan gunakan **Import gambar** (PNG, JPEG atau WebP, maksimal 2 MiB). Ubah ukuran di canvas atau Geometri, lalu **Simpan**. **Layout tabel** dan **Layout form** menambah objek terpisah sebagai susunan statis, bukan tabel berulang otomatis. Periksa salinan di WaiReport.
+Di Design YRF, pilih band lalu **Gambar**. Pilih objek gambar dan gunakan
+**Import gambar** (PNG, JPEG atau WebP, maksimal 2 MiB). Ubah ukuran di canvas
+atau Geometri, lalu **Simpan**. **Layout tabel** dan **Layout form** menambah
+objek terpisah sebagai susunan statis. Periksa hasilnya di WaiReport.
 
 ### Native table columns and rows
 
@@ -745,7 +789,9 @@ atau ID, dan gunakan panah untuk memajukan/memundurkan objek atau membawanya ke
 depan/belakang. Perubahan tetap draft sampai **Save** dan bisa di-Undo/Redo. Urutan
 antarbagian belum dapat diubah melalui daftar ini.
 
-Untuk gambar native, pilih **Penyesuaian gambar → cover** agar gambar memenuhi bingkainya. Atur **Posisi gambar horizontal (%)** dan **Posisi gambar vertikal (%)** dari 0 sampai 100 untuk memilih bagian yang terlihat; 50 berarti di tengah. Posisi yang sama digunakan di Design, Preview, dan PDF. Ini mengatur posisi gambar dalam bingkai, belum membuat kotak crop bebas.
+Untuk gambar native, pilih **Penyesuaian gambar → cover** agar gambar memenuhi bingkainya. Atur **Posisi gambar horizontal (%)** dan **Posisi gambar vertikal (%)** dari 0 sampai 100 untuk memilih bagian yang terlihat; 50 berarti di tengah. Posisi yang sama digunakan di Design, Preview, dan PDF. Untuk gambar yang sudah diimpor, pilih **Potong gambar** dan tentukan area yang ingin
+dipertahankan. **Terapkan potongan** mengganti gambar di draft dengan bingkai yang sama.
+Gunakan **Undo** untuk memulihkan gambar semula.
 
 ### Parameter laporan
 

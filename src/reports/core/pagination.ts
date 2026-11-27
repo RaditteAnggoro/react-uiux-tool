@@ -2,6 +2,7 @@ import { narrativeLines, narrativeLineHeight } from "./narrative.js";
 import type { ReportBand, ReportDocumentV1 } from "./types.js";
 import { datasetRows } from "./data.js";
 import { tableHeaderGroups } from "./table.js";
+import { outputDocument } from "./visibility.js";
 
 export interface PlacedBand {
   band: ReportBand;
@@ -55,6 +56,21 @@ function tableHeaderHeight(band: ReportBand): number {
   if (Array.isArray(table.props.headerRows) && table.props.headerRows.length > 0) return height * table.props.headerRows.length;
   const columns = Array.isArray(table.props.columns) ? table.props.columns as Array<Record<string, unknown>> : [];
   return height * (tableHeaderGroups(columns).some((group) => group.label) ? 2 : 1);
+}
+
+function firstTableHeight(segment: Segment, capacity: number): number {
+  const table = segment.rows?.length ? tableOf(segment.band) : undefined;
+  if (!table) return segment.band.height;
+  const overhead = Math.max(0, table.box.y) + tableHeaderHeight(segment.band);
+  const row = rowHeight(segment.band);
+  const merges = Array.isArray(table.props.merges) ? table.props.merges : [];
+  let rows = 1;
+  for (const merge of merges) {
+    if (!merge || typeof merge !== "object" || Number(merge.row) !== 0) continue;
+    const span = Math.min(segment.rows!.length, Number(merge.rowSpan));
+    if (Number.isInteger(span) && overhead + span * row <= capacity) rows = Math.max(rows, span);
+  }
+  return overhead + rows * row;
 }
 
 function tableRows(
@@ -134,6 +150,7 @@ export function paginateReport(
   document: ReportDocumentV1,
   options: PaginationOptions = {},
 ): ReportPageLayout[] {
+  document = outputDocument(document);
   const capacity = contentHeight(document);
   const headers = document.bands.filter(isRepeatedHeader);
   const footers = document.bands.filter(isRepeatedFooter);
@@ -171,7 +188,8 @@ export function paginateReport(
     y += segment.band.height;
   };
 
-  for (const segment of buildSegments(document, flow, options.data)) {
+  const segments = buildSegments(document, flow, options.data);
+  for (const [index, segment] of segments.entries()) {
     if (segment.band.pageBreakBefore === true && y > 0) flush();
     const narrative = segment.band.elements.length === 1 ? segment.band.elements[0] : undefined;
     if (narrative?.type === "text" && narrative.props.flowText === true && typeof narrative.props.text === "string") {
@@ -192,16 +210,17 @@ export function paginateReport(
       }
       continue;
     }
-    if (!segment.rows) {
+    const rows = segment.rows;
+    if (!rows?.length) {
+      const next = segments[index + 1];
+      if (y > 0 && segment.band.keepWithNext && next && !next.band.pageBreakBefore) {
+        const combined = segment.band.height + firstTableHeight(next, bodyCapacity);
+        if (combined <= bodyCapacity && y + combined > bodyCapacity) flush();
+      }
       placeFixed(segment);
       continue;
     }
     const heightPerRow = rowHeight(segment.band);
-    const rows = segment.rows;
-    if (rows.length === 0) {
-      placeFixed(segment);
-      continue;
-    }
     let offset = 0;
     while (offset < rows.length) {
       const showTableHeader = offset === 0 || tableOf(segment.band)?.props.headerRepeat !== false;
@@ -216,7 +235,7 @@ export function paginateReport(
         for (const candidate of merges) {
           if (!candidate || typeof candidate !== "object") continue;
           const entry = candidate as Record<string, unknown>;
-          const start = Number(entry.row), span = Number(entry.rowSpan ?? 1);
+          const start = Number(entry.row), span = Math.min(Number(entry.rowSpan ?? 1), rows.length - start);
           if (!Number.isInteger(start) || !Number.isInteger(span) || start < offset || span < 2) continue;
           if (start < offset + count && start + span > offset + count && start > offset) count = start - offset;
           else if (start === offset && span > count && y > 0 && tableOffset + headerHeight + span * heightPerRow <= bodyCapacity) moveMergeToNextPage = true;

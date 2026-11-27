@@ -1,3 +1,6 @@
+import { asRecord, datasetRows } from "../core/data.js";
+import type { ReportElement } from "../core/types.js";
+
 export interface ChartSeries {
   label: string;
   values: number[];
@@ -13,7 +16,7 @@ export interface ChartOptions {
   title?: string;
 }
 
-const DEFAULT_PALETTE = ["#1D3557", "#2F6FED", "#0F766E", "#B45309", "#8A1C1C"];
+export const CHART_PALETTE = ["#1D3557", "#2F6FED", "#0F766E", "#B45309", "#8A1C1C"];
 const PAD = { top: 12, right: 8, bottom: 22, left: 30 };
 
 function esc(value: unknown): string {
@@ -28,10 +31,39 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+export function reportChartOptions(element: ReportElement, data?: Record<string, unknown>): ChartOptions {
+  const props = element.props;
+  const binding = typeof element.bindings?.path === "string" ? element.bindings.path : "";
+  const rows = datasetRows(data, binding);
+  const categoryKey = String(props.categoryKey ?? "label");
+  const valueKey = String(props.valueKey ?? "value");
+  const number = (value: unknown) => {
+    if (typeof value !== "number" && typeof value !== "string") return 0;
+    const result = Number(value);
+    return Number.isFinite(result) ? result : 0;
+  };
+  const labels = rows.length ? rows.map(row => String(asRecord(row)[categoryKey] ?? ""))
+    : Array.isArray(props.labels) ? props.labels.map(String) : [];
+  const series = Array.isArray(props.series) ? props.series.map(asRecord)
+    .filter(entry => Array.isArray(entry.values))
+    .map(entry => ({ label: typeof entry.label === "string" ? entry.label : "Value", values: (entry.values as unknown[]).map(number) })) : [{
+    label: String(props.seriesLabel ?? "Value"),
+    values: rows.length ? rows.map(row => number(asRecord(row)[valueKey]))
+      : Array.isArray(props.values) ? props.values.map(number) : [],
+  }];
+  return {
+    type: props.chartType === "line" || props.chartType === "pie" ? props.chartType : "bar",
+    labels, series,
+    width: Math.max(20, element.box.width),
+    height: Math.max(15, element.box.height),
+    title: typeof props.title === "string" ? props.title : undefined,
+  };
+}
+
 /** Deterministic SVG chart for print. No canvas, no runtime dependency. */
 export function renderChartSvg(options: ChartOptions): string {
   const { width, height, labels } = options;
-  const palette = options.palette?.length ? options.palette : DEFAULT_PALETTE;
+  const palette = options.palette?.length ? options.palette : CHART_PALETTE;
   const innerWidth = Math.max(10, width - PAD.left - PAD.right);
   const innerHeight = Math.max(10, height - PAD.top - PAD.bottom);
   const title = options.title ? `<text x="${PAD.left}" y="9" font-size="6" font-weight="600">${esc(options.title)}</text>` : "";
@@ -59,18 +91,22 @@ export function renderChartSvg(options: ChartOptions): string {
     });
   } else {
     const all = options.series.flatMap((series) => series.values);
-    const maximum = Math.max(1, ...all.map((value) => Math.abs(value)));
-    const baseline = PAD.top + innerHeight;
+    const minimum = all.reduce((min, value) => Math.min(min, value), 0);
+    const maximum = all.reduce((max, value) => Math.max(max, value), 1);
+    const valueY = (value: number) => PAD.top + innerHeight * (maximum - value) / (maximum - minimum);
+    const zeroY = valueY(0);
     for (let tick = 0; tick <= 4; tick += 1) {
-      const y = baseline - (tick / 4) * innerHeight;
+      const value = minimum + (maximum - minimum) * tick / 4;
+      const y = valueY(value);
       parts.push(
         `<line x1="${PAD.left}" y1="${round(y)}" x2="${round(PAD.left + innerWidth)}" y2="${round(y)}" stroke="#E5E7EB" stroke-width="0.2" />`,
       );
       parts.push(
-        `<text x="${PAD.left - 2}" y="${round(y + 1)}" font-size="4" text-anchor="end" fill="#6B7280">${esc(round((maximum * tick) / 4))}</text>`,
+        `<text x="${PAD.left - 2}" y="${round(y + 1)}" font-size="4" text-anchor="end" fill="#6B7280">${esc(round(value))}</text>`,
       );
     }
-    const slot = innerWidth / Math.max(1, labels.length);
+    const slots = options.series.reduce((max, entry) => Math.max(max, entry.values.length), Math.max(1, labels.length));
+    const slot = innerWidth / slots;
     labels.forEach((label, index) => {
       const x = PAD.left + index * slot + slot / 2;
       parts.push(
@@ -83,16 +119,16 @@ export function renderChartSvg(options: ChartOptions): string {
         const barWidth = Math.max(1, (slot * 0.6) / options.series.length);
         series.values.forEach((value, index) => {
           const x = PAD.left + index * slot + slot * 0.2 + seriesIndex * barWidth;
-          const barHeight = (Math.abs(value) / maximum) * innerHeight;
+          const y = valueY(value);
           parts.push(
-            `<rect x="${round(x)}" y="${round(baseline - barHeight)}" width="${round(barWidth)}" height="${round(barHeight)}" fill="${color}" />`,
+            `<rect x="${round(x)}" y="${round(Math.min(y, zeroY))}" width="${round(barWidth)}" height="${round(Math.abs(y - zeroY))}" fill="${color}" />`,
           );
         });
       } else {
         const points = series.values
           .map((value, index) => {
             const x = PAD.left + index * slot + slot / 2;
-            const y = baseline - (value / maximum) * innerHeight;
+            const y = valueY(value);
             return `${round(x)},${round(y)}`;
           })
           .join(" ");
@@ -101,7 +137,7 @@ export function renderChartSvg(options: ChartOptions): string {
         );
         series.values.forEach((value, index) => {
           const x = PAD.left + index * slot + slot / 2;
-          const y = baseline - (value / maximum) * innerHeight;
+          const y = valueY(value);
           parts.push(`<circle cx="${round(x)}" cy="${round(y)}" r="0.8" fill="${color}" />`);
         });
       }

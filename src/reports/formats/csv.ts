@@ -1,6 +1,6 @@
 import type { ReportDocumentV1, ReportElement } from "../core/types.js";
-import { evaluateExpression } from "../core/expressions.js";
-import { toDecimalString } from "../core/decimal.js";
+import { datasetRows } from "../core/data.js";
+import { tableCellText } from "../core/table.js";
 
 const FORMULA = /^[=+\-@\t\r]/;
 
@@ -15,19 +15,6 @@ interface TableRows {
   rows: string[][];
 }
 
-function resolveRows(data: Record<string, unknown> | undefined, path: string | undefined): unknown[] {
-  if (!data || !path) return [];
-  const [dataset, ...rest] = path.split(".");
-  const root = data[dataset ?? ""];
-  if (!rest.length) return Array.isArray(root) ? root : [];
-  const field = rest.join(".");
-  return Array.isArray(root)
-    ? root.map((row) =>
-        row && typeof row === "object" ? (row as Record<string, unknown>)[field] : undefined,
-      )
-    : [];
-}
-
 export function collectTables(
   document: ReportDocumentV1,
   data: Record<string, unknown> = {},
@@ -39,20 +26,14 @@ export function collectTables(
     const columns = Array.isArray(element.props.columns)
       ? (element.props.columns as Array<Record<string, unknown>>)
       : [];
-    const rows = resolveRows(data, typeof element.bindings?.path === "string" ? element.bindings.path : "");
+    const path = typeof element.bindings?.path === "string" ? element.bindings.path : "";
+    const rows = !path && Array.isArray(element.props.staticRows) ? element.props.staticRows : datasetRows(data, path);
     tables.push({
       headers: columns.map((column) => String(column.label ?? column.key ?? "")),
       rows: rows.map((row) =>
         columns.map((column) => {
           const value = row && typeof row === "object" ? (row as Record<string, unknown>)[String(column.key ?? "")] : "";
-          if (column.currency === true) {
-            const result = evaluateExpression(String(value ?? "0"), { locale: document.locale });
-            if (result.ok && result.value && typeof result.value === "object") {
-              const text = toDecimalString(result.value);
-              return new Intl.NumberFormat(document.locale, { minimumFractionDigits: 2 }).format(Number(text));
-            }
-          }
-          return value === null || value === undefined ? "" : String(value);
+          return tableCellText(value, column, document.locale);
         }),
       ),
     });

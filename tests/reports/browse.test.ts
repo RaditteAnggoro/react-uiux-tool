@@ -29,7 +29,11 @@ test("browse lists project reports, suggests public/rpt, and skips excluded path
       path.resolve("fixtures/reports/synthetic/invoice.report.json"),
       path.join(root, "secrets", "deep.report.json"),
     );
-    await symlink(path.join(root, "invoice.report.json"), path.join(root, "link.report.json"));
+    if (process.platform === "win32") {
+      await symlink(path.join(root, "public", "rpt"), path.join(root, "report-link"), "junction");
+    } else {
+      await symlink(path.join(root, "invoice.report.json"), path.join(root, "link.report.json"), "file");
+    }
 
     const session = (await (await fetch(`${studio.url}/api/session`)).json()) as { token: string };
     const headers = {
@@ -56,6 +60,7 @@ test("browse lists project reports, suggests public/rpt, and skips excluded path
     assert.ok(paths.includes("public/rpt/sample.yrf"));
     assert.ok(!paths.some((entry) => entry.includes("node_modules")));
     assert.ok(!paths.some((entry) => entry.includes("link.report.json")));
+    assert.ok(!paths.some((entry) => entry.startsWith("report-link/")));
     assert.ok(!paths.some((entry) => entry.includes("secrets/deep.report.json")));
     assert.deepEqual(data.suggestions, [{ path: "public/rpt" }]);
     assert.equal(data.truncated, false);

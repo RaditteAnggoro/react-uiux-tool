@@ -13,17 +13,32 @@ import {
 import type { DragEvent, ReactNode } from "react";
 import type {
   AnalysisReport,
+  BuildResult,
   JsxElement,
   SourcePatch,
   PatchRequest,
 } from "../../src/engine/types";
 import { api, setProject, setToken } from "./api";
+import NextRuntimeView from "./NextRuntimeView";
+import { vscodeSourceUrl } from "./source-location";
+import { sourceLineRange } from "./code-location";
+import ComponentBoards from "./ComponentBoards";
+import { isBoardProvider } from "../../src/engine/board-providers";
+import CssTokenEditor from "./CssTokenEditor";
 import { en, id, evidenceText, type Key } from "./i18n";
 import { releaseHistory } from "./release-history";
 const ReportStudio = lazy(() => import("./features/report-studio/ReportStudio"));
 type Screen = "home" | "wizard" | "open" | "analysis" | "studio" | "report";
 type ModalName = "language" | "preview" | "about" | "guide" | "review" | "leave-project" | "close-tab" | "history" | null;
 type PageTab = { id: string; path: string; name: string; file: string; selectedId: string | null; selectedIds: string[]; inspectorTab: Key; zoom: number; kind?: "route" | "design"; componentId?: string };
+type SourceAnchor = { line: number; hash: string };
+type DraftChange = { id: string; file: string; object: string; action: string; anchor: SourceAnchor };
+type DraftSummary = {
+  count: number;
+  canRedo: boolean;
+  files: string[];
+  history?: { applied: DraftChange[]; undone: DraftChange[] };
+};
 type ProjectTreeEntry = {
   name: string;
   path: string;
@@ -444,6 +459,8 @@ function Modal({
   closeLabel?: string;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
+  const closeDialog = useRef(onClose);
+  closeDialog.current = onClose;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement;
     const focusables = () =>
@@ -454,7 +471,7 @@ function Modal({
       ).filter((e) => !e.hasAttribute("disabled"));
     focusables()[0]?.focus();
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeDialog.current();
       if (e.key === "Tab") {
         const items = focusables();
         const first = items[0];
@@ -513,6 +530,7 @@ export default function App() {
   const t = (key: Key) => (language === "id" ? id : en)[key];
   const evidence = (value: string) => evidenceText(value, language);
   const [reportReturn, setReportReturn] = useState<"home" | "studio">("home");
+  const reportLauncher = useRef<HTMLButtonElement>(null);
   const [session, setSession] = useState<any>(null),
     [screen, setScreen] = useState<Screen>("home"),
     [modal, setModal] = useState<ModalName>(null);
@@ -529,8 +547,18 @@ export default function App() {
   const [draftPreviewStale, setDraftPreviewStale] = useState(false);
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [buildStatus, setBuildStatus] = useState<{ state: "running" | "success" | "error"; message: string; output?: string } | null>(null);
-  const [changeEntries, setChangeEntries] = useState<Array<{ id: string; file: string; object: string; action: string }>>([]);
-  const [undoneChanges, setUndoneChanges] = useState<Array<{ id: string; file: string; object: string; action: string }>>([]);
+  const [changeEntries, setChangeEntries] = useState<DraftChange[]>([]);
+  const [undoneChanges, setUndoneChanges] = useState<DraftChange[]>([]);
+  const canvasMore = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const menu = canvasMore.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
+  const [selectionCandidates, setSelectionCandidates] = useState<JsxElement[]>([]);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [selectionWarning, setSelectionWarning] = useState(""),
@@ -538,6 +566,7 @@ export default function App() {
     [pendingInsert, setPendingInsert] = useState(""),
     [draggingPalette, setDraggingPalette] = useState(false),
     [isDemo, setIsDemo] = useState(false);
+  const activeActions = useRef(0);
   const [path, setPath] = useState(""),
     [wizardStep, setWizardStep] = useState(0),
     [plan, setPlan] = useState<any>(null);
@@ -576,15 +605,34 @@ export default function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<string[]>([]);
   const [closeTabId, setCloseTabId] = useState<string | null>(null);
+  const [tabSwitching, setTabSwitching] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const tabNavigation = useRef<{ target: PageTab | null; after?: () => void; startingPreview?: Preview } | null>(null);
+  const navigatingTab = useRef(false);
   const [source, setSource] = useState("");
+  const [codeFile, setCodeFile] = useState("");
   const [codeSearchOpen, setCodeSearchOpen] = useState(false);
   const [codeSearch, setCodeSearch] = useState("");
   const [codeMatch, setCodeMatch] = useState(0);
   const [codeRevealLine, setCodeRevealLine] = useState<number | null>(null);
+  const [codeAnchorStale, setCodeAnchorStale] = useState(false);
+  const editorSource = report && codeFile ? vscodeSourceUrl(report.projectRoot, codeFile, codeRevealLine) : undefined;
   const codeSearchInput = useRef<HTMLInputElement>(null);
   const draftPreviewTimer = useRef<number | null>(null);
   const localDragRef = useRef(false);
+  const lastBoardProps = useRef(new Map<string, Record<string, unknown>>());
+  const [boardProviderIds, setBoardProviderIds] = useState<Record<string, readonly string[]>>({});
+  const [changingProvider, setChangingProvider] = useState(false);
+  const changingProviderRef = useRef(false);
+  const boardKey = designTarget && report ? JSON.stringify([report.projectRoot, designTarget]) : null;
+  const sendBoardProps = (props: Record<string, unknown>) => {
+    if (!preview || !designTarget) return;
+    frame.current?.contentWindow?.postMessage({ type: "uiux:board-args", component: designTarget, props }, new URL(preview.url).origin);
+  };
   const codeSource = useRef<HTMLPreElement>(null);
+  const codeViewport = useRef<HTMLDivElement>(null);
+  const codeRequest = useRef(0);
+  const activeCodeLine = codeRevealLine ? sourceLineRange(source, codeRevealLine) : null;
   const codeMatches = useMemo(() => {
     if (!codeSearch) return [];
     const text = source.toLocaleLowerCase(), query = codeSearch.toLocaleLowerCase();
@@ -597,7 +645,7 @@ export default function App() {
     if (codeSearchOpen) codeSearchInput.current?.focus();
   }, [codeSearchOpen]);
   useEffect(() => {
-    codeSource.current?.querySelector('[data-current-match="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (codeSearchOpen) codeSource.current?.querySelector('[data-current-match="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [codeMatch, codeMatches, codeSearchOpen]);
   useEffect(() => {
     const onFind = (event: KeyboardEvent) => {
@@ -733,12 +781,14 @@ export default function App() {
   }, [selectedId, report?.analyzedAt]);
   const currentBoard = boards.find((b) => b.id === boardId);
   const frameUrl = preview?.url ? new URL(route, preview.url) : null;
+  if (frameUrl && previewRevision) frameUrl.searchParams.set("__view", String(previewRevision));
   if (frameUrl && nav === "boards" && isDemo) {
     frameUrl.searchParams.set("board", "button");
     frameUrl.searchParams.set("scenario", currentBoard?.scenario || "default");
   }
   const frameSrc = frameUrl?.href;
   const act = async (fn: () => Promise<void>) => {
+    activeActions.current += 1;
     setBusy(true);
     setError("");
     try {
@@ -747,43 +797,88 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
       if (preview && previewState === "ready") setPreviewState("ready");
     } finally {
-      setBusy(false);
-    }
-  };
-  const actQuiet = async (fn: () => Promise<void>) => {
-    try {
-      await fn();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      activeActions.current -= 1;
+      if (activeActions.current === 0) setBusy(false);
     }
   };
   const flash = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 4000);
   };
-  const markDraftFile = (file?: string) => {
-    if (file) setDraftFiles((current) => (current.includes(file) ? current : [...current, file]));
-  };
-  const tabDirty = (tab: PageTab) =>
-    draftFiles.includes(tab.file) || (draftCount > 0 && tab.id === activeTabId);
+  const tabDirty = (tab: PageTab) => draftFiles.includes(tab.file);
   const routeName = (path: string) => path === "/" ? "Home" : path.split("/").filter(Boolean).pop() ?? path;
   const persistActiveTab = () => setPageTabs((tabs) => tabs.map((tab) => tab.id === activeTabId ? { ...tab, selectedId, selectedIds, inspectorTab, zoom } : tab));
+  const activateTab = async (target: PageTab | null, after?: () => void, startingPreview?: Preview) => {
+    tabNavigation.current = { target, after, startingPreview };
+    if (changingProviderRef.current || navigatingTab.current) return;
+    persistActiveTab();
+    navigatingTab.current = true;
+    setTabSwitching(true);
+    setError("");
+    let renderedTarget = startingPreview ? null : designTarget;
+    let targetChanged = false;
+    try {
+      while (tabNavigation.current) {
+        const next = tabNavigation.current;
+        tabNavigation.current = null;
+        const componentId = next.target?.componentId ?? null;
+        const component = componentId ? report?.components.find(item => item.id === componentId) : undefined;
+        try {
+          if (componentId && !component) throw new Error(t("privateDesignComponent"));
+          if ((preview || startingPreview) && componentId !== renderedTarget) {
+            await api("preview/design", component
+              ? { approved: true, file: component.source.file, componentName: component.name, providerIds: boardProviderIds[JSON.stringify([report?.projectRoot, component.id])] }
+              : { approved: true, clear: true });
+            renderedTarget = componentId;
+            targetChanged = true;
+          }
+        } catch (err) {
+          if (tabNavigation.current) continue;
+          if (targetChanged) {
+            const previous = report?.components.find(item => item.id === designTarget);
+            await api("preview/design", previous
+              ? { approved: true, file: previous.source.file, componentName: previous.name, providerIds: boardKey ? boardProviderIds[boardKey] : undefined }
+              : { approved: true, clear: true });
+          }
+          throw err;
+        }
+        if (tabNavigation.current) continue;
+        setActiveTabId(next.target?.id ?? null);
+        setRoute(next.target?.path ?? "/");
+        setSelectedId(next.target?.selectedId ?? null);
+        setSelectedIds(next.target?.selectedIds ?? []);
+        setSelectedRects({});
+        previewSelections.current.clear();
+        setInspectorTab(next.target?.inspectorTab ?? "props");
+        setZoom(next.target?.zoom ?? 100);
+        setMode("design");
+        setDesignTarget(renderedTarget);
+        if (targetChanged) {
+          setPreviewState("starting");
+          setPreviewRevision(revision => revision + 1);
+        }
+        next.after?.();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      navigatingTab.current = false;
+      setTabSwitching(false);
+    }
+  };
   const switchTab = (id: string) => {
     const target = pageTabs.find((tab) => tab.id === id);
-    if (!target || target.id === activeTabId) return;
-    persistActiveTab();
-    setActiveTabId(target.id); setRoute(target.path);
-    setSelectedId(target.selectedId); setSelectedIds(target.selectedIds); setSelectedRects({});
-    previewSelections.current.clear(); setInspectorTab(target.inspectorTab); setZoom(target.zoom); setMode("design");
+    if (!target || (target.id === activeTabId && !navigatingTab.current)) return;
+    void activateTab(target);
   };
-  const removeTab = (id: string) => {
+  const removeTab = (id: string, after?: () => void) => {
     const remaining = pageTabs.filter((tab) => tab.id !== id);
-    setPageTabs(remaining);
-    if (activeTabId !== id) return;
-    const next = remaining.at(-1);
-    setActiveTabId(next?.id ?? null); setSelectedId(next?.selectedId ?? null);
-    setSelectedIds(next?.selectedIds ?? []); setSelectedRects({});
-    if (next) { setRoute(next.path); setInspectorTab(next.inspectorTab); setZoom(next.zoom); }
+    const remove = () => {
+      setPageTabs(tabs => tabs.filter(tab => tab.id !== id));
+      after?.();
+    };
+    if (activeTabId === id) void activateTab(remaining.at(-1) ?? null, remove);
+    else remove();
   };
   const closeTab = (id: string) => {
     const tab = pageTabs.find((candidate) => candidate.id === id);
@@ -795,7 +890,7 @@ export default function App() {
   };
   const openTab = (path: string, activate = true) => {
     if (!report) return;
-    const existing = pageTabs.find((tab) => tab.path === path);
+    const existing = pageTabs.find((tab) => tab.kind !== "design" && tab.path === path);
     if (existing) { if (activate) switchTab(existing.id); return; }
     if (pageTabs.length >= 3) {
       const clean = pageTabs.find((tab) => !tabDirty(tab) && tab.id !== activeTabId);
@@ -808,17 +903,17 @@ export default function App() {
     const file = report.routes.find((candidate) => candidate.path === path)?.file ?? report.files.find((candidate) => /(^|\/)App\.[jt]sx?$/.test(candidate.file))?.file ?? "";
     const tab: PageTab = { id: `tab:${path}`, path, name: routeName(path), file, selectedId: null, selectedIds: [], inspectorTab: "props", zoom: 100, kind: "route" };
     setPageTabs((tabs) => [...tabs, tab]);
-    if (activate) {
-      persistActiveTab(); setActiveTabId(tab.id); setRoute(path);
-      setSelectedId(null); setSelectedIds([]); setSelectedRects({});
-      previewSelections.current.clear(); setInspectorTab("props"); setZoom(100);
-    }
+    if (activate) void activateTab(tab);
   };
-  const recordChange = (file: string, object: string, action: string) => {
+  const recordChange = (patch: SourcePatch, object: string, action: string) => {
+    const original = patch.before.split(/\r?\n/);
+    const edited = patch.after.split(/\r?\n/);
+    const firstChange = edited.findIndex((line, index) => original[index] !== line);
+    const line = firstChange < 0 ? edited.length : firstChange + 1;
     setUndoneChanges([]);
     setChangeEntries((entries) => [
       ...entries,
-      { id: `${file}:${object}:${action}:${entries.length}`, file, object, action },
+      { id: patch.id, file: patch.file, object, action, anchor: { line, hash: patch.afterHash } },
     ].slice(-50));
   };
   const multiSelectHint =
@@ -1023,6 +1118,8 @@ export default function App() {
       if (event.data?.type === "uiux:ready") {
         readySelectionToken.current += 1;
         sendCanvasSelection(readySelectionToken.current);
+        const board = boardKey && lastBoardProps.current.get(boardKey);
+        if (board) sendBoardProps(board);
       }
       if (event.data?.type === "uiux:selection-applied" && event.data.token === readySelectionToken.current && readySelectionToken.current > 0)
         setPreviewState("ready");
@@ -1088,6 +1185,7 @@ export default function App() {
           (element) => element.id === event.data.elementId,
         );
         if (sourceElement) {
+          if (event.data.type === "uiux:select") setSelectionCandidates([]);
           let target = sourceElement;
           if (
             sourceElement.ownerComponent &&
@@ -1107,6 +1205,7 @@ export default function App() {
                 setSelectedIds([]);
                 setSelectedRects({});
                 previewSelections.current.clear();
+                setSelectionCandidates(usages.filter(usage => !usage.dynamic));
                 setSelectionWarning(t("ambiguousCanvasTarget"));
                 return;
               }
@@ -1130,6 +1229,7 @@ export default function App() {
                 if (exact.length !== 1) {
                   setSelectedId(null); setSelectedIds([]); setSelectedRects({});
                   previewSelections.current.clear();
+                  setSelectionCandidates(usages.filter(usage => !usage.dynamic));
                   setSelectionWarning(t("ambiguousCanvasTarget"));
                   return;
                 }
@@ -1263,16 +1363,16 @@ export default function App() {
     sendMode();
   }, [mode, preview, frameSrc]);
   useEffect(() => {
-    if (preview) setPreviewState("starting");
-  }, [frameSrc]);
+    if (preview && preview.kind !== "next") setPreviewState("starting");
+  }, [frameSrc, preview?.kind]);
   useEffect(() => {
-    if (!preview || previewState !== "starting") return;
+    if (!preview || preview.kind === "next" || previewState !== "starting") return;
     const timer = window.setTimeout(() => {
       setPreviewState("error");
       setError(t("previewTimeout"));
     }, 10_000);
     return () => window.clearTimeout(timer);
-  }, [previewState, frameSrc, preview?.url, language]);
+  }, [previewState, frameSrc, preview?.url, preview?.kind, language]);
   async function restoreDraftState() {
     if (!report?.projectRoot) return;
     try {
@@ -1281,12 +1381,15 @@ export default function App() {
         count?: number;
         canRedo?: boolean;
         files?: string[];
+        history?: { applied: DraftChange[]; undone: DraftChange[] };
         analysis?: AnalysisReport;
       }>("draft/state", { expectedProject: report.projectRoot });
       if (!result.open || !result.analysis) return;
       applyReport(result.analysis);
       setDraftOpen(true);
       setDraftFiles(Array.isArray(result.files) ? result.files : []);
+      setChangeEntries(result.history?.applied ?? []);
+      setUndoneChanges(result.history?.undone ?? []);
       setDraftCount(result.count ?? 0);
       setDraftRedo(result.canRedo ?? false);
       setDraftPreviewStale(true);
@@ -1298,13 +1401,13 @@ export default function App() {
   }
   useEffect(() => {
     void restoreDraftState();
-  }, [report?.projectRoot, language]);
+  }, [report?.projectRoot]);
   useEffect(() => {
-    if (!preview || previewState !== "ready" || !draftOpen || !draftPreviewStale) return;
+    if (!preview || preview.kind === "next" || previewState !== "ready" || !draftOpen || !draftPreviewStale || tabSwitching) return;
     scheduleDraftPreview();
-  }, [preview, previewState, draftOpen, draftPreviewStale]);
+  }, [preview, previewState, draftOpen, draftPreviewStale, tabSwitching]);
   useEffect(() => {
-    if (!preview || !report || pageTabs.length > 0) return;
+    if (!preview || preview.kind === "next" || !report || pageTabs.length > 0) return;
     openTab(route || "/");
   }, [preview, report?.projectRoot, pageTabs.length]);
   const tabProjectRoot = useRef<string | null>(null);
@@ -1312,27 +1415,44 @@ export default function App() {
     const root = report?.projectRoot ?? null;
     if (tabProjectRoot.current === root) return;
     tabProjectRoot.current = root;
+    codeRequest.current += 1;
     setPageTabs([]);
     setActiveTabId(null);
     setDraftFiles([]);
+    setSource("");
+    setCodeFile("");
+    setCodeRevealLine(null);
+    setCodeAnchorStale(false);
   }, [report?.projectRoot]);
+  function requestCodeSource(file: string, anchor?: SourceAnchor | null) {
+    const request = ++codeRequest.current;
+    setSource("");
+    setCodeFile(file);
+    setCodeRevealLine(null);
+    setCodeAnchorStale(false);
+    setCodeSearch("");
+    setCodeSearchOpen(false);
+    void api<{ source: string; hash: string }>("source?file=" + encodeURIComponent(file)).then(value => {
+      if (request !== codeRequest.current) return;
+      setSource(value.source);
+      setCodeAnchorStale(!!anchor && anchor.hash !== value.hash);
+      setCodeRevealLine(anchor?.hash === value.hash ? anchor.line : null);
+    }, (error: unknown) => {
+      if (request === codeRequest.current) setError(error instanceof Error ? error.message : String(error));
+    });
+    return request;
+  }
   useEffect(() => {
     if (mode !== "code" || !selected) return;
-    const file = selected.source.file;
-    const line = selected.source.line;
-    void act(async () => {
-      const value = await api<{ source: string }>("source?file=" + encodeURIComponent(file));
-      setSource(value.source);
-      setCodeRevealLine(line);
-    });
-  }, [mode, selectedId]);
+    const request = requestCodeSource(selected.source.file, { line: selected.source.line, hash: selected.hash });
+    return () => { if (request === codeRequest.current) codeRequest.current += 1; };
+  }, [mode, selectedId, selected?.source.file, selected?.source.line, selected?.hash]);
   useEffect(() => {
-    if (mode !== "code" || !codeRevealLine) return;
-    const pre = codeSource.current;
-    if (!pre) return;
-    const lineHeight = parseFloat(getComputedStyle(pre).lineHeight || "") || 16;
-    pre.scrollTop = Math.max(0, (codeRevealLine - 3) * lineHeight);
-  }, [source, codeRevealLine, mode]);
+    const viewport = codeViewport.current;
+    const line = codeSource.current?.querySelector("[data-source-anchor]");
+    if (mode !== "code" || !viewport || !line || codeSearchOpen && codeSearch) return;
+    viewport.scrollTop += line.getBoundingClientRect().top - viewport.getBoundingClientRect().top - viewport.clientHeight / 3;
+  }, [source, codeRevealLine, mode, codeSearch, codeSearchOpen]);
   useEffect(() => {
     if (!error) return;
     setLogs((current) => [...current, `[error] ${error}`].slice(-200));
@@ -1594,7 +1714,7 @@ export default function App() {
       let value: Preview | undefined;
       for (let attempt = 0; attempt < 6; attempt += 1) {
         try {
-          value = await api<Preview>("preview/start", { approved: true });
+          value = await api<Preview>("preview/start", { approved: true, expectedProject: report?.projectRoot });
           break;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1607,6 +1727,12 @@ export default function App() {
       setDesignTarget(null);
       setModal(null);
       setScreen("studio");
+      if (value.kind === "next") {
+        setPreviewState("ready");
+        return;
+      }
+      const activeComponent = pageTabs.find(tab => tab.id === activeTabId && tab.kind === "design");
+      if (activeComponent) await activateTab(activeComponent, undefined, value);
       void restoreDraftState();
     } catch (err) {
       setPreview(null);
@@ -1658,12 +1784,13 @@ export default function App() {
   ) {
     const oldIds = new Set(report?.elements.map((candidate) => candidate.id));
     const shared = isSharedImplementation(element);
-    await actQuiet(async () => {
+    await act(async () => {
       const value = await api<{
         patch: SourcePatch;
         analysis: AnalysisReport;
         count: number;
         canRedo: boolean;
+        files: string[];
       }>("draft/edit", {
         file: element.source.file,
         elementId: element.id,
@@ -1675,8 +1802,8 @@ export default function App() {
       });
       if (operation === "prop") propDraft.current.dirty = false;
       applyReport(value.analysis, value.patch);
-      markDraftFile(value.patch?.file);
-      recordChange(element.source.file, element.tag, operation);
+      setDraftFiles(value.files);
+      recordChange(value.patch, element.tag, operation);
       if (operation === "remove") {
         setSelectedId(null);
         setSelectedIds([]);
@@ -1755,8 +1882,9 @@ export default function App() {
   async function undo() {
     if (draftOpen) {
       await act(async () => {
-        const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/undo", {});
+        const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean; files: string[] }>("draft/undo", {});
         applyReport(result.analysis, result.patch);
+        setDraftFiles(result.files);
         setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
         setChangeEntries((entries) => {
           const last = entries.at(-1);
@@ -1767,13 +1895,12 @@ export default function App() {
       });
       return;
     }
-    if (preview) setPreviewState("starting");
     await act(async () => {
-      const value = await api("undo", { approved: true });
+      const value = await api<{ analysis: AnalysisReport; preservedPreview?: boolean }>("undo", { approved: true });
       applyReport(value.analysis);
       setCheckpoint(false);
       setPatch(null);
-      if (preview && frame.current) {
+      if (!value.preservedPreview && preview && frame.current) {
         setPreviewState("starting");
         frame.current.src = frame.current.src;
       }
@@ -1789,8 +1916,9 @@ export default function App() {
   }
   async function redoDraft() {
     await act(async () => {
-      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/redo", {});
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean; files: string[] }>("draft/redo", {});
       applyReport(result.analysis, result.patch);
+      setDraftFiles(result.files);
       setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(true);
       setUndoneChanges((undone) => {
         const next = undone[0];
@@ -1801,10 +1929,12 @@ export default function App() {
     });
   }
   async function refreshDraftPreview() {
+    if (navigatingTab.current) return;
     await act(async () => {
-      await api("draft/preview", {});
+      const result = await api<{ hot: boolean }>("draft/preview", {});
+      if (navigatingTab.current) return;
       setDraftPreviewStale(false);
-      if (preview && frame.current && frameSrc) {
+      if (!result.hot && preview && frame.current && frameSrc) {
         const url = new URL(frameSrc);
         url.searchParams.set("__draft", String(Date.now()));
         frame.current.src = url.toString();
@@ -1819,41 +1949,55 @@ export default function App() {
       void refreshDraftPreview();
     }, 350);
   }
-  async function saveDraft(): Promise<boolean> {
-    let saved = false;
+  const applyDraftSummary = (result: DraftSummary) => {
+    const open = result.count > 0 || result.canRedo;
+    setDraftOpen(open);
+    setDraftCount(result.count);
+    setDraftRedo(result.canRedo);
+    setDraftPreviewStale(false);
+    setDraftFiles(result.files);
+    setChangeEntries(result.history?.applied ?? []);
+    setUndoneChanges(result.history?.undone ?? []);
+    if (!open) setDraftRecovered(false);
+  };
+  async function commitDraft(file?: string, build = false) {
+    let saved: (DraftSummary & { analysis: AnalysisReport; rebased?: string[]; build?: BuildResult }) | undefined;
     if (draftPreviewTimer.current !== null) {
       window.clearTimeout(draftPreviewTimer.current);
       draftPreviewTimer.current = null;
     }
     await act(async () => {
-      const result = await api<{ analysis: AnalysisReport }>("draft/commit", { approved: true });
-      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false);
+      const result = await api<NonNullable<typeof saved>>("draft/commit", { approved: true, file, build });
+      applyReport(result.analysis);
+      applyDraftSummary(result);
       setCheckpoint(false);
-      setDraftFiles([]);
-      setChangeEntries([]);
-      setUndoneChanges([]);
-      setDraftRecovered(false);
-      saved = true;
-      flash(language === "id" ? "Draft disimpan ke source" : "Draft saved to source");
+      saved = result;
+      flash(result.rebased?.length ? t("draftSavedRebased") : language === "id" ? "Draft disimpan ke source" : "Draft saved to source");
     });
     return saved;
   }
+  async function saveDraft(file?: string): Promise<boolean> {
+    return !!(await commitDraft(file));
+  }
   async function saveAndBuild() {
-    if (draftOpen && draftCount > 0) {
-      const saved = await saveDraft();
-      if (!saved) return;
-    }
     setBuildStatus({
       state: "running",
       message: language === "id" ? "Build berjalan…" : "Build running…",
     });
     try {
-      const result = await api<{ ok: boolean; code: number | null; output: string; durationMs: number }>("build");
+      const result = draftOpen && draftCount > 0
+        ? (await commitDraft(undefined, true))?.build
+        : await api<BuildResult>("build", { expectedProject: report?.projectRoot, approved: true });
+      if (!result) {
+        setBuildStatus({ state: "error", message: t("buildSkippedDraft") });
+        return;
+      }
       setBuildStatus({
         state: result.ok ? "success" : "error",
         message: result.ok
           ? `${language === "id" ? "Build berhasil" : "Build succeeded"} · ${(result.durationMs / 1000).toFixed(1)}s`
-          : `${language === "id" ? "Build gagal" : "Build failed"} · exit ${result.code}`,
+          : result.code === null ? (language === "id" ? "Build gagal" : "Build failed")
+            : `${language === "id" ? "Build gagal" : "Build failed"} · exit ${result.code}`,
         output: result.output,
       });
       flash(
@@ -1868,18 +2012,22 @@ export default function App() {
       });
     }
   }
-  async function discardDraft() {
+  async function discardDraft(file?: string): Promise<boolean> {
     if (draftPreviewTimer.current !== null) {
       window.clearTimeout(draftPreviewTimer.current);
       draftPreviewTimer.current = null;
     }
 
+    let discarded = false;
     await act(async () => {
-      const result = await api<{ analysis: AnalysisReport }>("draft/discard", {});
-      applyReport(result.analysis); setDraftOpen(false); setDraftCount(0); setDraftRedo(false); setDraftPreviewStale(false); setDraftRecovered(false); setDraftFiles([]); setChangeEntries([]); setUndoneChanges([]);
+      const result = await api<DraftSummary & { analysis: AnalysisReport }>("draft/discard", { file });
+      applyReport(result.analysis);
+      applyDraftSummary(result);
       setSelectedId(null); setSelectedIds([]); setSelectedRects({}); previewSelections.current.clear();
       flash(t("discarded"));
+      discarded = true;
     });
+    return discarded;
   }
   async function createProject() {
     await act(async () => {
@@ -2115,16 +2263,18 @@ export default function App() {
         }),
       );
   };
-  const openSourceFile = (file: string) => {
+  const openSourceFile = (file: string, anchor?: SourceAnchor | null) => {
     setMode("code");
-    const first = allElements.find((element) => element.source.file === file);
+    const first = anchor === undefined ? allElements.find((element) => element.source.file === file) : undefined;
     setSelectedId(first?.id || null);
-    void act(async () => {
-      const value = await api<{ source: string }>(
-        "source?file=" + encodeURIComponent(file),
-      );
-      setSource(value.source);
-    });
+    if (anchor !== undefined) {
+      setSelectedIds([]);
+      setSelectedRects({});
+      previewSelections.current.clear();
+    }
+    if (!first || first.id === selectedId && mode === "code") {
+      requestCodeSource(file, anchor ?? (first ? { line: first.source.line, hash: first.hash } : null));
+    }
   };
   function stageDroppedElement(element: JsxElement, tag: string) {
     setSelectedId(element.id);
@@ -2208,12 +2358,12 @@ export default function App() {
           confirmScope: shared,
         };
       });
-      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", {
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean; files: string[] }>("draft/edit-group", {
         items,
       });
       applyReport(result.analysis, result.patch);
-      markDraftFile(result.patch?.file);
-      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      setDraftFiles(result.files);
+      recordChange(result.patch, "selection", "move/align");
       const keepLocal = localDragRef.current;
       localDragRef.current = false;
       setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
@@ -2251,10 +2401,10 @@ export default function App() {
           confirmScope: false,
         })),
       );
-      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", { items });
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean; files: string[] }>("draft/edit-group", { items });
       applyReport(result.analysis, result.patch);
-      markDraftFile(result.patch?.file);
-      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      setDraftFiles(result.files);
+      recordChange(result.patch, "selection", "move/align");
       const keepLocal = localDragRef.current;
       localDragRef.current = false;
       setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
@@ -2347,12 +2497,12 @@ export default function App() {
           confirmScope: shared,
         };
       });
-      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean }>("draft/edit-group", {
+      const result = await api<{ analysis: AnalysisReport; patch: SourcePatch; count: number; canRedo: boolean; files: string[] }>("draft/edit-group", {
         items,
       });
       applyReport(result.analysis, result.patch);
-      markDraftFile(result.patch?.file);
-      recordChange(result.patch?.file ?? "", "selection", "move/align");
+      setDraftFiles(result.files);
+      recordChange(result.patch, "selection", "move/align");
       const keepLocal = localDragRef.current;
       localDragRef.current = false;
       setDraftOpen(true); setDraftCount(result.count); setDraftRedo(result.canRedo); setDraftPreviewStale(!keepLocal);
@@ -2422,6 +2572,10 @@ export default function App() {
       flash(t("privateDesignComponent"));
       return;
     }
+    if (!preview) {
+      flash(t("startPreviewForDesign"));
+      return;
+    }
     const existing = pageTabs.find((tab) => tab.kind === "design" && tab.componentId === component.id);
     if (existing) {
       switchTab(existing.id);
@@ -2440,7 +2594,7 @@ export default function App() {
       path: "/",
       name: component.name,
       file: component.source.file,
-      selectedId: null,
+      selectedId: elementsByOwner.get(component.id)?.[0]?.id ?? null,
       selectedIds: [],
       inspectorTab: "props",
       zoom: 100,
@@ -2448,34 +2602,7 @@ export default function App() {
       componentId: component.id,
     };
     setPageTabs((tabs) => [...tabs.filter((candidate) => candidate.id !== tab.id), tab]);
-    setActiveTabId(tab.id);
-    activateDesignComponent(component);
-  };
-  const activateDesignComponent = (
-    component: AnalysisReport["components"][number],
-  ) => {
-    const owned = elementsByOwner.get(component.id) || [];
-    if (owned[0]) setSelectedId(owned[0].id);
-    if (!component.exported) {
-      flash(t("privateDesignComponent"));
-      return;
-    }
-    if (!preview) {
-      flash(t("startPreviewForDesign"));
-      return;
-    }
-    void act(async () => {
-      await api("preview/design", {
-        approved: true,
-        file: component.source.file,
-        componentName: component.name,
-      });
-      setDesignTarget(component.id);
-      setRoute("/");
-      setMode("design");
-      setPreviewState("starting");
-      if (frame.current) frame.current.src = frame.current.src;
-    });
+    void activateTab(tab);
   };
   const renderElementNode = (element: JsxElement, depth: number): ReactNode => {
     const key = `element:${element.id}`;
@@ -3480,6 +3607,11 @@ export default function App() {
                     <p className="muted small">{t("noStyle")}</p>
                   )}
                 </section>
+                {report && <CssTokenEditor key={report.projectRoot} report={report} disabled={busy || draftOpen || !!patch} tr={t}
+                  onReview={request => void act(async () => {
+                    setPatch(await api<SourcePatch>("patch/token", request));
+                    setModal("review");
+                  })} />}
                 <section className="inspector-section">
                   <h4>{t("inlineStyle")}</h4>
                   <Field label={t("cssProperty")}>
@@ -3543,7 +3675,7 @@ export default function App() {
                           : "",
                       );
                     }}
-                    disabled={!editableSelected || !availableEvents.length}
+                    disabled={busy || !editableSelected || !availableEvents.length}
                   >
                     {!availableEvents.length && <option value="">—</option>}
                     {availableEvents.map((name) => (
@@ -3557,7 +3689,7 @@ export default function App() {
                     list="event-handler-names"
                     placeholder="handleChange"
                     onChange={(event) => setEventHandler(event.target.value)}
-                    disabled={!editableSelected}
+                    disabled={busy || !editableSelected}
                   />
                   <datalist id="event-handler-names">
                     {callableOptions.map((name) => (
@@ -3869,6 +4001,15 @@ export default function App() {
       </aside>
     );
   }
+  if (screen === "studio" && report && preview?.kind === "next") {
+    return <NextRuntimeView key={preview.url} origin={preview.url} projectRoot={report.projectRoot} routes={report.routes} basePath={report.detected.nextBasePath} tr={t} busy={busy} error={error}
+      onStop={() => void act(async () => {
+        await api("preview/stop", {});
+        setPreview(null);
+        setPreviewState("stopped");
+        setScreen("analysis");
+      })} />;
+  }
   return (
     <div
       className={`app ${screen === "studio" ? "workspace-app" : ""} ${screen === "report" ? "report-app" : ""}`}
@@ -3880,7 +4021,10 @@ export default function App() {
             token={session?.token ?? ""}
             language={language}
             context={reportReturn === "studio" ? "project" : "home"}
-            onExit={() => setScreen(reportReturn)}
+            onExit={() => {
+              setScreen(reportReturn);
+              requestAnimationFrame(() => reportLauncher.current?.focus());
+            }}
           />
         </Suspense>
       )}
@@ -3944,6 +4088,7 @@ export default function App() {
             </button>
             <button
               className="action-card"
+              ref={reportLauncher}
               onClick={() => {
                 setReportReturn("home");
                 setScreen("report");
@@ -4157,11 +4302,10 @@ export default function App() {
                   </button>
                   <button
                     className={`choice-card ${form.framework === "next" ? "selected" : ""}`}
-                    disabled
-                    title={t("unsupported")}
+                    onClick={() => setForm({ ...form, framework: "next" })}
                   >
                     <strong>Next.js</strong>
-                    <Badge>{t("limited")}</Badge>
+                    <Badge>TypeScript</Badge>
                     <p>{t("nextHint")}</p>
                   </button>
                 </div>
@@ -4344,10 +4488,10 @@ export default function App() {
                 >
                   {report.readiness.state === "UNSUPPORTED"
                     ? t("unsupported")
-                    : t("startPreview")}
+                    : report.detected.framework === "nextjs" ? t("nextStartRuntime") : t("startPreview")}
                   <Icon name="play" size={15} />
                 </button>
-                <p>{t("startPreviewHint")}</p>
+                <p>{t(report.detected.framework === "nextjs" ? "nextApprovalHint" : "startPreviewHint")}</p>
               </div>
             </div>
           </div>
@@ -4845,6 +4989,7 @@ export default function App() {
                     </button>
                     <button
                       className="tab-close"
+                      disabled={busy || tabSwitching}
                       aria-label={`Close ${tab.name}`}
                       onClick={() => closeTab(tab.id)}
                     >
@@ -4919,16 +5064,29 @@ export default function App() {
                   >
                     {draftOpen && draftCount > 0 ? "Save & Build" : "Build"}
                   </button>
-                  <details className="canvas-more">
+                  <details
+                    className="canvas-more"
+                    ref={canvasMore}
+                    onBlur={event => {
+                      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+                    }}
+                    onKeyDown={event => {
+                      if (event.key !== "Escape" || !event.currentTarget.open) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.currentTarget.open = false;
+                      event.currentTarget.querySelector("summary")?.focus();
+                    }}
+                  >
                     <summary aria-label={language === "id" ? "Aksi lain" : "More actions"}>⋯</summary>
                     <div className="canvas-more-menu">
                       <button
                         disabled={busy || !draftOpen || !preview}
-                        onClick={() => void refreshDraftPreview()}
+                        onClick={() => { if (canvasMore.current) canvasMore.current.open = false; void refreshDraftPreview(); }}
                       >
                         {language === "id" ? "Tampilkan draft" : "Preview draft"}
                       </button>
-                      <button disabled={busy || !draftOpen} onClick={() => void discardDraft()}>
+                      <button disabled={busy || !draftOpen} onClick={() => { if (canvasMore.current) canvasMore.current.open = false; void discardDraft(); }}>
                         {language === "id" ? "Buang draft" : "Discard Draft"}
                       </button>
                     </div>
@@ -4939,31 +5097,10 @@ export default function App() {
                     </span>
                   )}
                   {designTarget && (
-                    <button
-                      className="button small-button"
-                      onClick={() =>
-                        void act(async () => {
-                          await api("preview/design", {
-                            approved: true,
-                            clear: true,
-                          });
-                          setDesignTarget(null);
-                          setPreviewState("starting");
-                        })
-                      }
-                    >
+                    <button className="button small-button" onClick={() => openTab("/")}>
                       {t("appPreview")}
                     </button>
                   )}
-                  <button
-                    className="icon-button"
-                    title={t("undoHint")}
-                    aria-label={t("undo")}
-                    disabled={busy || (draftOpen ? draftCount === 0 : !checkpoint)}
-                    onClick={() => void undo()}
-                  >
-                    <Icon name="undo" size={16} />
-                  </button>
                 </div>
               </div>
               <div className="viewport-toolbar">
@@ -5014,7 +5151,7 @@ export default function App() {
                   <button
                     className="text-button small"
                     disabled={
-                      !preview && report.readiness.state === "UNSUPPORTED"
+                      tabSwitching || (!preview && report.readiness.state === "UNSUPPORTED")
                     }
                     title={report.readiness.reason}
                     onClick={() =>
@@ -5094,15 +5231,49 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {boardKey && preview && mode === "design" && (
+                <ComponentBoards key={boardKey} storageKey={`uiux-component-boards:${boardKey}`}
+                  stories={report.storyPresets?.filter(preset => preset.componentId === designTarget) ?? []}
+                  declaredProps={report.components.find(item => item.id === designTarget)?.props ?? []}
+                  providers={report.components.filter(item => isBoardProvider(item, designTarget))}
+                  providerIds={boardProviderIds[boardKey] ?? []}
+                  changingProvider={changingProvider || tabSwitching}
+                  onProviderChange={async providerIds => {
+                    const component = report.components.find(item => item.id === designTarget);
+                    if (!component || changingProviderRef.current || navigatingTab.current) return;
+                    changingProviderRef.current = true;
+                    setChangingProvider(true);
+                    setError("");
+                    try {
+                      await api("preview/design", { approved: true, file: component.source.file, componentName: component.name,
+                        providerIds });
+                      setBoardProviderIds(ids => ({ ...ids, [boardKey]: providerIds }));
+                      setPreviewState("starting");
+                      setPreviewRevision(revision => revision + 1);
+                    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+                    finally {
+                      changingProviderRef.current = false;
+                      setChangingProvider(false);
+                      const queued = tabNavigation.current;
+                      if (queued) void activateTab(queued.target, queued.after, queued.startingPreview);
+                    }
+                  }}
+                  ready={!changingProvider && !tabSwitching && previewState === "ready"} tr={t}
+                  onApply={props => {
+                    lastBoardProps.current.set(boardKey, props);
+                    sendBoardProps(props);
+                  }} />
+              )}
               <div
                 className={`canvas-area ${mode === "code" ? "code-area" : ""}`}
               >
                 {mode === "code" ? (
-                  <div className="canvas-source">
+                  <div className="canvas-source" ref={codeViewport}>
                     <div className="source-file-label">
                       <Icon name="file" size={15} />
-                      {selected?.source.file || t("sourceReadOnly")}
-                      {codeRevealLine ? ` · line ${codeRevealLine}` : ""}
+                      {codeFile || selected?.source.file || t("sourceReadOnly")}
+                      {codeRevealLine ? ` · ${t("sourceLine").replace("{line}", String(codeRevealLine))}` : ""}
+                      {editorSource && <a className="text-button source-editor-link" href={editorSource}>{t("openInVSCode")}</a>}
                     </div>
                     {codeSearchOpen && <div className="code-find" role="search">
                       <input ref={codeSearchInput} aria-label={t("findInCode")} placeholder={t("findInCode")} value={codeSearch} onChange={(event) => setCodeSearch(event.target.value)} onKeyDown={(event) => {
@@ -5114,8 +5285,8 @@ export default function App() {
                       <button className="button" aria-label={t("nextMatch")} disabled={!codeMatches.length} onClick={() => setCodeMatch((current) => (current + 1) % codeMatches.length)}>↓</button>
                       <button className="button" aria-label={t("closeSearch")} onClick={() => setCodeSearchOpen(false)}>×</button>
                     </div>}
-                    <p className="small muted">{t("sourceEditHint")}</p>
-                    <pre ref={codeSource}>{codeMatches.length ? <>{codeMatches.map((start, index) => <span key={start}>{source.slice(index ? codeMatches[index - 1] + codeSearch.length : 0, start)}<mark data-current-match={index === codeMatch}>{source.slice(start, start + codeSearch.length)}</mark></span>)}{source.slice(codeMatches[codeMatches.length - 1] + codeSearch.length)}</> : source || t("selectHint")}</pre>
+                    <p className="small muted">{codeAnchorStale ? t("sourceAnchorStale") : t("sourceEditHint")}</p>
+                    <pre ref={codeSource}>{codeSearchOpen && codeMatches.length ? <>{codeMatches.map((start, index) => <span key={start}>{source.slice(index ? codeMatches[index - 1] + codeSearch.length : 0, start)}<mark data-current-match={index === codeMatch}>{source.slice(start, start + codeSearch.length)}</mark></span>)}{source.slice(codeMatches[codeMatches.length - 1] + codeSearch.length)}</> : activeCodeLine ? <>{source.slice(0, activeCodeLine.start)}<span className="source-anchor" data-source-anchor>{source.slice(activeCodeLine.start, activeCodeLine.end)}</span>{source.slice(activeCodeLine.end)}</> : source || t("selectHint")}</pre>
                   </div>
                 ) : preview && (nav !== "boards" || isDemo) ? (
                   <div
@@ -5154,7 +5325,7 @@ export default function App() {
                     <iframe
                       ref={frame}
                       src={frameSrc}
-                      style={{ visibility: previewState === "starting" ? "hidden" : undefined, pointerEvents: draftOpen && draftPreviewStale ? "none" : undefined }}
+                      style={{ visibility: tabSwitching || previewState === "starting" ? "hidden" : undefined, pointerEvents: draftOpen && draftPreviewStale ? "none" : undefined }}
                       title={t("preview")}
                       onLoad={sendMode}
                       sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
@@ -5292,18 +5463,25 @@ export default function App() {
                 {bottomTab === "analysis" && renderAnalysis(true)}
                 {bottomTab === "changes" && (
                   <>
-                    {changeEntries.length > 0 && (
+                    {draftFiles.length > 0 && (
                       <ul className="change-list" aria-label={t("changes")}>
                         {changeEntries.map((entry) => (
                           <li key={entry.id}>
-                            <span className="change-object">{entry.object}</span>
-                            <span className="change-action">{entry.action}</span>
-                            <code>{entry.file}</code>
+                            <button className="text-button change-source" onClick={() => openSourceFile(entry.file, entry.anchor)}>
+                              <span className="change-object">{entry.object}</span>
+                              <span className="change-action">{entry.action}</span>
+                              <code>{entry.file}</code>
+                            </button>
+                          </li>
+                        ))}
+                        {draftFiles.filter(file => !changeEntries.some(entry => entry.file === file)).map(file => (
+                          <li key={file}>
+                            <button className="text-button change-source" onClick={() => openSourceFile(file, null)}><code>{file}</code></button>
                           </li>
                         ))}
                       </ul>
                     )}
-                    {renderDiff()}
+                    {(patch || draftFiles.length === 0) && renderDiff()}
                   </>
                 )}
                 {bottomTab === "problems" && (
@@ -5374,7 +5552,8 @@ export default function App() {
                   className="button"
                   disabled={busy}
                   onClick={() => {
-                    void discardDraft().then(() => {
+                    void discardDraft().then((discarded) => {
+                      if (!discarded) return;
                       setModal(null);
                       setScreen("home");
                     });
@@ -5454,13 +5633,19 @@ export default function App() {
       {modal === "close-tab" && closeTabId && (() => {
         const tab = pageTabs.find((candidate) => candidate.id === closeTabId);
         if (!tab) return null;
+        const dismiss = () => { setModal(null); setCloseTabId(null); };
+        const finish = () => removeTab(tab.id, dismiss);
         return (
-          <Modal closeLabel={t("close")} title={`${t("close")}: ${tab.name}`} onClose={() => { setModal(null); setCloseTabId(null); }}>
-            <p>{language === "id" ? "Tab ini memiliki perubahan yang belum disimpan." : "This tab has unsaved draft changes."}</p>
+          <Modal closeLabel={t("close")} title={`${t("close")}: ${tab.name}`} onClose={() => { if (!busy && !tabSwitching) dismiss(); }}>
+            <p>{t("closeTabDraftHint")}</p>
+            <ul aria-label={t("draftAffectedFiles")}>
+              <li><code>{tab.file}</code></li>
+            </ul>
             <div className="modal-footer">
-              <button className="button" onClick={() => { setModal(null); setCloseTabId(null); }}>{t("stayInWorkspace")}</button>
-              <button className="button" onClick={() => { void discardDraft().then(() => { removeTab(tab.id); setModal(null); setCloseTabId(null); }); }}>{language === "id" ? "Buang & tutup" : "Discard & close"}</button>
-              <button className="button accent" onClick={() => { void saveDraft().then((saved) => { if (!saved) return; removeTab(tab.id); setModal(null); setCloseTabId(null); }); }}>{language === "id" ? "Simpan & tutup" : "Save & close"}</button>
+              <button className="button" disabled={busy || tabSwitching} onClick={dismiss}>{t("stayInWorkspace")}</button>
+              <button className="button" disabled={busy || tabSwitching} onClick={() => void discardDraft(tab.file).then(discarded => { if (discarded) finish(); })}>{t("discardFileDraftAndClose")}</button>
+              <button className="button" disabled={busy || tabSwitching} onClick={() => void saveDraft(tab.file).then(saved => { if (saved) finish(); })}>{t("saveFileDraftAndClose")}</button>
+              <button className="button accent" disabled={busy || tabSwitching} onClick={finish}>{t("closeTabKeepDraft")}</button>
             </div>
           </Modal>
         );
@@ -5840,7 +6025,24 @@ export default function App() {
         </div>
       )}
       {selectionWarning && <div className="error-banner selection-warning" role="status">
-        <span aria-hidden="true">△</span><div><strong>{t("warnings")}</strong><p>{selectionWarning}</p></div>
+        <span aria-hidden="true">△</span>
+        <div>
+          <strong>{t("warnings")}</strong><p>{selectionWarning}</p>
+          {selectionWarning === t("ambiguousCanvasTarget") && selectionCandidates.length > 0 && (
+            <ul className="change-list" aria-label={t("sourceCandidates")}>
+              {selectionCandidates.map(candidate => (
+                <li key={candidate.id}>
+                  <button className="text-button change-source" onClick={() => {
+                    setSelectionWarning("");
+                    openSourceFile(candidate.source.file, { line: candidate.source.line, hash: candidate.hash });
+                  }}>
+                    <span>{candidate.tag}</span> <code>{candidate.source.file}:{candidate.source.line}</code>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button className="icon-button" onClick={() => setSelectionWarning("")} aria-label={t("close")}><Icon name="close" size={16} /></button>
       </div>}
       {toast && (

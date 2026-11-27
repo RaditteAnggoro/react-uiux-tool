@@ -137,7 +137,7 @@ export interface TemplateDefinition {
   name: { en: string; id: string };
   description: { en: string; id: string };
   styleFamily: StyleFamilyId;
-  build: () => ReportDocumentV1;
+  build: (locale?: string) => ReportDocumentV1;
 }
 
 function baseDocument(
@@ -185,7 +185,8 @@ function invoice(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
     },
     {
       id: "lines",
-      schema: { fields: ["description", "quantity", "unitPrice", "amount"] },
+      schema: { fields: ["description", "quantity", "unitPrice", "amount"],
+        fieldTypes: { description: "string", quantity: "number", unitPrice: "number", amount: "number" } },
     },
   ];
   const bands: ReportBand[] = [
@@ -337,7 +338,8 @@ function statement(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1 {
     },
     {
       id: "entries",
-      schema: { fields: ["date", "reference", "description", "debit", "credit", "balance"] },
+      schema: { fields: ["date", "reference", "description", "debit", "credit", "balance"],
+        fieldTypes: { date: "date", reference: "string", description: "string", debit: "number", credit: "number", balance: "number" } },
     },
   ];
   document.parameters = [
@@ -1395,6 +1397,56 @@ function approvalMemo(family: StyleFamilyId, locale = "id-ID"): ReportDocumentV1
   return document;
 }
 
+function vehicleCollateral(locale = "id-ID"): ReportDocumentV1 {
+  const label = (id: string, en: string) => locale.toLowerCase().startsWith("id") ? id : en;
+  const family = "neutralFinance";
+  const { colors } = STYLE_FAMILIES[family];
+  const document = baseDocument("vehicle-collateral", label("Formulir agunan kendaraan", "Vehicle collateral form"), family, locale);
+  const sections = [
+    { id: "reference", title: label("Referensi aplikasi", "Application references"), fields: [
+      ["applicationNumber", label("Nomor aplikasi", "Application number")], ["contractNumber", label("Nomor kontrak", "Contract number")],
+      ["customerName", label("Nama pemohon", "Applicant name")], ["branch", label("Cabang", "Branch")],
+    ] },
+    { id: "vehicle", title: label("Identitas kendaraan", "Vehicle identification"), fields: [
+      ["vehicleModel", label("Merek dan tipe", "Make and model")], ["vehicleYear", label("Tahun kendaraan", "Model year")],
+      ["vehicleColor", label("Warna", "Color")], ["registrationNumber", label("Nomor polisi", "Registration number")],
+      ["chassisNumber", label("Nomor rangka", "Chassis number")], ["engineNumber", label("Nomor mesin", "Engine number")],
+    ] },
+    { id: "documents", title: label("Dokumen dan pemeriksaan", "Documents and review"), fields: [
+      ["ownershipNumber", label("Nomor BPKB", "Ownership document number")], ["registrationDocument", label("Nomor STNK", "Registration document number")],
+      ["reviewedDate", label("Tanggal pemeriksaan", "Review date")], ["reviewer", label("Petugas pemeriksa", "Reviewer")],
+    ] },
+  ] as const;
+  document.datasets = [{ id: "collateral", schema: { fields: sections.flatMap(section => section.fields.map(([id]) => id)) } }];
+  document.bands = [{
+    id: "collateral-title", kind: "reportTitle", height: 28, elements: [
+      text("collateral-title-text", { x: 0, y: 3, width: 178, height: 13 }, { text: document.title, fontSize: 20, fontWeight: 700, color: colors.primary }),
+      line("collateral-title-rule", { x: 0, y: 25, width: 178, height: 0.4 }, { color: colors.rule, strokeWidth: 0.4 }),
+    ],
+  }, ...sections.map((section): ReportBand => ({
+    id: `collateral-${section.id}`, kind: "detail", height: 14 + Math.ceil(section.fields.length / 2) * 18,
+    elements: [
+      text(`collateral-heading-${section.id}`, { x: 0, y: 2, width: 178, height: 8 },
+        { text: section.title, fontSize: 12, fontWeight: 700, color: colors.primary }),
+      ...section.fields.flatMap(([id, label], index) => {
+        const x = index % 2 === 0 ? 0 : 92;
+        const y = 13 + Math.floor(index / 2) * 18;
+        return [
+          text(`collateral-label-${id}`, { x, y, width: 86, height: 6 }, { text: label, fontSize: 8, color: colors.muted }),
+          field(`collateral-value-${id}`, { x, y: y + 6, width: 86, height: 9 },
+            { fontSize: 11, color: colors.text }, `collateral.${id}`),
+        ];
+      }),
+    ],
+  })), {
+    id: "collateral-signature", kind: "summary", height: 32, elements: [
+      line("collateral-signature-line", { x: 92, y: 22, width: 60, height: 0.4 }, { color: colors.rule, strokeWidth: 0.4 }),
+      text("collateral-signature-label", { x: 92, y: 23, width: 60, height: 7 }, { text: label("Tanda tangan pemeriksa", "Reviewer's signature"), fontSize: 8, color: colors.muted }),
+    ],
+  }];
+  return document;
+}
+
 export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
   {
     id: "blank",
@@ -1542,6 +1594,16 @@ export const TEMPLATE_CATALOG: readonly TemplateDefinition[] = [
     styleFamily: "neutralFinance",
     build: () => approvalMemo("neutralFinance"),
   },
+  {
+    id: "vehicleCollateral",
+    name: { en: "Vehicle collateral form", id: "Formulir agunan kendaraan" },
+    description: {
+      en: "A4 form for application references, vehicle identifiers, document review and signature.",
+      id: "Formulir A4 untuk referensi aplikasi, identitas kendaraan, pemeriksaan dokumen, dan tanda tangan.",
+    },
+    styleFamily: "neutralFinance",
+    build: vehicleCollateral,
+  },
 
 ];
 
@@ -1552,7 +1614,7 @@ export function getTemplate(id: string): TemplateDefinition | null {
 export function buildTemplate(id: string, family?: StyleFamilyId, locale?: string): ReportDocumentV1 {
   const template = getTemplate(id);
   if (!template) throw new Error(`Unknown report template: ${id}`);
-  const document = template.build();
+  const document = template.build(locale);
   if (locale) document.locale = locale;
   if (family) {
     document.styleTokens = STYLE_FAMILIES[family] as unknown as Record<string, unknown>;

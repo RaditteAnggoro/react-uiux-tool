@@ -8,24 +8,126 @@ import { paginateReport, type PlacedBand } from "../core/pagination.js";
 import { evaluateExpression } from "../core/expressions.js";
 import { toDecimalString } from "../core/decimal.js";
 import { decodePdfImage, type PdfImageData } from "./pdf-image.js";
+import { CHART_PALETTE, reportChartOptions } from "../renderers/chart.js";
+import { summarizeCrosstab } from "../core/crosstab.js";
+import { reportBarcode } from "../core/barcode.js";
 
 const MM = 72 / 25.4;
-type PdfContent = string[] & { unsupportedCharacters: number; clippedCells: number };
+type PdfContent = string[] & { unsupportedCharacters: number; clippedCells: number; limitedGraphics: number };
+type PdfDiagnostics = { unsupportedCharacters: number; unsupportedImages?: number; clippedCells?: number; limitedGraphics?: number };
 
-function escapePdfText(value: string): string {
-  return String(value ?? "")
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, "?")
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
+// PDF WinAnsi uses the Windows-1252 printable characters in positions 0x80–0x9f.
+const WIN_ANSI_EXTRAS = new Map([
+  "€", "", "‚", "ƒ", "„", "…", "†", "‡", "ˆ", "‰", "Š", "‹", "Œ", "", "Ž", "",
+  "", "‘", "’", "“", "”", "•", "–", "—", "˜", "™", "š", "›", "œ", "", "ž", "Ÿ",
+].flatMap((glyph, offset) => glyph ? [[glyph, String.fromCharCode(0x80 + offset)] as const] : []));
+
+function escapePdfText(value: string, diagnostics: PdfContent): string {
+  let result = "";
+  for (const character of value) {
+    const code = character.codePointAt(0)!;
+    const encoded = code >= 0x20 && code <= 0x7e || code >= 0xa0 && code <= 0xff
+      ? character : WIN_ANSI_EXTRAS.get(character);
+    if (encoded === undefined) diagnostics.unsupportedCharacters++;
+    result += encoded === "\\" || encoded === "(" || encoded === ")" ? "\\" + encoded : encoded ?? "?";
+  }
+  return result;
 }
 
 function textLine(state: PdfContent, x: number, y: number, value: string, size: number, bold = false): void {
   if (!value) return;
-  state.unsupportedCharacters += [...value].filter((char) => !/^[\x20-\x7E\xA0-\xFF]$/.test(char)).length;
   state.push(
-    `BT ${bold ? "/F2" : "/F1"} ${size} Tf ${(x * MM).toFixed(2)} ${(y * MM).toFixed(2)} Td (${escapePdfText(value)}) Tj ET`,
+    `BT ${bold ? "/F2" : "/F1"} ${size} Tf ${(x * MM).toFixed(2)} ${(y * MM).toFixed(2)} Td (${escapePdfText(value, state)}) Tj ET`,
   );
+}
+
+const points = (mm: number) => (mm * MM).toFixed(2);
+const boxPath = (x: number, y: number, width: number, height: number) =>
+  `${points(x)} ${points(y)} ${points(width)} ${points(height)} re`;
+const rgb = (hex: string) => [1, 3, 5].map(index => (parseInt(hex.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ");
+
+function drawChart(content: PdfContent, element: ReportElement, data: Record<string, unknown>, x: number, y: number) {
+  const { width, height } = element.box;
+  if (width < 6 || height < 6) { content.limitedGraphics++; return; }
+  const chart = reportChartOptions(element, data);
+  const series = chart.series.slice(0, 12).map(entry => entry.values.slice(0, 40));
+  const categories = Math.max(chart.labels.length, ...chart.series.map(entry => entry.values.length));
+  if (chart.series.length > 12 || categories > 40) content.limitedGraphics++;
+  const count = Math.min(categories, 40);
+  const top = chart.title ? y - 5 : y - 1;
+  const bottom = y - height + 5;
+  if (count && top <= bottom) content.limitedGraphics++;
+  content.push(`q ${boxPath(x, y - height, width, height)} W n`);
+  if (chart.title) textLine(content, x + 1, y - 3.2, chart.title, 8, true);
+  if (chart.type === "pie") {
+    const values = (series[0] ?? []).map(value => Math.max(0, value));
+    const total = values.reduce((sum, value) => sum + value, 0);
+    const radius = Math.max(0, Math.min(width, top - bottom) / 2 - 1);
+    const cx = x + width / 2, cy = (top + bottom) / 2;
+    let angle = Math.PI / 2;
+    for (const [index, value] of values.entries()) {
+      if (value === 0 || !total || !radius) continue;
+      const sweep = value / total * Math.PI * 2;
+      const steps = Math.max(2, Math.ceil(sweep * 10));
+      const path = Array.from({ length: steps + 1 }, (_, step) => {
+        const at = angle - sweep * step / steps;
+        return `${points(cx + radius * Math.cos(at))} ${points(cy + radius * Math.sin(at))} l`;
+      }).join(" ");
+      content.push(`q ${rgb(CHART_PALETTE[index % CHART_PALETTE.length]!)} rg ${points(cx)} ${points(cy)} m ${path} h f Q`);
+      angle -= sweep;
+    }
+  } else if (count && top > bottom) {
+    const values = series.flat();
+    const maximum = Math.max(1, ...values);
+    const minimum = Math.min(0, ...values);
+    const valueY = (value: number) => bottom + (top - bottom) * (value - minimum) / (maximum - minimum);
+    const zero = valueY(0);
+    const slot = (width - 2) / count;
+    content.push(`q 0.55 G 0.3 w ${points(x + 1)} ${points(zero)} m ${points(x + width - 1)} ${points(zero)} l S Q`);
+    for (const [index, entries] of series.entries()) {
+      const color = rgb(CHART_PALETTE[index % CHART_PALETTE.length]!);
+      if (chart.type === "line") {
+        const path = entries.map((value, i) =>
+          `${points(x + 1 + (i + 0.5) * slot)} ${points(valueY(value))} ${i === 0 ? "m" : "l"}`).join(" ");
+        if (entries.length > 1) content.push(`q ${color} RG 1 w ${path} S Q`);
+        entries.forEach((value, i) => content.push(`q ${color} rg ${boxPath(x + 0.7 + (i + 0.5) * slot, valueY(value) - 0.3, 0.6, 0.6)} f Q`));
+      } else {
+        const barWidth = slot * 0.75 / Math.max(1, series.length);
+        entries.forEach((value, i) => {
+          const scaled = valueY(value);
+          content.push(`q ${color} rg ${boxPath(x + 1 + (i + 0.125) * slot + index * barWidth, Math.min(scaled, zero), barWidth, Math.abs(scaled - zero))} f Q`);
+        });
+      }
+    }
+    const interval = Math.max(1, Math.ceil(10 / slot));
+    chart.labels.slice(0, count).forEach((label, index) => {
+      if (index % interval === 0) textLine(content, x + 1 + slot * index, y - height + 1.3, label, 6);
+    });
+  }
+  content.push("Q");
+}
+
+function drawCrosstab(content: PdfContent, element: ReportElement, document: ReportDocumentV1, data: Record<string, unknown>, x: number, y: number) {
+  const matrix = summarizeCrosstab(element, data, document.locale);
+  const rows = [matrix.header, ...matrix.rows, matrix.footer];
+  const width = element.box.width / matrix.header.length;
+  const height = element.box.height / rows.length;
+  if (matrix.limited) content.limitedGraphics++;
+  if (width < 2 || height < 2) { content.limitedGraphics++; return; }
+  const size = Math.min(9, Math.max(4, (height - 0.8) * MM));
+  rows.forEach((cells, row) => {
+    cells.forEach((value, column) => {
+      const left = x + column * width, bottom = y - (row + 1) * height;
+      const box = boxPath(left, bottom, width, height);
+      const heading = row === 0 || row === rows.length - 1;
+      if (heading) content.push(`q 0.92 g ${box} f Q`);
+      content.push(`q 0.7 G 0.35 w ${box} S Q`);
+      content.push(`q ${box} W n`);
+      if (value.length * size * 0.53 / MM > width - 1.5) content.clippedCells++;
+      textLine(content, left + 0.7, bottom + (height - size / MM) / 2 + 0.4, value, size, heading);
+      content.push("Q");
+    });
+  });
 }
 
 function fieldText(
@@ -87,6 +189,16 @@ function drawBand(
     const y = bandY - element.box.y;
     const size = Number(element.props.fontSize ?? 9);
     const bold = Number(element.props.fontWeight ?? 400) >= 600;
+    const degrees = typeof element.props.rotation === "number" && Number.isFinite(element.props.rotation)
+      ? element.props.rotation % 360 : 0;
+    if (degrees) {
+      // PDF's vertical axis points up, so its angle has the opposite sign to CSS.
+      const angle = -degrees * Math.PI / 180;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const cx = x + element.box.width / 2, cy = y - element.box.height / 2;
+      const dx = cx * (1 - cos) + cy * sin, dy = cy * (1 - cos) - cx * sin;
+      content.push(`q ${cos.toFixed(7)} ${sin.toFixed(7)} ${(-sin).toFixed(7)} ${cos.toFixed(7)} ${points(dx)} ${points(dy)} cm`);
+    }
     if (element.type === "text" || element.type === "field") {
       const rgb = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
         ? [1, 3, 5].map((index) => (parseInt(value.slice(index, index + 2), 16) / 255).toFixed(3)).join(" ") : null;
@@ -114,6 +226,27 @@ function drawBand(
         const border = Number(element.props.borderWidth ?? 0), borderColor = color(element.props.borderColor) ?? "0 0 0";
         if (Number.isFinite(border) && border > 0) content.push(`q ${borderColor} RG ${(border * MM).toFixed(2)} w ${left.toFixed(2)} ${bottom.toFixed(2)} ${boxWidth.toFixed(2)} ${boxHeight.toFixed(2)} re S Q`);
       }
+    } else if (element.type === "barcode") {
+      const code = reportBarcode(element, data);
+      if (!code) {
+        if (degrees) content.push("Q");
+        continue;
+      }
+      const horizontal = element.box.width / code.width, vertical = element.box.height / code.height;
+      const stepX = code.kind === "qrcode" ? Math.min(horizontal, vertical) : horizontal;
+      const stepY = code.kind === "qrcode" ? stepX : vertical;
+      const left = x + (element.box.width - code.width * stepX) / 2;
+      const top = y - (element.box.height - code.height * stepY) / 2;
+      content.push(`q 1 g ${boxPath(x, y - element.box.height, element.box.width, element.box.height)} f Q`);
+      content.push("q 0 g");
+      for (const rect of code.rects) {
+        content.push(`${boxPath(left + rect.x * stepX, top - (rect.y + rect.height) * stepY, rect.width * stepX, rect.height * stepY)} f`);
+      }
+      content.push("Q");
+    } else if (element.type === "chart") {
+      drawChart(content, element, data, x, y);
+    } else if (element.type === "crosstab") {
+      drawCrosstab(content, element, document, data, x, y);
     } else if (element.type === "text") {
       const textColor = typeof element.props.color === "string" && /^#[0-9a-f]{6}$/i.test(element.props.color) ? [1, 3, 5].map((i) => (parseInt(String(element.props.color).slice(i, i + 2), 16) / 255).toFixed(3)).join(" ") : "0 0 0";
       content.push(`q ${textColor} rg`);
@@ -255,11 +388,12 @@ function drawBand(
         rowY -= rowHeight;
       }
     }
+    if (degrees) content.push("Q");
   }
 }
 
 /** Dependency-free PDF 1.4 writer that follows the same pagination as the HTML print renderer. */
-export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: { unsupportedCharacters: number; unsupportedImages?: number; clippedCells?: number }): Uint8Array {
+export function exportPdf(document: ReportDocumentV1, data: Record<string, unknown> = {}, diagnostics?: PdfDiagnostics): Uint8Array {
   data = withParameterDefaults(document, data);
   const layouts = paginateReport(document, { data });
   const images = new Map<string, { name: string; data: PdfImageData }>();
@@ -274,13 +408,18 @@ export function exportPdf(document: ReportDocumentV1, data: Record<string, unkno
   const totalPages = layouts.length;
   const bodyTop = document.page.height - document.page.margins.top;
   const pages: PdfContent[] = layouts.map((layout, index) => {
-    const content = Object.assign([] as string[], { unsupportedCharacters: 0, clippedCells: 0 });
+    const content = Object.assign([] as string[], { unsupportedCharacters: 0, clippedCells: 0, limitedGraphics: 0 });
     for (const placed of layout.bands) {
       drawBand(document, placed, data, index + 1, totalPages, bodyTop, content, images);
     }
     return content;
   });
-  if (diagnostics) { diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0); diagnostics.unsupportedImages = unsupportedImages; diagnostics.clippedCells = pages.reduce((sum, page) => sum + page.clippedCells, 0); }
+  if (diagnostics) {
+    diagnostics.unsupportedCharacters = pages.reduce((sum, page) => sum + page.unsupportedCharacters, 0);
+    diagnostics.unsupportedImages = unsupportedImages;
+    diagnostics.clippedCells = pages.reduce((sum, page) => sum + page.clippedCells, 0);
+    diagnostics.limitedGraphics = pages.reduce((sum, page) => sum + page.limitedGraphics, 0);
+  }
 
   const width = (document.page.width * MM).toFixed(2);
   const height = (document.page.height * MM).toFixed(2);

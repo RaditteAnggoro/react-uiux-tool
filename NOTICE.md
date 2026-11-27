@@ -42,3 +42,9 @@ source or other AGPL implementation was copied into this MIT project.
 
 Read [Inspiration, credits, and independence](INSPIRATION.md) for the complete,
 plain-language record of what each reference contributed to the product brief.
+
+## Development skills
+
+The project uses the portable [Lazy Developer skill pack](https://github.com/RaditteAnggoro/skill-for-lazy-developer/tree/9a747d0f2cee7fd29a2ad88559efa1f460b8c5e1)
+in `.agents/skills/`. The pack is copyright © 2026 Raditte Anggoro and Codex
+Developer Skills contributors under its [MIT license](.agents/LICENSE.lazy-developer).

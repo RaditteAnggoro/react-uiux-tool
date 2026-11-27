@@ -5,7 +5,9 @@ import { exportCsv } from "./csv.js";
 import { exportPdf } from "./pdf.js";
 import { exportXlsx } from "./xlsx.js";
 import { exportDocx } from "./docx.js";
-import { parameterWarnings } from "../core/parameters.js";
+import { parameterWarnings, withParameterDefaults } from "../core/parameters.js";
+import { reportBarcode } from "../core/barcode.js";
+import { outputDocument } from "../core/visibility.js";
 
 export type ExportFormat = "html" | "csv" | "pdf" | "xlsx" | "docx";
 
@@ -49,20 +51,15 @@ function fidelityWarnings(document: ReportDocumentV1, format: ExportFormat): str
           Array.isArray(element.props.merges) ||
           Array.isArray(element.props.rowRules)),
     ).length;
-  const tableCount = document.bands
-    .flatMap((band) => band.elements)
-    .filter((element) => element.type === "table").length;
   const warnings: string[] = [];
   if (advancedTables && ["pdf", "xlsx", "docx"].includes(format)) warnings.push(`${format.toUpperCase()}: advanced table headers, merged cells or row styling may be simplified`);
   if (format === "pdf") {
-    if (types.has("chart")) warnings.push("PDF: chart elements are not rendered yet");
-    if (types.has("crosstab")) warnings.push("PDF: crosstab cells are not rendered yet");
     const hasRichFormatting = document.bands.some((band) => band.elements.some(({ props, type }) =>
       props.underline === true || props.strike === true || props.list === "bullet" ||
       props.list === "number" || (Number(props.borderWidth ?? 0) > 0 && !["rect", "text", "field", "image"].includes(type)) ||
-      Number(props.rotation ?? 0) !== 0 || props.wrap === false,
+      props.wrap === false,
     ));
-    if (hasRichFormatting) warnings.push("PDF: underline, strikethrough, lists, borders, rotation or text wrapping may not be rendered");
+    if (hasRichFormatting) warnings.push("PDF: underline, strikethrough, lists, borders or text wrapping may not be rendered");
     const unsupportedConditionalColor = document.bands.some((band) => band.elements.some((element) => [...(element.conditions ?? []), element.props.rowCondition].some((rule) => {
       if (!rule || typeof rule !== "object") return false;
       const entry = rule as Record<string, unknown>;
@@ -72,11 +69,10 @@ function fidelityWarnings(document: ReportDocumentV1, format: ExportFormat): str
   }
   if (format === "xlsx" || format === "docx" || format === "csv") {
     if (types.has("image") && format !== "csv") warnings.push(`${format.toUpperCase()}: image elements are not exported`);
-    if (tableCount > 1) {
-      warnings.push(`${format.toUpperCase()}: only the first table is exported (${tableCount} tables found)`);
-    }
     if (format === "csv") warnings.push("CSV: layout, styling, and non-table elements are dropped");
-    if (format === "docx") warnings.push("DOCX: paragraphs and the first table only; charts and crosstabs are dropped");
+    if (format === "docx" && [...types].some(type => type !== "table")) {
+      warnings.push("DOCX: exports the report title and tables; design elements and layout are omitted");
+    }
   }
   return warnings;
 }
@@ -91,12 +87,26 @@ export function exportReport(
     const first = validation.errors[0];
     throw new Error(`Document is invalid: ${first?.path ?? "$"} ${first?.message ?? ""}`.trim());
   }
-  const doc = document as ReportDocumentV1;
+  const doc = outputDocument(document as ReportDocumentV1);
+  if (doc.linkedReports?.length) throw new Error("Resolve linked reports in Report Studio before exporting.");
   const warnings = [
     ...validation.warnings.map((issue) => `${issue.path} ${issue.message}`.trim()),
     ...parameterWarnings(doc, data).map((issue) => `${issue.path} ${issue.message}`),
     ...fidelityWarnings(doc, format),
   ];
+  const barcodes = doc.bands.flatMap(band => band.elements).filter(element => element.type === "barcode");
+  if (barcodes.length && (format === "pdf" || format === "html")) {
+    const sample = withParameterDefaults(doc, data);
+    for (const element of barcodes) {
+      const code = reportBarcode(element, sample);
+      if (!code) warnings.push(`Barcode ${element.id}: the bound value is missing or invalid`);
+      else if (element.box.width / code.width < 0.2 || code.kind === "qrcode" && element.box.height / code.height < 0.2) {
+        warnings.push(`Barcode ${element.id}: increase the frame size for print scanning`);
+      }
+    }
+  } else if (barcodes.length && format === "xlsx") {
+    warnings.push("XLSX: barcode graphics are omitted");
+  }
   const base = slug(doc.title);
   if (format === "html") {
     return {
@@ -131,11 +141,12 @@ export function exportReport(
     };
   }
   if (format === "pdf") {
-    const diagnostics = { unsupportedCharacters: 0, unsupportedImages: 0, clippedCells: 0 };
+    const diagnostics = { unsupportedCharacters: 0, unsupportedImages: 0, clippedCells: 0, limitedGraphics: 0 };
     const bytes = exportPdf(doc, data, diagnostics);
     if (diagnostics.unsupportedImages) warnings.push(`PDF: ${diagnostics.unsupportedImages} image(s) could not be rendered; use an 8-bit non-interlaced PNG or JPEG`);
-    if (diagnostics.unsupportedCharacters) warnings.push(`PDF: ${diagnostics.unsupportedCharacters} unsupported character(s) are replaced with "?" (Latin-1 subset)`);
+    if (diagnostics.unsupportedCharacters) warnings.push(`PDF: ${diagnostics.unsupportedCharacters} unsupported character(s) are replaced with "?" (WinAnsi fonts)`);
     if (diagnostics.clippedCells) warnings.push(`PDF: ${diagnostics.clippedCells} table cell(s) may be clipped; widen the column or shorten the value`);
+    if (diagnostics.limitedGraphics) warnings.push(`PDF: ${diagnostics.limitedGraphics} chart or crosstab occurrence(s) exceed the frame or data limit`);
     return {
       filename: `${base}.pdf`,
       mime: "application/pdf",

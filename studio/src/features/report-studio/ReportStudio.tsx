@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import ReportDialog from "./ReportDialog";
+import ImageCrop from "./ImageCrop";
+import { revealJsonObject } from "./code-location";
+import TabularImport, { type ImportSheet } from "./TabularImport";
+import SampleIssues from "./SampleIssues";
+import { sampleFieldRules, validateSampleData } from "../../../../src/reports/core/sample-validation";
+import DatasetRules from "./DatasetRules";
+import { MAX_LINKED_REPORTS, validLinkedReportArguments, validSubreportPath } from "../../../../src/reports/core/subreport";
+import { parseUniqueJson } from "../../../../src/reports/formats/yrf/patch";
 import type {
   PageOrientation,
   PageSizeName,
@@ -14,14 +23,18 @@ import CanvasRulers from "./CanvasRulers";
 import TableStructureEditor from "./TableStructureEditor";
 import TableRulesEditor from "./TableRulesEditor";
 import { tableHeaderGroups, tableHeaderMatrix, tableHeaderTextColor } from "../../../../src/reports/core/table";
-import { csvToRecords } from "../../../../src/reports/core/data";
+import { asRecord, csvToRecords, parseCsv } from "../../../../src/reports/core/data";
 import { imagePosition } from "../../../../src/reports/core/image-position";
+import { appendPdfPages, appendReportSections } from "./report-imports";
 
 const MM_TO_PX = 96 / 25.4;
 const MIN_ELEMENT_MM = 2;
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 type ResizeHandle = (typeof HANDLES)[number];
 const PT_TO_PX = 96 / 72;
+const BarcodePreview = lazy(() => import("./BarcodePreview"));
+const PALETTE_TYPES = ["text", "rect", "line", "image", "field", "table", "form", "barcode"] as const;
+type PaletteType = typeof PALETTE_TYPES[number];
 
 const STYLE_PRESETS: Record<string, Record<string, unknown>> = {
   body: { fontSize: 10, fontWeight: 400, italic: false, list: undefined, color: "#111827" },
@@ -86,6 +99,7 @@ interface Issue {
 
 interface OpenResult {
   file: string;
+  root: string;
   hash: string;
   document: ReportDocumentV1;
   warnings: Issue[];
@@ -114,8 +128,9 @@ async function request<T>(token: string, path: string, body?: unknown): Promise<
   });
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {
+    const validation = Array.isArray(data.errors) ? issues(data.errors as Issue[]) : [];
     const error = new Error(
-      typeof data.error === "string" ? data.error : `HTTP ${response.status}`,
+      typeof data.error === "string" ? data.error : validation[0] ?? `HTTP ${response.status}`,
     ) as Error & { code?: string };
     error.code = typeof data.code === "string" ? data.code : undefined;
     throw error;
@@ -127,6 +142,8 @@ function issues(list: Issue[] | undefined): string[] {
   return (list ?? []).map((issue) => `${issue.path ?? ""} ${issue.message}`.trim());
 }
 
+type ReportExport = { file: string; mime: string; base64: string; warnings?: string[] };
+
 export default function ReportStudio({ token, language, onExit, context = "home" }: ReportStudioProps) {
   const dict = language === "id" ? reportId : reportEn;
   const tr = (key: ReportKey) => dict[key];
@@ -134,6 +151,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [state, setState] = useState<StudioState | null>(null);
   const [document, setDocument] = useState<ReportDocumentV1 | null>(null);
   const [file, setFile] = useState("");
+  const [openedRoot, setOpenedRoot] = useState("");
   const [hash, setHash] = useState("");
   const [savedJson, setSavedJson] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -156,31 +174,58 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "csv" | "html" | "xlsx" | "docx">("pdf");
+  const [pendingExport, setPendingExport] = useState<ReportExport | null>(null);
+  const exportFormatInput = useRef<HTMLSelectElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const folderPickerButton = useRef<HTMLButtonElement>(null);
+  const reportSearchInput = useRef<HTMLInputElement>(null);
+  const [folderError, setFolderError] = useState("");
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [past, setPast] = useState<ReportDocumentV1[]>([]);
   const [future, setFuture] = useState<ReportDocumentV1[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ run: () => void } | null>(null);
-  const [sampleJson, setSampleJson] = useState("");
+  const [sampleByReport, setSampleByReport] = useState<Record<string, string>>({});
+  const [sampleCheck, setSampleCheck] = useState<{ key: string; text: string; result: ReturnType<typeof validateSampleData> } | null>(null);
+  const [importDataset, setImportDataset] = useState("");
+  const [reviewImport, setReviewImport] = useState(false);
+  const [subreportPath, setSubreportPath] = useState("");
+  const [linkArgumentEdit, setLinkArgumentEdit] = useState<{ link: string; text: string; invalid: boolean } | null>(null);
+  const [cropSource, setCropSource] = useState<{ id: string; src: string; key: string } | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ key: string; dataset: string; sheets: ImportSheet[] } | null>(null);
+  const workbookInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
+  const pdfTextInput = useRef<HTMLInputElement>(null);
+  const subreportInput = useRef<HTMLInputElement>(null);
+  const currentSampleKey = useRef("");
+  const importGeneration = useRef(0);
   const [totalPath, setTotalPath] = useState("");
   const [sampleError, setSampleError] = useState("");
   const [mode, setMode] = useState<"native" | "yrf">("native");
   const [yrfInitialPath, setYrfInitialPath] = useState<string>("");
   const [browse, setBrowse] = useState<BrowseResult | null>(null);
+  const [browseFailed, setBrowseFailed] = useState(false);
   const [codeText, setCodeText] = useState("");
+  const codeArea = useRef<HTMLTextAreaElement>(null);
+  const [codeTarget, setCodeTarget] = useState<{ id: string } | null>(null);
+  const [codeLine, setCodeLine] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    setCodeLine(tab === "code" && codeTarget && codeArea.current ? revealJsonObject(codeArea.current, codeTarget) : null);
+  }, [tab, codeTarget]);
   const [codeErrors, setCodeErrors] = useState<string[]>([]);
   const [codeEdited, setCodeEdited] = useState(false);
   const [overflowCount, setOverflowCount] = useState(0);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageDocumentRef = useRef(document);
-  const imageFileRef = useRef(file);
+  const imageReadGeneration = useRef(0);
   imageDocumentRef.current = document;
-  imageFileRef.current = file;
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [sampleSchema, setSampleSchema] = useState<string>("");
   const [showFormats, setShowFormats] = useState(false);
   const [expandedBands, setExpandedBands] = useState<Set<string>>(new Set());
   const [layerSearch, setLayerSearch] = useState("");
+  const [moveDestination, setMoveDestination] = useState("");
   useEffect(() => {
     if (!selectedId || !document) return;
     const band = document.bands.find((item) => item.elements.some((element) => element.id === selectedId));
@@ -228,8 +273,28 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const [showRight, setShowRight] = useState(
     () => typeof window === "undefined" || window.innerWidth > 1100,
   );
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1100px)");
+    const adjustPanels = (event: MediaQueryListEvent) => { if (event.matches) setShowRight(false); };
+    media.addEventListener("change", adjustPanels);
+    return () => media.removeEventListener("change", adjustPanels);
+  }, []);
+
+  const revealReports = () => {
+    setShowLeft(true);
+    if (window.innerWidth <= 1100) setShowRight(false);
+  };
+  const revealCanvasOnNarrowScreen = () => {
+    if (window.innerWidth <= 1100) {
+      setShowLeft(false);
+      setShowRight(false);
+    }
+  };
   const resizeRef = useRef<{
+    pointerId: number;
+    target: Element;
     snapshot: ReportDocumentV1;
+    next: ReportDocumentV1;
     id: string;
     handle: ResizeHandle;
     startX: number;
@@ -237,7 +302,10 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     box: ReportElement["box"];
   } | null>(null);
   const dragRef = useRef<{
+    pointerId: number;
+    target: Element;
     snapshot: ReportDocumentV1;
+    next: ReportDocumentV1;
     id: string;
     ids: string[];
     boxes: Array<{ id: string; box: ReportElement["box"] }>;
@@ -248,11 +316,26 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const dirty = (document ? JSON.stringify(document) !== savedJson : false) || codeEdited;
+  const sampleKey = file && openedRoot ? `uiux-report-sample:${JSON.stringify([openedRoot, file])}` : "";
+  const sampleJson = sampleByReport[sampleKey] ?? "";
+  currentSampleKey.current = sampleKey;
+  const updateSample = (value: string) => {
+    importGeneration.current += 1;
+    setSampleCheck(null);
+    setSampleError("");
+    setSampleByReport(current => ({ ...current, [sampleKey]: value }));
+    if (sampleKey) {
+      try {
+        if (value) sessionStorage.setItem(sampleKey, value);
+        else sessionStorage.removeItem(sampleKey);
+      } catch { /* The current editor still holds the sample when storage is unavailable. */ }
+    }
+  };
 
   const canvasData = useMemo<Record<string, unknown> | undefined>(() => {
     if (!sampleJson.trim()) return undefined;
     try {
-      const value = JSON.parse(sampleJson) as unknown;
+      const value = parseUniqueJson(sampleJson);
       return typeof value === "object" && value !== null && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : undefined;
@@ -281,8 +364,10 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         const query = scopeContext ? "?format=all&scope=context" : "?format=all";
         const next = await request<BrowseResult>(token, `reports/browse${query}`);
         setBrowse(next);
+        setBrowseFailed(false);
       } catch {
         setBrowse(null);
+        setBrowseFailed(true);
       }
     },
     [token],
@@ -293,11 +378,11 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       const next = await request<StudioState>(token, "reports/state");
       setState(next);
       if (next.root) setFolder(next.root);
-      await loadBrowse(!next.root && Boolean(next.context));
+      if (next.root || (context === "project" && next.context)) await loadBrowse(!next.root);
     } catch (error) {
       setErrors([(error as Error).message]);
     }
-  }, [token]);
+  }, [token, context, loadBrowse]);
 
   useEffect(() => {
     void refreshState();
@@ -315,49 +400,80 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   };
 
   const adopt = (result: OpenResult) => {
+    imageReadGeneration.current += 1;
+    importGeneration.current += 1;
     setDocument(result.document);
     setFile(result.file);
+    setOpenedRoot(result.root);
     setHash(result.hash);
     setSavedJson(JSON.stringify(result.document));
+    const key = `uiux-report-sample:${JSON.stringify([result.root, result.file])}`;
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored !== null) setSampleByReport(current => ({ ...current, [key]: current[key] ?? stored }));
+    } catch { /* Session storage is optional. */ }
+    setImportDataset("");
+    setSubreportPath("");
+    setSampleError("");
     setWarnings(issues(result.warnings));
     selectIds([]);
     setSelectedBand(result.document.bands[0]?.id ?? null);
     setExpandedBands(result.document.bands[0] ? new Set([result.document.bands[0].id]) : new Set());
     setTab("design");
+    revealCanvasOnNarrowScreen();
   };
 
-  const useFolderPath = async (target: string) => {
+  const selectFolder = async (selection: { path: string } | { useDefault: true }) => {
+    setFolderError("");
     try {
-      const next = await call<StudioState>("root", { path: target });
+      const next = await call<StudioState>("root", selection);
+      if (!next.root) throw new Error(tr("chooseFolderFirst"));
       setState(next);
-      setFolder(next.root ?? target);
-      setMessage(`${tr("reportFolder")}: ${next.root ?? target}`);
-      setShowLeft(true);
+      setFolder(next.root);
+      revealReports();
       await loadBrowse(false);
+      return next.root;
     } catch (error) {
-      setErrors([(error as Error).message]);
+      setFolderError("useDefault" in selection ? tr("defaultReportFolderUnavailable") : (error as Error).message);
+      return null;
     }
   };
 
-  const chooseFolder = async () => {
+  const chooseFolder = async (focusReportList: boolean, startPath: string | null | undefined) => {
+    const trigger = window.document.activeElement;
     setBusy(true);
+    setPickingFolder(true);
+    setFolderError("");
+    let reportFolderAvailable = Boolean(startPath);
     try {
       const picked = await request<{ path: string; unavailable: boolean }>(
         token,
         "pick-directory",
-        {},
+        { startPath },
       );
-      if (picked.path) await useFolderPath(picked.path);
-    } catch (error) {
-      setErrors([(error as Error).message]);
+      if (picked.path) {
+        reportFolderAvailable = Boolean(await selectFolder({ path: picked.path }));
+      } else if (picked.unavailable) {
+        reportFolderAvailable = false;
+        setFolderError(tr("reportFolderPickerUnavailable"));
+      }
+    } catch {
+      reportFolderAvailable = false;
+      setFolderError(tr("reportFolderPickerUnavailable"));
     } finally {
+      setPickingFolder(false);
       setBusy(false);
+      const focusTarget = reportFolderAvailable && focusReportList ? reportSearchInput : folderInput;
+      requestAnimationFrame(() => {
+        const focused = window.document.activeElement;
+        if (!focused || focused === window.document.body || focused === trigger) focusTarget.current?.focus();
+      });
     }
   };
 
   const useFolder = async () => {
     if (!folder.trim()) return;
-    await useFolderPath(folder.trim());
+    await selectFolder({ path: folder.trim() });
   };
 
   const openEntry = async (entry: BrowseEntry) => {
@@ -367,9 +483,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return;
     }
     if (!state?.root) {
-      const directory = entry.absolute.slice(0, entry.absolute.lastIndexOf("/"));
-      await useFolderPath(directory);
-      await performOpen(entry.name);
+      const separator = Math.max(entry.absolute.lastIndexOf("/"), entry.absolute.lastIndexOf("\\"));
+      const directory = entry.absolute.slice(0, separator + 1);
+      if (await selectFolder({ path: directory })) await performOpen(entry.name);
       return;
     }
     await performOpen(entry.path);
@@ -378,7 +494,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const applyCode = async () => {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(codeText);
+      parsed = parseUniqueJson(codeText);
     } catch (error) {
       setCodeErrors([(error as Error).message]);
       return;
@@ -393,7 +509,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         );
         return;
       }
-      commit(parsed as ReportDocumentV1);
+      commit(parsed as ReportDocumentV1, true);
       setCodeErrors([]);
       setCodeEdited(false);
       setMessage(tr("codeApplied"));
@@ -443,6 +559,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     try {
       const result = await call<{ hash: string; warnings: Issue[] }>("save", {
         file,
+        expectedRoot: openedRoot,
         expectedHash: hash,
         document,
       });
@@ -454,9 +571,21 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return true;
     } catch (error) {
       const typed = error as Error & { code?: string };
-      setErrors([typed.code === "CONFLICT" ? tr("conflict") : typed.message]);
+      setErrors([typed.code === "CONFLICT" ? tr("conflict") :
+        typed.code === "REPORT_FOLDER_CHANGED" ? tr("reportFolderChanged") : typed.message]);
       return false;
     }
+  };
+
+  const downloadReport = (result: ReportExport) => {
+    const bytes = Uint8Array.from(atob(result.base64), character => character.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.mime }));
+    const link = window.document.createElement("a");
+    link.href = url;
+    link.download = result.file;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setMessage(`${tr("exported")}: ${result.file}`);
   };
 
   const exportDocument = async () => {
@@ -467,24 +596,16 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return;
     }
     try {
-      const result = await call<{ file: string; mime: string; base64: string; warnings?: string[] }>("export", {
+      const result = await call<ReportExport>("export", {
         document,
         format: exportFormat,
         data: parsed.data ?? {},
+        expectedRoot: openedRoot,
+        file,
       });
       setWarnings(result.warnings ?? []);
-      const binary = atob(result.base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-      }
-      const url = URL.createObjectURL(new Blob([bytes], { type: result.mime }));
-      const link = window.document.createElement("a");
-      link.href = url;
-      link.download = result.file;
-      link.click();
-      URL.revokeObjectURL(url);
-      setMessage(`${tr("exported")}: ${result.file}`);
+      if (result.warnings?.length) setPendingExport(result);
+      else downloadReport(result);
     } catch (error) {
       setErrors([(error as Error).message]);
     }
@@ -496,7 +617,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return { valid: true };
     }
     try {
-      const value = JSON.parse(sampleJson) as unknown;
+      const value = parseUniqueJson(sampleJson);
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         throw new Error(tr("sampleInvalid"));
       }
@@ -507,6 +628,14 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       return { valid: false };
     }
   };
+
+  const checkSampleData = () => {
+    const parsed = parseSampleData();
+    if (!parsed.valid || !document) { setSampleCheck(null); return; }
+    setSampleCheck({ key: sampleKey, text: sampleJson, result: validateSampleData(document.datasets, parsed.data ?? {}) });
+  };
+
+  const rulesDataset = document?.datasets.find(dataset => dataset.id === importDataset) ?? document?.datasets[0];
 
   const refreshPreview = async () => {
     if (!document) return;
@@ -519,10 +648,13 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       const result = await call<PreviewResult>("preview", {
         document,
         data: parsed.data,
+        expectedRoot: openedRoot,
+        file,
       });
       setPreviewHtml(result.html);
       setWarnings(issues(result.warnings));
       setTab("preview");
+      revealCanvasOnNarrowScreen();
     } catch (error) {
       setErrors([(error as Error).message]);
     }
@@ -537,8 +669,26 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     return null;
   }, [document, selectedId]);
 
-  const commit = (next: ReportDocumentV1) => {
+  const commit = (next: ReportDocumentV1, fromCode = false) => {
     if (!document) return;
+    if (!fromCode) {
+      const locked = document.bands.flatMap(band => band.elements).filter(element => element.props.contentLocked === true);
+      if (locked.length) {
+        const elements = new Map(next.bands.flatMap(band => band.elements).map(element => [element.id, element]));
+        const settings = new Set(["contentLocked", "layoutLocked", "deleteLocked", "outputHidden"]);
+        const contents = (element: ReportElement) => JSON.stringify([
+          Object.entries(element.props).filter(([key]) => !settings.has(key)).sort(([a], [b]) => a.localeCompare(b)),
+          element.bindings,
+        ]);
+        if (locked.some(element => {
+          const changed = elements.get(element.id);
+          return changed && contents(element) !== contents(changed);
+        })) {
+          setMessage(tr("contentLocked"));
+          return;
+        }
+      }
+    }
     setPast((entries) => [...entries.slice(-49), document]);
     setFuture([]);
     setDocument(next);
@@ -547,6 +697,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   const selectIds = (ids: string[]) => {
     setSelectedIds(ids);
     setSelectedId(ids.length ? ids[ids.length - 1]! : null);
+    setMoveDestination("");
   };
 
   const selectedElements = useMemo(
@@ -566,8 +717,49 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       (element) => element.groupId && element.groupId === selectedElements[0]?.groupId,
     );
 
+  const groupIds = new Set(selectedElements.map(element => element.groupId).filter(Boolean));
+  const moveElements = document?.bands.flatMap(band => band.elements).filter(element =>
+    selectedIds.includes(element.id) || !!element.groupId && groupIds.has(element.groupId)) ?? [];
+  const moveElementIds = new Set(moveElements.map(element => element.id));
+  const hasLayoutLock = moveElements.some(element => element.props.layoutLocked === true);
+  const hasDeleteLock = selectedElements.some(element => element.props.deleteLocked === true);
+  const moveTop = moveElements.reduce((top, element) => Math.min(top, element.box.y), Infinity);
+  const moveBottom = moveElements.reduce((bottom, element) => Math.max(bottom, element.box.y + element.box.height), 0);
+  const movingTables = moveElements.filter(element => element.type === "table").length;
+  const moveTargets = document?.bands.filter(band =>
+    moveElements.length > 0 && !hasLayoutLock && moveBottom - moveTop <= band.height &&
+    band.elements.filter(element => element.type === "table" && !moveElementIds.has(element.id)).length + movingTables <= 1 &&
+    moveElements.some(element => !band.elements.includes(element))
+  ) ?? [];
+
+  const moveToSection = () => {
+    const target = moveTargets.find(band => band.id === moveDestination);
+    if (!document || !target) return;
+    const offset = Math.min(0, target.height - moveBottom);
+    const moved = moveElements.map(element => ({ ...element, box: { ...element.box, y: element.box.y + offset } }));
+    commit({ ...document, bands: document.bands.map(band => {
+      const elements = band.elements.filter(element => !moveElementIds.has(element.id));
+      return { ...band, elements: band.id === target.id ? [...elements, ...moved] : elements };
+    }) });
+    setSelectedBand(target.id);
+    selectIds(moved.map(element => element.id));
+  };
+
+  const sectionMove = moveTargets.length > 0 && (
+    <div className="rs-section-move">
+      <label className="rs-field">
+        <span>{tr("moveToSection")}</span>
+        <select value={moveDestination} onChange={event => setMoveDestination(event.target.value)}>
+          <option value="">{tr("selectSection")}</option>
+          {moveTargets.map(band => <option key={band.id} value={band.id}>{band.label ?? band.kind} · {band.id}</option>)}
+        </select>
+      </label>
+      <button type="button" className="rs-ghost" disabled={!moveDestination} onClick={moveToSection}>{tr("moveObjects")}</button>
+    </div>
+  );
+
   const alignSelection = (mode: "left" | "right" | "centerH" | "top" | "bottom" | "middleV") => {
-    if (!document || selectedElements.length < 2 || selectionSpansBands) return;
+    if (!document || selectedElements.length < 2 || selectionSpansBands || hasLayoutLock) return;
     const boxes = selectedElements.map((element) => element.box);
     const minX = Math.min(...boxes.map((box) => box.x));
     const maxRight = Math.max(...boxes.map((box) => box.x + box.width));
@@ -666,17 +858,18 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   };
 
   const groupSelection = () => {
-    if (!document || selectedIds.length < 2 || selectionSpansBands) return;
-    const groupId = `group-${Date.now().toString(36)}`;
+    if (!document || moveElements.length < 2) return;
+    const groupId = `group-${crypto.randomUUID()}`;
     commit({
       ...document,
       bands: document.bands.map((band) => ({
         ...band,
         elements: band.elements.map((element) =>
-          selectedIds.includes(element.id) ? { ...element, groupId } : element,
+          moveElementIds.has(element.id) ? { ...element, groupId } : element,
         ),
       })),
     });
+    selectIds(moveElements.map(element => element.id));
   };
 
   const ungroupSelection = () => {
@@ -686,7 +879,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       bands: document.bands.map((band) => ({
         ...band,
         elements: band.elements.map((element) => {
-          if (!selectedIds.includes(element.id)) return element;
+          if (!moveElementIds.has(element.id)) return element;
           const next = { ...element };
           delete next.groupId;
           return next;
@@ -743,12 +936,12 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   };
 
   const patchElementBox = (patch: Partial<ReportElement["box"]>) => {
-    if (!selected) return;
+    if (!selected || selected.props.layoutLocked === true) return;
     patchElement({ box: { ...selected.box, ...patch } });
   };
 
   const addElement = (
-    type: "text" | "rect" | "line" | "image" | "field" | "table" | "form",
+    type: PaletteType,
     position?: { x: number; y: number; bandId: string },
   ) => {
     if (!document) return;
@@ -796,6 +989,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           bindings: { path: "" },
         }),
       ];
+    } else if (type === "barcode") {
+      created = [make("", { type: "barcode", box: { x, y, width: 55, height: 16 },
+        props: { barcodeKind: "code128", barcodeValue: "ITEM-001" } })];
     } else if (type === "field") {
       created = [
         make("", {
@@ -836,6 +1032,10 @@ export default function ReportStudio({ token, language, onExit, context = "home"
 
   const removeElement = () => {
     if (!document || selectedIds.length === 0) return;
+    if (hasDeleteLock) {
+      setMessage(tr("deletionLocked"));
+      return;
+    }
     commit({
       ...document,
       bands: document.bands.map((band) => ({
@@ -873,8 +1073,8 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     })),
   });
 
-  const beginDrag = (element: ReportElement, event: React.MouseEvent) => {
-    if (!document || editingId) return;
+  const beginDrag = (element: ReportElement, event: React.PointerEvent) => {
+    if (!document || editingId || !event.isPrimary || event.button !== 0 || element.props.layoutLocked === true) return;
     event.stopPropagation();
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
     const grouped = element.groupId
@@ -890,29 +1090,39 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       : selectedIds.includes(element.id)
         ? selectedIds
         : grouped;
+    const elements = document.bands.flatMap(band => band.elements);
+    if (elements.some(candidate => ids.includes(candidate.id) && candidate.props.layoutLocked === true)) return;
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
     dragRef.current = {
+      pointerId: event.pointerId,
+      target,
       snapshot: document,
+      next: document,
       id: element.id,
       ids,
       startX: event.clientX,
       startY: event.clientY,
       box: { ...element.box },
       boxes: ids.map((id) => {
-        const found = document.bands
-          .flatMap((band) => band.elements)
-          .find((candidate) => candidate.id === id);
+        const found = elements.find(candidate => candidate.id === id);
         return { id, box: found ? { ...found.box } : { ...element.box } };
       }),
     };
   };
 
-  const beginResize = (element: ReportElement, handle: ResizeHandle, event: React.MouseEvent) => {
-    if (!document || editingId) return;
+  const beginResize = (element: ReportElement, handle: ResizeHandle, event: React.PointerEvent) => {
+    if (!document || editingId || !event.isPrimary || event.button !== 0 || element.props.layoutLocked === true) return;
     event.stopPropagation();
     event.preventDefault();
     selectIds([element.id]);
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
     resizeRef.current = {
+      pointerId: event.pointerId,
+      target,
       snapshot: document,
+      next: document,
       id: element.id,
       handle,
       startX: event.clientX,
@@ -929,11 +1139,12 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     patchElement({ props });
   };
 
-  const importImage = (file: File | undefined) => {
+  const importImage = (file: File | undefined, preserveAlt = false) => {
     if (!file) return;
     const targetId = selectedId;
-    const reportFile = imageFileRef.current;
-    if (!targetId || !selected || selected.type !== "image") return;
+    if (!targetId || !selected || selected.type !== "image" || selected.props.contentLocked === true) return;
+    const generation = ++imageReadGeneration.current;
+    const isCurrent = () => currentSampleKey.current === sampleKey && imageReadGeneration.current === generation;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
       setErrors([tr("imageTypeError")]);
       return;
@@ -945,26 +1156,30 @@ export default function ReportStudio({ token, language, onExit, context = "home"
     const reader = new FileReader();
     reader.onload = () => {
       const current = imageDocumentRef.current;
-      if (!current || imageFileRef.current !== reportFile) return;
+      if (!current || !isCurrent()) return;
       const target = current.bands.flatMap((band) => band.elements).find((element) => element.id === targetId && element.type === "image");
-      if (!target) return;
-      const next = { ...current, bands: current.bands.map((band) => ({ ...band, elements: band.elements.map((element) => element.id === targetId ? { ...element, props: { ...element.props, src: String(reader.result), alt: file.name } } : element) })) };
+      if (!target || target.props.contentLocked === true) return;
+      const next = { ...current, bands: current.bands.map((band) => ({ ...band, elements: band.elements.map((element) => element.id === targetId ? { ...element, props: { ...element.props, src: String(reader.result), alt: preserveAlt ? element.props.alt || file.name : file.name } } : element) })) };
       setPast((entries) => [...entries.slice(-49), current]);
       setFuture([]);
       imageDocumentRef.current = next;
       setDocument(next);
       setErrors([]);
     };
-    reader.onerror = () => setErrors([tr("imageTypeError")]);
+    reader.onerror = () => { if (isCurrent()) setErrors([tr("imageTypeError")]); };
     reader.readAsDataURL(file);
   };
 
   const importData = async (file: File | undefined) => {
     if (!file) return;
+    const generation = ++importGeneration.current;
+    setSampleCheck(null);
+    setSampleError("");
     if (file.size > 2 * 1024 * 1024) {
-      setErrors([tr("imageSizeError")]);
+      setSampleError(tr("importSizeError"));
       return;
     }
+    const isCurrent = () => currentSampleKey.current === sampleKey && generation === importGeneration.current;
     try {
       const tableBound = document?.bands
         .flatMap((band) => band.elements)
@@ -972,7 +1187,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           (element) =>
             element.type === "table" && typeof element.bindings?.path === "string",
         );
-      const dataset =
+      const dataset = (importDataset || null) ??
         (selected?.type === "table" && typeof selected.bindings?.path === "string"
           ? String(selected.bindings.path).split(".")[0]
           : null) ??
@@ -980,39 +1195,86 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         document?.datasets[0]?.id ??
         "data";
 
-      let existing: Record<string, unknown> = {};
-      try {
-        const current = sampleJson.trim() ? (JSON.parse(sampleJson) as unknown) : {};
-        if (current && typeof current === "object" && !Array.isArray(current)) {
-          existing = current as Record<string, unknown>;
-        }
-      } catch {
-        existing = {};
-      }
+      const current = parseSampleData();
+      if (!current.valid) return;
+      const existing = current.data ?? {};
 
+      if (file.name.toLowerCase().endsWith(".xlsx")) {
+        const { readWorkbook } = await import("./read-workbook");
+        const sheets = await readWorkbook(file);
+        if (isCurrent()) setPendingImport({ key: sampleKey, dataset, sheets });
+        return;
+      }
       const text = await file.text();
-      let merged: Record<string, unknown>;
+      if (!isCurrent()) return;
+      let imported: Record<string, unknown>;
       if (file.name.toLowerCase().endsWith(".json")) {
-        const parsed = JSON.parse(text) as unknown;
+        const parsed = parseUniqueJson(text.replace(/^\uFEFF/, ""));
         if (Array.isArray(parsed)) {
-          merged = { ...existing, [dataset]: parsed };
+          imported = { [dataset]: parsed };
         } else if (parsed && typeof parsed === "object") {
           const object = parsed as Record<string, unknown>;
-          merged = { ...existing, ...object };
-          if (!Array.isArray(merged[dataset])) {
-            throw new Error(tr("sampleInvalid"));
-          }
+          imported = object;
         } else {
           throw new Error(tr("sampleInvalid"));
         }
       } else {
-        merged = { ...existing, [dataset]: csvToRecords(text) };
+        const delimiter = file.name.toLowerCase().endsWith(".tsv") ? "\t" : ",";
+        if (reviewImport) {
+          const parsed = parseCsv(text, 5000, delimiter);
+          if (parsed.headers.length > 100) throw new Error("Mapped imports support up to 100 columns.");
+          setPendingImport({ key: sampleKey, dataset, sheets: [{ name: file.name, ...parsed }] });
+          return;
+        }
+        imported = { [dataset]: csvToRecords(text, 5000, delimiter) };
       }
-      setSampleJson(JSON.stringify(merged, null, 2));
+      const result = validateSampleData(imageDocumentRef.current?.datasets ?? [], imported);
+      if (result.count) {
+        setSampleCheck({ key: sampleKey, text: sampleJson, result });
+        setSampleError(tr("importInvalidTypes"));
+        return;
+      }
+      const merged = { ...existing, ...imported };
+      updateSample(JSON.stringify(merged, null, 2));
       setSampleError("");
       setMessage(tr("dataImported").replace("{dataset}", dataset));
     } catch (error) {
-      setSampleError(error instanceof Error ? error.message : tr("sampleInvalid"));
+      if (isCurrent()) setSampleError(error instanceof Error ? error.message : tr("sampleInvalid"));
+    }
+  };
+
+  const importReportSections = async (input: HTMLInputElement, kind: "pdf" | "pdf-text" | "native") => {
+    const selectedFile = input.files?.[0];
+    input.value = "";
+    if (!selectedFile || !document) return;
+    const key = sampleKey;
+    setBusy(true);
+    setErrors([]);
+    setMessage("");
+    try {
+      if (selectedFile.size > 5 * 1024 * 1024) throw new Error(tr("sectionFileSize"));
+      let next: ReportDocumentV1;
+      if (kind !== "native") {
+        const { readPdf } = await import("./read-pdf");
+        next = appendPdfPages(document, await readPdf(selectedFile, kind === "pdf-text" ? "text" : "image"), selectedFile.name);
+      } else {
+        const source = parseUniqueJson((await selectedFile.text()).replace(/^\uFEFF/, ""));
+        const sourceCheck = await request<{ ok: boolean; errors: Issue[] }>(token, "reports/validate", { document: source });
+        if (!sourceCheck.ok) throw new Error(issues(sourceCheck.errors)[0] ?? tr("sampleInvalid"));
+        next = appendReportSections(document, source as ReportDocumentV1);
+      }
+      if (currentSampleKey.current !== key || imageDocumentRef.current !== document) return;
+      const check = await request<{ ok: boolean; errors: Issue[] }>(token, "reports/validate", { document: next });
+      if (!check.ok) throw new Error(issues(check.errors)[0] ?? tr("sampleInvalid"));
+      if (currentSampleKey.current !== key || imageDocumentRef.current !== document) return;
+      commit(next);
+      selectIds([]);
+      setSelectedBand(next.bands[document.bands.length]?.id ?? null);
+      setMessage(tr(kind === "pdf-text" ? "pdfTextImported" : kind === "pdf" ? "pdfImported" : "subreportImported"));
+    } catch (error) {
+      if (currentSampleKey.current === key) setErrors([(error as Error).message]);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1031,7 +1293,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       ArrowDown: [0, step],
     };
     const move = moves[event.key];
-    if (!move) return;
+    if (!move || hasLayoutLock) return;
     event.preventDefault();
     if (event.altKey) {
       const delta: Record<string, Partial<ReportElement["box"]>> = {
@@ -1092,34 +1354,32 @@ export default function ReportStudio({ token, language, onExit, context = "home"
   }, [document, tab, zoom]);
 
   useEffect(() => {
-    const move = (event: MouseEvent) => {
+    const move = (event: PointerEvent) => {
       const drag = dragRef.current;
-      if (!drag || !document) return;
+      if (!drag || drag.pointerId !== event.pointerId) return;
       const factor = MM_TO_PX * zoom;
       const dx = (event.clientX - drag.startX) / factor;
       const dy = (event.clientY - drag.startY) / factor;
-      if (Math.abs(dx) < 0.2 && Math.abs(dy) < 0.2) return;
+      if (Math.abs(dx) < 0.2 && Math.abs(dy) < 0.2 && drag.next === drag.snapshot) return;
       const snap = (value: number) =>
         event.altKey || !snapToGrid ? Math.round(value * 10) / 10 : Math.round(value);
       const deltaX = snap(dx);
       const deltaY = snap(dy);
-      setDocument((current) => {
-        if (!current) return current;
-        let next = current;
-        for (const entry of drag.boxes) {
-          const x = Math.min(
-            Math.max(0, entry.box.x + deltaX),
-            Math.max(0, current.page.width - entry.box.width),
-          );
-          const y = Math.max(0, entry.box.y + deltaY);
-          next = withBox(next, entry.id, { ...entry.box, x, y });
-        }
-        return next;
-      });
+      let next = drag.snapshot;
+      for (const entry of drag.boxes) {
+        const x = Math.min(
+          Math.max(0, entry.box.x + deltaX),
+          Math.max(0, next.page.width - entry.box.width),
+        );
+        const y = Math.max(0, entry.box.y + deltaY);
+        if (x !== entry.box.x || y !== entry.box.y) next = withBox(next, entry.id, { ...entry.box, x, y });
+      }
+      drag.next = next;
+      setDocument(next);
     };
-    const resize = (event: MouseEvent) => {
+    const resize = (event: PointerEvent) => {
       const state = resizeRef.current;
-      if (!state || !document) return;
+      if (!state || state.pointerId !== event.pointerId) return;
       const factor = MM_TO_PX * zoom;
       const dx = (event.clientX - state.startX) / factor;
       const dy = (event.clientY - state.startY) / factor;
@@ -1137,51 +1397,61 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         y = Math.max(0, Math.min(snap(box.y + dy), box.y + box.height - MIN_ELEMENT_MM));
         height = box.y + box.height - y;
       }
-      if (x + width > document.page.width) {
-        width = Math.max(MIN_ELEMENT_MM, document.page.width - x);
+      if (x + width > state.snapshot.page.width) {
+        width = Math.max(MIN_ELEMENT_MM, state.snapshot.page.width - x);
       }
-      setDocument((current) =>
-        current ? withBox(current, state.id, { x, y, width, height }) : current,
-      );
+      state.next = x === box.x && y === box.y && width === box.width && height === box.height
+        ? state.snapshot : withBox(state.snapshot, state.id, { x, y, width, height });
+      setDocument(state.next);
     };
-    const up = () => {
+    const up = (event: PointerEvent) => {
       const drag = dragRef.current;
-      if (drag) {
+      if (drag?.pointerId === event.pointerId) {
         dragRef.current = null;
-        setPast((entries) => [...entries.slice(-49), drag.snapshot]);
-        setFuture([]);
+        if (drag.next !== drag.snapshot) {
+          setPast((entries) => [...entries.slice(-49), drag.snapshot]);
+          setFuture([]);
+        }
       }
       const state = resizeRef.current;
-      if (state) {
+      if (state?.pointerId === event.pointerId) {
         resizeRef.current = null;
-        setPast((entries) => [...entries.slice(-49), state.snapshot]);
-        setFuture([]);
+        if (state.next !== state.snapshot) {
+          setPast((entries) => [...entries.slice(-49), state.snapshot]);
+          setFuture([]);
+        }
       }
     };
-    const cancel = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+    const cancel = (event: KeyboardEvent | PointerEvent) => {
+      if ("key" in event && event.key !== "Escape") return;
       const drag = dragRef.current;
-      if (drag) {
+      if (drag && (!("pointerId" in event) || drag.pointerId === event.pointerId)) {
         dragRef.current = null;
+        if (drag.target.hasPointerCapture(drag.pointerId)) drag.target.releasePointerCapture(drag.pointerId);
         setDocument(drag.snapshot);
       }
       const state = resizeRef.current;
-      if (state) {
+      if (state && (!("pointerId" in event) || state.pointerId === event.pointerId)) {
         resizeRef.current = null;
+        if (state.target.hasPointerCapture(state.pointerId)) state.target.releasePointerCapture(state.pointerId);
         setDocument(state.snapshot);
       }
     };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mousemove", resize);
-    window.addEventListener("mouseup", up);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("lostpointercapture", cancel);
     window.addEventListener("keydown", cancel);
     return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mousemove", resize);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("lostpointercapture", cancel);
       window.removeEventListener("keydown", cancel);
     };
-  }, [document, zoom, snapToGrid]);
+  }, [zoom, snapToGrid]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1211,7 +1481,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       }
       if (key === "e") {
         event.preventDefault();
-        if (selected) setEditingId(selected.id);
+        if (selected && selected.props.contentLocked !== true) setEditingId(selected.id);
       }
     };
     window.addEventListener("keydown", handler);
@@ -1224,7 +1494,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         token={token}
         language={language}
         initialPath={yrfInitialPath}
-        onExit={() => guardUnsaved(onExit)}
+        onExit={onExit}
         onBack={() => {
           setMode("native");
           setYrfInitialPath("");
@@ -1240,25 +1510,37 @@ export default function ReportStudio({ token, language, onExit, context = "home"
 
   const page = document?.page;
   const scale = page ? MM_TO_PX * zoom : MM_TO_PX;
+  const folderPathChanged = folder !== (state.root ?? "");
+  const folderControlsBusy = busy || pickingFolder;
+  const openStartFlow = async (choice: "open" | "create") => {
+    setFlow(choice);
+    setShowStart(false);
+    revealReports();
+    if (choice === "open") setPickingFolder(true);
+    let activeFolder = state.root;
+    const browseProject = choice === "open" && context === "project" && Boolean(state.context);
+    if (!activeFolder && !browseProject) {
+      activeFolder = await selectFolder({ useDefault: true });
+    }
+    if (choice === "open") {
+      await chooseFolder(true, activeFolder ?? state.context);
+      return;
+    }
+    requestAnimationFrame(() => folderPickerButton.current?.focus());
+  };
 
   return (
     <div className="rs">
       {showStart && !document && (
-        <div className="rs-modal" role="dialog" aria-modal="true" aria-label={tr("howToStart")}>
-          <div className="rs-modal-card rs-start">
+        <ReportDialog label={tr("howToStart")} className="rs-start" onCancel={onExit}>
             <div className="rs-start-mark" aria-hidden="true">▤</div>
             <div className="rs-start-choices">
               <button
                 className="rs-start-choice"
                 aria-label={tr("openExistingReport")}
                 title={tr("openExistingHint")}
-                onClick={() => {
-                  setFlow("open");
-                  setShowStart(false);
-                  setShowLeft(true);
-                  void loadBrowse();
-                  requestAnimationFrame(() => (globalThis.document.querySelector(".rs-folder-actions input") as HTMLInputElement | null)?.focus());
-                }}
+                autoFocus
+                onClick={() => void openStartFlow("open")}
               >
                 <span className="rs-start-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
@@ -1269,11 +1551,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 className="rs-start-choice"
                 aria-label={tr("createNewReport")}
                 title={tr("createNewHint")}
-                onClick={() => {
-                  setFlow("create");
-                  setShowStart(false);
-                  setShowLeft(true);
-                }}
+                onClick={() => void openStartFlow("create")}
               >
                 <span className="rs-start-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 5v14M5 12h14"/></svg>
@@ -1281,8 +1559,24 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 <strong>{tr("createNewReport")}</strong>
               </button>
             </div>
+        </ReportDialog>
+      )}
+      {pendingExport && (
+        <ReportDialog label={tr("exportWarningsTitle")} onCancel={() => setPendingExport(null)}>
+          <h3>{tr("exportWarningsTitle")}</h3>
+          <p>{tr("exportWarningsIntro")}</p>
+          <ul>{pendingExport.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+          <div className="rs-modal-actions">
+            <button className="rs-ghost" autoFocus onClick={() => setPendingExport(null)}>{tr("cancel")}</button>
+            <button className="rs-ghost" onClick={() => {
+              setPendingExport(null);
+              requestAnimationFrame(() => exportFormatInput.current?.focus());
+            }}>{tr("chooseExportFormat")}</button>
+            <button className="rs-primary" onClick={() => { downloadReport(pendingExport); setPendingExport(null); }}>
+              {tr("downloadReport")}
+            </button>
           </div>
-        </div>
+        </ReportDialog>
       )}
       <header className="rs-bar">
         <button className="rs-ghost" onClick={() => guardUnsaved(onExit)}>
@@ -1318,7 +1612,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           <button className="rs-ghost rs-icon" aria-label={tr("undo")} title={`${tr("undo")} (Cmd/Ctrl+Z)`} disabled={!past.length || busy} onClick={undo}>↶</button>
           <button className="rs-ghost rs-icon" aria-label={tr("redo")} title={`${tr("redo")} (Cmd/Ctrl+Shift+Z)`} disabled={!future.length || busy} onClick={redo}>↷</button>
           <div className="rs-tabs">
-            <button className={tab === "design" ? "on" : ""} onClick={() => setTab("design")}>
+            <button className={tab === "design" ? "on" : ""} onClick={() => { setTab("design"); revealCanvasOnNarrowScreen(); }}>
               {tr("design")}
             </button>
             <button
@@ -1328,7 +1622,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   setCodeText(document ? JSON.stringify(document, null, 2) : "");
                 }
                 setCodeErrors([]);
+                setCodeTarget(selectedId ? { id: selectedId } : null);
                 setTab("code");
+                revealCanvasOnNarrowScreen();
               }}
             >
               {tr("code")}
@@ -1339,6 +1635,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           </div>
           <select
             className="rs-export-select"
+            ref={exportFormatInput}
             aria-label={tr("export")}
             value={exportFormat}
             onChange={(event) => setExportFormat(event.target.value as "pdf" | "csv" | "html" | "xlsx" | "docx")}
@@ -1358,6 +1655,31 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         </div>
       </header>
 
+      <div className="rs-panel-controls">
+        <button
+          type="button"
+          className="rs-ghost rs-edge-toggle"
+          aria-label={tr("toggleLeftPanel")}
+          aria-pressed={showLeft}
+          aria-expanded={showLeft}
+          onClick={() => { if (showLeft) setShowLeft(false); else revealReports(); }}
+        >
+          {tr("reports")}
+        </button>
+        <button
+          type="button"
+          className="rs-ghost rs-edge-toggle"
+          aria-label={tr("toggleRightPanel")}
+          aria-pressed={showRight}
+          aria-expanded={showRight}
+          onClick={() => {
+            if (!showRight && window.innerWidth <= 1100) setShowLeft(false);
+            setShowRight(!showRight);
+          }}
+        >
+          {tr("toggleRightPanel")}
+        </button>
+      </div>
       <div
         className={`rs-body ${showLeft ? "left-open" : ""} ${showRight ? "right-open" : ""}`}
         style={{
@@ -1365,27 +1687,49 @@ export default function ReportStudio({ token, language, onExit, context = "home"
           ["--rs-right-width" as string]: `${rightWidth}px`,
         }}
       >
-        <button
-          type="button"
-          className="rs-edge-toggle rs-edge-left"
-          aria-label={tr("toggleLeftPanel")}
-          aria-pressed={showLeft}
-          aria-expanded={showLeft}
-          onClick={() => setShowLeft((value) => !value)}
-        >
-          {showLeft ? "‹" : "›"}
-        </button>
-        <button
-          type="button"
-          className="rs-edge-toggle rs-edge-right"
-          aria-label={tr("toggleRightPanel")}
-          aria-pressed={showRight}
-          aria-expanded={showRight}
-          onClick={() => setShowRight((value) => !value)}
-        >
-          {showRight ? "›" : "‹"}
-        </button>
         <aside className="rs-left">
+          <section>
+            <h3>{tr("reportFolder")}</h3>
+            {state.context && state.context !== state.root && (
+              <p className="rs-hint">
+                {tr("projectContext")}: {state.context}
+              </p>
+            )}
+            <div className="rs-folder-actions">
+              <input
+                value={folder}
+                title={folder || undefined}
+                aria-label={tr("folder")}
+                ref={folderInput}
+                disabled={folderControlsBusy}
+                placeholder="/path/to/reports"
+                onChange={(event) => setFolder(event.target.value)}
+              />
+              <button className="rs-ghost" disabled={!folder.trim() || !folderPathChanged || folderControlsBusy} onClick={() => void useFolder()}>
+                {tr("useFolder")}
+              </button>
+              <button
+                className="rs-ghost"
+                ref={folderPickerButton}
+                disabled={folderControlsBusy}
+                onClick={() => void chooseFolder(flow === "open" && !document, state.root ?? state.context)}
+              >
+                {tr("openFolder")}
+              </button>
+              {browse?.suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.path}
+                  className="rs-ghost"
+                  disabled={folderControlsBusy || !state.context}
+                  onClick={() => void selectFolder({ path: `${state.context}/${suggestion.path}` })}
+                >
+                  {tr("useSuggestion")}: {suggestion.path}
+                </button>
+              ))}
+            </div>
+            {pickingFolder && <p className="rs-hint" role="status">{tr("folderPickerWaiting")}</p>}
+            {folderError && <p className="rs-hint rs-error" role="alert">{folderError}</p>}
+          </section>
 
           {(flow === "create" || document) && (
           <section>
@@ -1419,61 +1763,28 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 <span>{tr("fileName")}</span>
                 <input value={filename} onChange={(event) => setFilename(event.target.value)} />
               </label>
-              <button className="rs-primary wide" disabled={!state.root || busy} onClick={() => void createReport()}>
+              <div className="rs-create-actions">
+              <button className="rs-primary wide" disabled={!state.root || folderPathChanged || folderControlsBusy} onClick={() => void createReport()}>
                 {tr("create")}
               </button>
-              <button className="rs-ghost wide" disabled={!state.root || busy} onClick={() => setMode("yrf")}>
+              <button className="rs-ghost wide" disabled={!state.root || folderPathChanged || folderControlsBusy} onClick={() => guardUnsaved(() => setMode("yrf"))}>
                 {tr("createYrf")}
               </button>
+              </div>
             </section>
 
             )}
 
           <section>
-            <h3>{tr("reportFolder")}</h3>
-            <p className="rs-folder-path" title={state.root ?? undefined}>
-              {state.root ?? tr("notSelected")}
-            </p>
-            {state.context && (
-              <p className="rs-hint">
-                {tr("projectContext")}: {state.context}
-              </p>
-            )}
-            <div className="rs-folder-actions">
-              <input
-                value={folder}
-                aria-label={tr("folder")}
-                placeholder="/path/to/reports"
-                onChange={(event) => setFolder(event.target.value)}
-              />
-              <button className="rs-ghost" disabled={!folder || busy} onClick={() => void useFolder()}>
-                {tr("useFolder")}
-              </button>
-              <button className="rs-ghost" disabled={busy} onClick={() => void chooseFolder()}>
-                {tr("openFolder")}
-              </button>
-              {browse?.suggestions.map((suggestion) => (
-                <button
-                  key={suggestion.path}
-                  className="rs-ghost"
-                  disabled={busy || !state.context}
-                  onClick={() => void useFolderPath(`${state.context}/${suggestion.path}`)}
-                >
-                  {tr("useSuggestion")}: {suggestion.path}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section>
             <div className="rs-section-head">
               <h3>{tr("reports")}</h3>
-              <button className="rs-ghost" onClick={() => void loadBrowse(false)}>
+              <button className="rs-ghost" disabled={busy || (!state.root && !state.context)} onClick={() => void loadBrowse(!state.root)}>
                 {tr("refresh")}
               </button>
             </div>
             <input
               className="rs-search"
+              ref={reportSearchInput}
               aria-label={tr("searchReports")}
               placeholder={tr("searchReports")}
               value={reportSearch}
@@ -1484,6 +1795,8 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 entry.path.toLowerCase().includes(reportSearch.toLowerCase()),
               );
               if (entries.length === 0) {
+                if (browseFailed) return <p className="rs-hint rs-error" role="alert">{tr("reportListLoadFailed")}</p>;
+                if (!browse) return null;
                 return <p className="rs-hint">{reportSearch ? tr("noResults") : tr("noReports")}</p>;
               }
               return (
@@ -1496,6 +1809,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       <li key={entry.absolute}>
                         <button
                           className={file === entry.path ? "on" : ""}
+                          disabled={pickingFolder}
                           onClick={() =>
                             guardUnsaved(() => {
                               void openEntry(entry);
@@ -1523,33 +1837,115 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             <h3>{tr("sampleData")}</h3>
             <p className="rs-hint">{tr("sampleHint")}</p>
             <textarea
+              aria-label={tr("sampleData")}
               className="rs-data"
               rows={6}
               spellCheck={false}
+              disabled={!sampleKey}
               placeholder='{"lines": [{"description": "Contoh", "amount": 1000}]}'
               value={sampleJson}
-              onChange={(event) => setSampleJson(event.target.value)}
+              onChange={(event) => updateSample(event.target.value)}
               onBlur={() => parseSampleData()}
             />
             {sampleError && <p className="rs-hint rs-error">{sampleError}</p>}
+            {document?.datasets.some(dataset => sampleFieldRules(dataset).some(rule => rule.type || rule.required)) && (
+              <button className="rs-ghost" disabled={!sampleKey} onClick={checkSampleData}>{tr("sampleTypeCheck")}</button>
+            )}
+            {document && rulesDataset && <DatasetRules key={rulesDataset.id} dataset={rulesDataset} tr={tr}
+              onChange={updated => {
+                setSampleCheck(null);
+                commit({ ...document, datasets: document.datasets.map(dataset => dataset.id === updated.id ? updated : dataset) });
+              }} />}
+            {sampleCheck?.key === sampleKey && sampleCheck.text === sampleJson && <SampleIssues result={sampleCheck.result} tr={tr} />}
+            {!!document?.datasets.length && (
+              <label className="rs-field">
+                <span>{tr("importDataset")}</span>
+                <select value={importDataset} onChange={event => setImportDataset(event.target.value)}>
+                  <option value="">{tr("automatic")}</option>
+                  {document.datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.id}</option>)}
+                </select>
+              </label>
+            )}
             <div className="rs-row-actions">
-              <button className="rs-ghost" onClick={() => csvInputRef.current?.click()}>
+              <button className="rs-ghost" disabled={!sampleKey} onClick={() => csvInputRef.current?.click()}>
                 {tr("importData")}
               </button>
               <input
                 ref={csvInputRef}
                 type="file"
-                accept=".csv,.json,text/csv,application/json"
+                accept=".csv,.tsv,.json,text/csv,text/tab-separated-values,application/json"
                 hidden
-                onChange={(event) => void importData(event.target.files?.[0])}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  void importData(file);
+                }}
               />
+              <button className="rs-ghost" disabled={!sampleKey} onClick={() => workbookInput.current?.click()}>
+                {tr("importWorkbook")}
+              </button>
+              <input ref={workbookInput} type="file" accept=".xlsx" hidden onChange={event => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                void importData(file);
+              }} />
             </div>
+            <label className="rs-check">
+              <input type="checkbox" checked={reviewImport} disabled={!sampleKey} onChange={event => setReviewImport(event.target.checked)} />
+              {tr("reviewImport")}
+            </label>
             {sampleSchema && (
               <p className="rs-hint">
                 {tr("schemaPreview")}: {sampleSchema}
               </p>
             )}
           </section>
+
+          {document && (
+            <section>
+              <h3>{tr("insertSections")}</h3>
+              <details className="rs-dataset-rules">
+                <summary>{tr("linkedReports")}</summary>
+                <p className="rs-hint">{tr("linkedReportsHint")}</p>
+                <label className="rs-field">
+                  <span>{tr("linkedReportPath")}</span>
+                  <input value={subreportPath} maxLength={240} onChange={event => setSubreportPath(event.target.value)} />
+                </label>
+                <button type="button" className="rs-ghost" disabled={!validSubreportPath(subreportPath.trim()) ||
+                  document.linkedReports?.includes(subreportPath.trim()) || (document.linkedReports?.length ?? 0) >= MAX_LINKED_REPORTS}
+                  onClick={() => {
+                    commit({ ...document, linkedReports: [...document.linkedReports ?? [], subreportPath.trim()] });
+                    setSubreportPath("");
+                  }}>{tr("linkReport")}</button>
+                <ul>{document.linkedReports?.map(link => <li key={link}>
+                  <span>{link}</span>{" "}
+                  <button type="button" className="rs-ghost" aria-label={`${tr("linkedArguments")} ${link}`}
+                    onClick={() => setLinkArgumentEdit({ link,
+                      text: JSON.stringify(document.linkedReportArguments?.[link] ?? {}, null, 2), invalid: false })}>
+                    {tr("linkedArguments")}
+                  </button>{" "}
+                  <button type="button" className="rs-ghost" aria-label={`${tr("unlinkReport")} ${link}`}
+                    onClick={() => {
+                      const next = { ...document.linkedReportArguments };
+                      delete next[link];
+                      commit({ ...document, linkedReports: document.linkedReports!.filter(path => path !== link),
+                        linkedReportArguments: Object.keys(next).length ? next : undefined });
+                    }}>
+                    {tr("unlinkReport")}
+                  </button>
+                </li>)}</ul>
+              </details>
+              <p className="rs-hint">{tr("insertSectionsHint")}</p>
+              <div className="rs-row-actions">
+                <button className="rs-ghost" disabled={busy} onClick={() => pdfInput.current?.click()}>{tr("importPdf")}</button>
+                <button className="rs-ghost" disabled={busy} onClick={() => pdfTextInput.current?.click()}>{tr("importPdfText")}</button>
+                <button className="rs-ghost" disabled={busy} onClick={() => subreportInput.current?.click()}>{tr("importSubreport")}</button>
+              </div>
+              <input ref={pdfInput} type="file" accept=".pdf" hidden onChange={event => void importReportSections(event.currentTarget, "pdf")} />
+              <input ref={pdfTextInput} type="file" accept=".pdf,application/pdf" hidden onChange={event => void importReportSections(event.currentTarget, "pdf-text")} />
+              <input ref={subreportInput} type="file" accept=".report.json" hidden onChange={event => void importReportSections(event.currentTarget, "native")} />
+            </section>
+          )}
 
           {document && selectedBand && (() => {
             const band = document.bands.find((item) => item.id === selectedBand);
@@ -1605,7 +2001,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                       ["line", "addLine", "line"],
                     ],
                   ],
-                  ["paletteData", [["table", "addTable", "table"]]],
+                  ["paletteData", [["table", "addTable", "table"], ["barcode", "addBarcode", "field"]]],
                 ] as const
               ).map(([group, items]) => (
                 <details className="rs-palette-group" key={group} open>
@@ -1744,6 +2140,15 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                           />
                           <span>{tr("pageBreakBefore")}</span>
                         </label>
+                        {((band.kind !== "pageHeader" && band.kind !== "pageFooter") || band.repeat === false) &&
+                          !band.elements.some(element => element.type === "table" || element.props.flowText === true) && (
+                            <label className="rs-check">
+                              <input type="checkbox"
+                                checked={band.keepWithNext === true}
+                                onChange={event => patchBand(band.id, { keepWithNext: event.target.checked })} />
+                              <span>{tr("keepWithNext")}</span>
+                            </label>
+                          )}
                       </li>
                       {(band.kind === "pageHeader" || band.kind === "pageFooter") && <li>
                         <label className="rs-check">
@@ -1789,58 +2194,33 @@ export default function ReportStudio({ token, language, onExit, context = "home"
         <main className="rs-canvas-wrap">
           {!document ? (
             showStart ? null : (
-            <div className="rs-empty rs-landing">
-              <div className="rs-landing-mark" aria-hidden="true">▤</div>
-              <div className="rs-landing-actions">
-                <button
-                  className="rs-landing-card"
-                  aria-label={tr("openExistingReport")}
-                  title={tr("openExistingHint")}
-                  onClick={() => {
-                    setFlow("open");
-                    setShowLeft(true);
-                  }}
-                >
-                  <span className="rs-start-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
-                  </span>
-                  <strong>{tr("openExistingReport")}</strong>
-                </button>
-                <button
-                  className="rs-landing-card"
-                  aria-label={tr("createNewReport")}
-                  title={tr("createNewHint")}
-                  onClick={() => {
-                    setFlow("create");
-                    setShowLeft(true);
-                  }}
-                >
-                  <span className="rs-start-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 5v14M5 12h14"/></svg>
-                  </span>
-                  <strong>{tr("createNewReport")}</strong>
-                </button>
+              <div className="rs-empty">
+                <p className="rs-hint">
+                  {flow === "open" && (state.root || browse?.entries.length)
+                    ? tr("selectReportFromList")
+                    : tr(state.root ? "templateHint" : "chooseFolderFirst")}
+                </p>
               </div>
-              {flow === "create" && !state.root && (
-                <p className="rs-hint">{tr("chooseFolderFirst")}</p>
-              )}
-            </div>
             )
           ) : tab === "code" ? (
             <div className="rs-code">
               <div className="rs-code-head">
-                <span>{tr("codeHint")}</span>
+                <span>{tr("codeHint")} {codeLine !== null && <strong>{tr("codeLine").replace("{line}", String(codeLine))}</strong>}</span>
                 <button className="rs-primary" onClick={() => void applyCode()}>
                   {tr("applyCode")}
                 </button>
               </div>
               <textarea
                 className="rs-code-area"
+                ref={codeArea}
+                aria-label={tr("code")}
+                wrap="off"
                 spellCheck={false}
                 value={codeText}
                 onChange={(event) => {
                   setCodeText(event.target.value);
                   setCodeEdited(true);
+                  setCodeLine(null);
                 }}
               />
               {codeErrors.map((entry) => (
@@ -1892,6 +2272,14 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 ref={canvasRef}
                 tabIndex={0}
                 onKeyDown={onCanvasKeyDown}
+                onPaste={(event) => {
+                  if (selected?.type !== "image" || selected.props.contentLocked === true ||
+                      (event.target as HTMLElement).closest("input,textarea,[contenteditable]")) return;
+                  const image = [...event.clipboardData.files].find(file => file.type.startsWith("image/"));
+                  if (!image) return;
+                  event.preventDefault();
+                  importImage(image, true);
+                }}
                 onMouseDown={(event) => {
                   const target = event.target as HTMLElement;
                   if (target.closest(".rs-el, .rs-handle")) return;
@@ -1979,7 +2367,9 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                           selectIds(next);
                           setSelectedBand(band.id);
                         }}
-                        onBeginEdit={(id) => setEditingId(id)}
+                        onBeginEdit={(id) => {
+                          if (!band.elements.some(element => element.id === id && element.props.contentLocked === true)) setEditingId(id);
+                        }}
                         onCommitText={(id, value) => {
                           setEditingId(null);
                           if (!document) return;
@@ -2001,6 +2391,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                           addElement(type, { x, y, bandId })
                         }
                         data={canvasData}
+                        barcodeMissing={tr("barcodeMissing")}
                       />
                     ))}
                   </div>
@@ -2039,7 +2430,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     ["bottom", "alignBottom"],
                   ] as const
                 ).map(([mode, label]) => (
-                  <button key={mode} disabled={selectionSpansBands} onClick={() => alignSelection(mode)}>
+                  <button key={mode} disabled={selectionSpansBands || hasLayoutLock} onClick={() => alignSelection(mode)}>
                     {tr(label)}
                   </button>
                 ))}
@@ -2068,13 +2459,14 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   {tr("ungroup")}
                 </button>
               ) : (
-                <button className="rs-ghost" disabled={selectionSpansBands} onClick={groupSelection}>
+                <button className="rs-ghost" onClick={groupSelection}>
                   {tr("group")}
                 </button>
               )}
-              <button className="rs-ghost danger" onClick={removeElement}>
+              <button className="rs-ghost danger" onClick={removeElement} disabled={hasDeleteLock} title={hasDeleteLock ? tr("deletionLocked") : undefined}>
                 {tr("remove")}
               </button>
+              {sectionMove}
             </section>
           ) : selected ? (
             <section>
@@ -2082,6 +2474,27 @@ export default function ReportStudio({ token, language, onExit, context = "home"
               <p className="rs-hint">
                 {selected.type} · {selected.id}
               </p>
+              <label className="rs-check">
+                <input type="checkbox" checked={selected.props.layoutLocked === true}
+                  onChange={event => patchElementProps({ layoutLocked: event.target.checked })} />
+                {tr("lockPosition")}
+              </label>
+              <label className="rs-check">
+                <input type="checkbox" checked={selected.props.deleteLocked === true}
+                  onChange={event => patchElementProps({ deleteLocked: event.target.checked })} />
+                {tr("lockDeletion")}
+              </label>
+              <label className="rs-check">
+                <input type="checkbox" checked={selected.props.contentLocked === true}
+                  onChange={event => patchElementProps({ contentLocked: event.target.checked })} />
+                {tr("lockContents")}
+              </label>
+              <label className="rs-check">
+                <input type="checkbox" checked={selected.props.outputHidden === true}
+                  onChange={event => patchElementProps({ outputHidden: event.target.checked })} />
+                {tr("hideOutput")}
+              </label>
+              {sectionMove}
               <div className="rs-format-bar">
                 <select
                   aria-label={tr("stylePreset")}
@@ -2224,6 +2637,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     type="number"
                     step={0.5}
                     value={selected.box.x}
+                    disabled={selected.props.layoutLocked === true}
                     onChange={(event) => patchElementBox({ x: Number(event.target.value) })}
                   />
                 </label>
@@ -2233,6 +2647,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     type="number"
                     step={0.5}
                     value={selected.box.y}
+                    disabled={selected.props.layoutLocked === true}
                     onChange={(event) => patchElementBox({ y: Number(event.target.value) })}
                   />
                 </label>
@@ -2242,6 +2657,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     type="number"
                     step={0.5}
                     value={selected.box.width}
+                    disabled={selected.props.layoutLocked === true}
                     onChange={(event) => patchElementBox({ width: Number(event.target.value) })}
                   />
                 </label>
@@ -2251,6 +2667,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     type="number"
                     step={0.5}
                     value={selected.box.height}
+                    disabled={selected.props.layoutLocked === true}
                     onChange={(event) => patchElementBox({ height: Number(event.target.value) })}
                   />
                 </label>
@@ -2458,6 +2875,21 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                   {rules.length > 0 && <button type="button" className="rs-ghost danger" onClick={() => patchElement({ conditions: rules.slice(1) })}>{tr("conditionalRemove")}</button>}
                 </section>;
               })()}
+              {selected.type === "barcode" && <>
+                <label className="rs-field"><span>{tr("barcodeKind")}</span>
+                  <select value={String(selected.props.barcodeKind)} onChange={event => patchElementProps({ barcodeKind: event.target.value })}>
+                    <option value="code128">Code 128</option>
+                    <option value="qrcode">QR Code</option>
+                  </select>
+                </label>
+                <label className="rs-field"><span>{tr("barcodeValue")}</span>
+                  <input maxLength={256} value={String(selected.props.barcodeValue ?? "")} onChange={event => patchElementProps({ barcodeValue: event.target.value })} />
+                </label>
+                <label className="rs-field"><span>{tr("barcodeBinding")}</span>
+                  <input placeholder="invoice.number" value={String(selected.bindings?.path ?? "")}
+                    onChange={event => patchElement({ bindings: { path: event.target.value } })} />
+                </label>
+              </>}
               {selected.type === "image" && (
                 <>
                   <label className="rs-field">
@@ -2487,17 +2919,24 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                     hidden
                     onChange={(event) => { importImage(event.target.files?.[0]); event.currentTarget.value = ""; }}
                   />
+                  <span className="rs-hint">{tr("imagePasteHint")}</span>
                   <button className="rs-ghost" onClick={() => imageInputRef.current?.click()}>
                     {tr("chooseImage")}
                   </button>
                   <p className="rs-hint">{tr("imageImportHint")}</p>
                   {typeof selected.props.src === "string" &&
                     selected.props.src.startsWith("data:image") && (
-                      <img className="rs-image-thumb" src={selected.props.src} alt="" />
+                      <div className="rs-image-actions">
+                        <img className="rs-image-thumb" src={selected.props.src} alt="" />
+                        <button type="button" className="rs-ghost" disabled={selected.props.contentLocked === true}
+                          onClick={() => setCropSource({ id: selected.id, src: String(selected.props.src), key: sampleKey })}>
+                          {tr("cropImage")}
+                        </button>
+                      </div>
                     )}
                 </>
               )}
-              <button className="rs-ghost danger" onClick={removeElement}>
+              <button className="rs-ghost danger" onClick={removeElement} disabled={hasDeleteLock} title={hasDeleteLock ? tr("deletionLocked") : undefined}>
                 {tr("remove")}
               </button>
             </section>
@@ -2588,6 +3027,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
       </div>
 
       <footer className="rs-status">
+        {!!state.formats?.length && <button className="rs-ghost" onClick={() => setShowFormats(true)}>{tr("formats")}</button>}
         {message && <span className="ok">{message}</span>}
         {errors.map((entry) => (
           <span className="bad" key={entry}>
@@ -2604,13 +3044,69 @@ export default function ReportStudio({ token, language, onExit, context = "home"
             {tr("overflowWarning")}: {overflowCount}
           </span>
         )}
-        {!message && errors.length === 0 && warnings.length === 0 && (
-          <span className="rs-hint">{state.root ? `${tr("folder")}: ${state.root}` : tr("selectFolderFirst")}</span>
+        {!state.root && !message && errors.length === 0 && warnings.length === 0 && (
+          <span className="rs-hint">{tr("selectFolderFirst")}</span>
         )}
       </footer>
+      {pendingImport?.key === sampleKey && (
+        <TabularImport sheets={pendingImport.sheets} dataset={pendingImport.dataset} tr={tr}
+          schema={document?.datasets.find(dataset => dataset.id === pendingImport.dataset)}
+          fields={(() => {
+            const fields = asRecord(document?.datasets.find(dataset => dataset.id === pendingImport.dataset)?.schema).fields;
+            return Array.isArray(fields) ? fields.filter((field): field is string => typeof field === "string") : [];
+          })()}
+          onCancel={() => setPendingImport(null)}
+          onApply={rows => {
+            const existing = parseSampleData();
+            if (!existing.valid) return;
+            updateSample(JSON.stringify({ ...existing.data, [pendingImport.dataset]: rows }, null, 2));
+            setMessage(tr("dataImported").replace("{dataset}", pendingImport.dataset));
+            setPendingImport(null);
+          }} />
+      )}
+      {document && linkArgumentEdit && (
+        <ReportDialog label={tr("linkedArguments")} onCancel={() => setLinkArgumentEdit(null)}>
+          <h3>{tr("linkedArguments")}</h3>
+          <p>{linkArgumentEdit.link}</p>
+          <p className="rs-hint">{tr("linkedArgumentsHint")}</p>
+          <label className="rs-field">
+            <span>{tr("linkedArgumentsJson")}</span>
+            <textarea rows={5} maxLength={16_000} value={linkArgumentEdit.text} onChange={event => {
+              setLinkArgumentEdit({ ...linkArgumentEdit, text: event.target.value, invalid: false });
+            }} />
+          </label>
+          {linkArgumentEdit.invalid && <p role="alert">{tr("linkedArgumentsInvalid")}</p>}
+          <div className="rs-modal-actions">
+            <button type="button" className="rs-ghost" onClick={() => setLinkArgumentEdit(null)}>{tr("cancel")}</button>
+            <button type="button" className="rs-primary" onClick={() => {
+              try {
+                const value = parseUniqueJson(linkArgumentEdit.text);
+                if (!validLinkedReportArguments(value)) throw new Error();
+                const next = { ...document.linkedReportArguments };
+                if (Object.keys(value).length) next[linkArgumentEdit.link] = value;
+                else delete next[linkArgumentEdit.link];
+                commit({ ...document, linkedReportArguments: Object.keys(next).length ? next : undefined });
+                setLinkArgumentEdit(null);
+              } catch { setLinkArgumentEdit({ ...linkArgumentEdit, invalid: true }); }
+            }}>{tr("applyLinkedArguments")}</button>
+          </div>
+        </ReportDialog>
+      )}
+
+      {cropSource && <ImageCrop source={cropSource.src} tr={tr} onCancel={() => setCropSource(null)}
+        onApply={src => {
+          const current = imageDocumentRef.current;
+          const target = current?.bands.flatMap(band => band.elements).find(element => element.id === cropSource.id);
+          if (current && currentSampleKey.current === cropSource.key && target?.type === "image" &&
+              target.props.src === cropSource.src && !target.props.contentLocked) {
+            commit({ ...current, bands: current.bands.map(band => ({ ...band, elements: band.elements.map(element =>
+              element.id === target.id ? { ...element, props: { ...element.props, src } } : element) })) });
+          }
+          setCropSource(null);
+        }} />}
+
       {showFormats && (
-        <div className="rs-modal" role="dialog" aria-modal="true" aria-label={tr("formats")}>
-          <div className="rs-modal-card rs-formats">
+        <ReportDialog className="rs-formats" label={tr("formats")} onCancel={() => setShowFormats(false)}>
             <h3>{tr("formats")}</h3>
             <table>
               <thead>
@@ -2635,6 +3131,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                           (
                             {
                               editable: "capEditable",
+                              experimental: "capExperimental",
                               readonly: "capReadonly",
                               "export-only": "capExport",
                               unsupported: "capUnsupported",
@@ -2653,23 +3150,28 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 {tr("close")}
               </button>
             </div>
-          </div>
-        </div>
+        </ReportDialog>
       )}
       {confirmAction && (
-        <div className="rs-modal" role="dialog" aria-modal="true" aria-label={tr("unsaved")}>
-          <div className="rs-modal-card">
+        <ReportDialog label={tr("unsaved")} onCancel={() => { if (!busy) setConfirmAction(null); }}>
             <h3>{tr("unsaved")}</h3>
             <p>{tr("unsavedHint")}</p>
             <div className="rs-modal-actions">
-              <button className="rs-ghost" onClick={() => setConfirmAction(null)}>
+              <button className="rs-ghost" autoFocus disabled={busy} onClick={() => setConfirmAction(null)}>
                 {tr("cancel")}
               </button>
               <button
                 className="rs-ghost"
+                disabled={busy}
                 onClick={() => {
                   const run = confirmAction.run;
                   setConfirmAction(null);
+                  if (savedJson) setDocument(JSON.parse(savedJson) as ReportDocumentV1);
+                  setCodeEdited(false);
+                  setCodeText("");
+                  setCodeErrors([]);
+                  setPast([]);
+                  setFuture([]);
                   run();
                 }}
               >
@@ -2677,6 +3179,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
               </button>
               <button
                 className="rs-primary"
+                disabled={busy}
                 onClick={() => {
                   const run = confirmAction.run;
                   void save().then((ok) => {
@@ -2689,8 +3192,7 @@ export default function ReportStudio({ token, language, onExit, context = "home"
                 {tr("saveAndContinue")}
               </button>
             </div>
-          </div>
-        </div>
+        </ReportDialog>
       )}
     </div>
   );
@@ -2775,6 +3277,7 @@ function BandView({
   onResizeStart,
   onDropElement,
   data,
+  barcodeMissing,
 }: {
   band: ReportBand;
   scale: number;
@@ -2784,15 +3287,16 @@ function BandView({
   onSelect: (id: string, additive: boolean) => void;
   onBeginEdit: (id: string) => void;
   onCommitText: (id: string, value: string) => void;
-  onBeginDrag: (element: ReportElement, event: React.MouseEvent) => void;
-  onResizeStart: (element: ReportElement, handle: ResizeHandle, event: React.MouseEvent) => void;
+  onBeginDrag: (element: ReportElement, event: React.PointerEvent) => void;
+  onResizeStart: (element: ReportElement, handle: ResizeHandle, event: React.PointerEvent) => void;
   onDropElement: (
-    type: "text" | "rect" | "line" | "image" | "field" | "table" | "form",
+    type: PaletteType,
     x: number,
     y: number,
     bandId: string,
   ) => void;
   data?: Record<string, unknown>;
+  barcodeMissing: string;
 }) {
   return (
     <div
@@ -2803,11 +3307,11 @@ function BandView({
       }}
       onDrop={(event) => {
         const type = event.dataTransfer.getData("text/rs-element");
-        if (!["text", "rect", "line", "image", "field", "table", "form"].includes(type)) return;
+        if (!PALETTE_TYPES.includes(type as PaletteType)) return;
         event.preventDefault();
         const rect = event.currentTarget.getBoundingClientRect();
         onDropElement(
-          type as "text" | "rect" | "line" | "image" | "field" | "table" | "form",
+          type as PaletteType,
           Math.max(0, Math.round((event.clientX - rect.left) / scale)),
           Math.max(0, Math.round((event.clientY - rect.top) / scale)),
           band.id,
@@ -2818,7 +3322,7 @@ function BandView({
         <div
           key={element.id}
           data-id={element.id}
-          className={`rs-el rs-el-${element.type} ${selectedIds.includes(element.id) ? "on" : ""} ${selectedIds.includes(element.id) && !editingId ? "movable" : ""}`}
+          className={`rs-el rs-el-${element.type} ${element.props.outputHidden === true ? "rs-output-hidden" : ""} ${selectedIds.includes(element.id) ? "on" : ""} ${selectedIds.includes(element.id) && !editingId && element.props.layoutLocked !== true ? "movable" : ""}`}
           style={{
             left: element.box.x * scale,
             top: element.box.y * scale,
@@ -2864,8 +3368,9 @@ function BandView({
                 : undefined,
             whiteSpace: element.props.wrap === false ? "pre" : "pre-wrap",
           }}
-          onMouseDown={(event) => {
+          onPointerDown={(event) => {
             event.stopPropagation();
+            if (!event.isPrimary || event.button !== 0) return;
             onSelect(element.id, event.shiftKey || event.metaKey || event.ctrlKey);
             if (element.type === "text" && event.detail === 2) return;
             onBeginDrag(element, event);
@@ -2959,13 +3464,16 @@ function BandView({
           {element.type === "chart" && (
             <span className="rs-image-stub">{String(element.props.title ?? "Chart")}</span>
           )}
+          {element.type === "barcode" && <Suspense fallback={null}>
+            <BarcodePreview element={element} data={data} missing={barcodeMissing} />
+          </Suspense>}
           {element.type === "pageNumber" && <span>Page 1 of 1</span>}
             </>
           )}
         </div>
       ))}
       {band.elements
-        .filter((element) => selectedIds.length === 1 && element.id === selectedId)
+        .filter((element) => selectedIds.length === 1 && element.id === selectedId && element.props.layoutLocked !== true)
         .map((element) => (
           <div
             key={`handles-${element.id}`}
@@ -2982,7 +3490,7 @@ function BandView({
                 key={handle}
                 className={`rs-handle ${handle}`}
                 data-handle={handle}
-                onMouseDown={(event) => onResizeStart(element, handle, event)}
+                onPointerDown={(event) => onResizeStart(element, handle, event)}
               />
             ))}
           </div>

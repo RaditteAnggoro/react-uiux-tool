@@ -1,4 +1,5 @@
 /** Source-preserving .yrf scalar patch: only approved spans may change. */
+import { hasYrfScriptField, isYrfLocalField, yrfObjectCapability } from "./capabilities.js";
 
 export type YrfPathSegment = string | number;
 
@@ -83,7 +84,12 @@ function decodeEscape(text: string, index: number): { value: string; next: numbe
 export interface ContainerSpan { path: string; start: number; end: number; kind: "array" | "object" }
 export interface BooleanSpan { path: string; start: number; end: number; value: boolean }
 
-export function collectScalarSpans(text: string, containers?: ContainerSpan[], booleans?: BooleanSpan[]): ScalarSpan[] {
+export function collectScalarSpans(
+  text: string,
+  containers?: ContainerSpan[],
+  booleans?: BooleanSpan[],
+  rejectDuplicateKeys = false,
+): ScalarSpan[] {
   const spans: ScalarSpan[] = [];
   let index = 0;
 
@@ -120,10 +126,12 @@ export function collectScalarSpans(text: string, containers?: ContainerSpan[], b
   };
 
   const parseValue = (segments: YrfPathSegment[]): void => {
+    if (rejectDuplicateKeys && segments.length > 128) throw new Error("JSON exceeds the nesting limit");
     skipWhitespace();
     const char = text[index];
     if (char === "{") {
       const containerStart = index;
+      const keys = rejectDuplicateKeys ? new Set<string>() : undefined;
       index += 1;
       for (;;) {
         skipWhitespace();
@@ -134,6 +142,11 @@ export function collectScalarSpans(text: string, containers?: ContainerSpan[], b
         }
         if (text[index] !== '"') throw new Error("Expected object key");
         const key = readString().value;
+        if (keys?.has(key)) {
+          const location = segments.reduce<string>((path, part) => path + `[${JSON.stringify(part)}]`, "$");
+          throw new Error(`Duplicate JSON key ${JSON.stringify(key)} at ${location}`);
+        }
+        keys?.add(key);
         skipWhitespace();
         if (text[index] !== ":") throw new Error("Expected ':'");
         index += 1;
@@ -197,6 +210,12 @@ export function collectScalarSpans(text: string, containers?: ContainerSpan[], b
   return spans;
 }
 
+export function parseUniqueJson(text: string): unknown {
+  const value: unknown = JSON.parse(text);
+  collectScalarSpans(text, undefined, undefined, true);
+  return value;
+}
+
 export function collectStringSpans(text: string): StringSpan[] {
   return collectScalarSpans(text).filter((span): span is StringSpan => span.kind === "string");
 }
@@ -226,7 +245,7 @@ export function removeYrfObject(text: string, objectPath: string): string {
   const objects = valueAtPath(document, parseYrfPath(match[1]!));
   if (!Array.isArray(objects) || Number(match[2]) >= objects.length) throw new Error("Object not found");
   const object = objects[Number(match[2])];
-  if (!object || typeof object !== "object" || Array.isArray(object) || !["label", "textbox", "line", "shape", "image"].includes(String((object as Record<string, unknown>).type)) || Object.keys(object).some((key) => /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key))) throw new Error("Unsupported or scripted objects cannot be removed visually");
+  if (!object || typeof object !== "object" || Array.isArray(object) || yrfObjectCapability(String((object as Record<string, unknown>).type)) !== "visual" || Object.keys(object).some(hasYrfScriptField)) throw new Error("Unsupported or scripted objects cannot be removed visually");
   const spans: ContainerSpan[] = [];
   collectScalarSpans(text, spans);
   const arraySpans = spans.filter((span) => span.path === match[1] && span.kind === "array");
@@ -253,7 +272,7 @@ export function moveYrfObject(
   const objects = valueAtPath(document, parseYrfPath(match[1]!));
   if (!Array.isArray(objects) || Number(match[2]) >= objects.length) throw new Error("Object not found");
   for (const object of objects) {
-    if (!object || typeof object !== "object" || Array.isArray(object) || typeof (object as Record<string, unknown>).type !== "string" || Object.keys(object).some((key) => /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(key))) throw new Error("Scripted objects cannot be reordered visually");
+    if (!object || typeof object !== "object" || Array.isArray(object) || yrfObjectCapability(String((object as Record<string, unknown>).type)) !== "visual" || Object.keys(object).some(hasYrfScriptField)) throw new Error("Unsupported or scripted objects cannot be reordered visually");
   }
   const index = Number(match[2]);
   const target = position === "front" ? objects.length - 1 : position === "back" ? 0 : position === "up" ? index - 1 : index + 1;
@@ -282,7 +301,10 @@ export function setYrfObjectScalar(text: string, objectPath: string, field: stri
   const document = JSON.parse(text.replace(/^\uFEFF/, ""));
   const object = valueAtPath(document, parseYrfPath(objectPath));
   if (!object || typeof object !== "object" || Array.isArray(object)) throw new Error("Object not found");
-  if (!["label", "textbox", "line", "shape", "image"].includes(String((object as Record<string, unknown>).type)) || /scripts?$|^(?:onformat|onbeforeprint|onafterprint|beforeprint|afterprint)$/i.test(field)) throw new Error("Unsupported object or script property cannot be edited visually");
+  const properties = object as Record<string, unknown>;
+  const kind = String(properties.type);
+  const localField = isYrfLocalField(kind, field, properties[field], properties.formatType) && isYrfLocalField(kind, field, value, properties.formatType);
+  if ((!localField && yrfObjectCapability(kind) !== "visual") || hasYrfScriptField(field) || Object.keys(object).some(hasYrfScriptField)) throw new Error("Unsupported object or script property cannot be edited visually");
   const imageData = field === "data" && (object as Record<string, unknown>).type === "image" && typeof value === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 2_796_230;
   if (typeof value === "string" && value.length > 4000 && !imageData) throw new Error("Invalid property value");
   const booleanSpans: BooleanSpan[] = [];
@@ -348,7 +370,8 @@ export function applyYrfChanges(text: string, changes: YrfChange[]): YrfPatchRes
   const applied: YrfPatchChange[] = [];
   const touched = new Set<string>();
   let document: unknown;
-  try { document = JSON.parse(text.replace(/^\uFEFF/, "")); } catch { return { ok: false, error: "Invalid YRF JSON" }; }
+  try { document = parseUniqueJson(text.replace(/^\uFEFF/, "")); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Invalid YRF JSON" }; }
 
   for (const change of changes) {
     const invalid = validateChange(change);
@@ -358,7 +381,9 @@ export function applyYrfChanges(text: string, changes: YrfChange[]): YrfPatchRes
     const object = valueAtPath(document, parseYrfPath(change.objectPath));
     if (!object || typeof object !== "object" || Array.isArray(object)) return { ok: false, error: "Report object not found" };
     const kind = (object as Record<string, unknown>).type;
-    if (typeof kind !== "string" || !["label", "textbox", "line", "shape", "image"].includes(kind)) return { ok: false, error: "Unsupported report object type" };
+    const localField = typeof kind === "string" && isYrfLocalField(kind, change.field, change.expected) && isYrfLocalField(kind, change.field, change.value);
+    if (typeof kind !== "string" || (!localField && yrfObjectCapability(kind) !== "visual")) return { ok: false, error: "Unsupported report object type" };
+    if (Object.keys(object).some(hasYrfScriptField)) return { ok: false, error: "Scripted objects cannot be edited visually" };
     if (change.field === "caption" && kind !== "label" && kind !== "textbox") return { ok: false, error: "Caption is only editable for label or textbox objects" };
     if ((change.field === "text" || change.field === "dataField") && kind !== "textbox") return { ok: false, error: "Text and data fields are only editable for textbox objects" };
     if (["x1", "y1", "x2", "y2"].includes(change.field) && kind !== "line") return { ok: false, error: "Endpoints are only editable for line objects" };

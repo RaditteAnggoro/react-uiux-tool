@@ -26,6 +26,7 @@ export type ElementType =
   | "spacer"
   | "pageNumber"
   | "chart"
+  | "barcode"
   | "crosstab";
 
 export interface ReportBox {
@@ -55,6 +56,7 @@ export interface ReportBand {
   repeat?: boolean;
   groupBy?: string;
   pageBreakBefore?: boolean;
+  keepWithNext?: boolean;
   elements: ReportElement[];
 }
 
@@ -94,6 +96,8 @@ export interface ReportProvenance {
   importWarnings?: string[];
 }
 
+export type LinkedReportArguments = Record<string, string | number | boolean>;
+
 export interface ReportDocumentV1 {
   kind: typeof RDM_KIND;
   schemaVersion: typeof RDM_SCHEMA_VERSION;
@@ -105,6 +109,8 @@ export interface ReportDocumentV1 {
   styleTokens: Record<string, unknown>;
   datasets: ReportDataset[];
   parameters: ReportParameter[];
+  linkedReports?: string[];
+  linkedReportArguments?: Record<string, LinkedReportArguments>;
   bands: ReportBand[];
   exportProfiles: Record<string, unknown>;
   provenance?: ReportProvenance;
@@ -173,6 +179,7 @@ export const ELEMENT_TYPES: readonly ElementType[] = [
   "spacer",
   "pageNumber",
   "chart",
+  "barcode",
   "crosstab",
 ];
 
@@ -202,6 +209,8 @@ export const DOCUMENT_KEYS: readonly string[] = [
   "styleTokens",
   "datasets",
   "parameters",
+  "linkedReports",
+  "linkedReportArguments",
   "bands",
   "exportProfiles",
   "provenance",
@@ -216,6 +225,7 @@ export const BAND_KEYS: readonly string[] = [
   "repeat",
   "groupBy",
   "pageBreakBefore",
+  "keepWithNext",
   "elements",
 ];
 

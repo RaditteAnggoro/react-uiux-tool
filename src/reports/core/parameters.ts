@@ -1,4 +1,4 @@
-import type { ReportDocumentV1, ReportIssue } from "./types.js";
+import type { ReportDocumentV1, ReportIssue, ReportParameter } from "./types.js";
 
 /** Values supplied under `parameters` take precedence over report defaults. */
 export function withParameterDefaults(document: ReportDocumentV1, data: Record<string, unknown> = {}): Record<string, unknown> {
@@ -7,6 +7,15 @@ export function withParameterDefaults(document: ReportDocumentV1, data: Record<s
   if (supplied !== undefined && (!supplied || typeof supplied !== "object" || Array.isArray(supplied))) return data;
   const defaults = Object.fromEntries(document.parameters.filter((parameter) => parameter.defaultValue !== undefined).map((parameter) => [parameter.id, parameter.defaultValue]));
   return { ...data, parameters: { ...defaults, ...(supplied as Record<string, unknown> | undefined) } };
+}
+
+export function reportParameterValueValid(type: ReportParameter["type"], value: unknown): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "number") return (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value));
+  const date = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : null;
+  return !!date && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 /** Report missing and incorrectly typed parameters without exposing their values. */
@@ -22,8 +31,7 @@ export function parameterWarnings(document: ReportDocumentV1, data: Record<strin
     const missing = value === undefined || value === null || value === "";
     const path = `$.parameters.${parameter.id}`;
     if (missing) return parameter.required ? [{ code: "REQUIRED_PARAMETER", path, message: `Required parameter ${parameter.id} has no value`, severity: "warning" }] : [];
-    const date = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : null;
-    const valid = parameter.type === "string" ? typeof value === "string" : parameter.type === "boolean" ? typeof value === "boolean" : parameter.type === "number" ? (typeof value === "number" && Number.isFinite(value)) || (typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value)) : !!date && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    const valid = reportParameterValueValid(parameter.type, value);
     return valid ? [] : [{ code: "INVALID_PARAMETER_TYPE", path, message: `Parameter ${parameter.id} must be ${parameter.type}`, severity: "warning" }];
   });
 }

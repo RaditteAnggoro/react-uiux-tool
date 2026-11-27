@@ -3,12 +3,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export interface BuildResult {
-  ok: boolean;
-  code: number | null;
-  output: string;
-  durationMs: number;
-}
+import type { BuildResult } from "../engine/types.js";
+export type { BuildResult } from "../engine/types.js";
 
 const MAX_OUTPUT = 20_000;
 const TIMEOUT_MS = 120_000;

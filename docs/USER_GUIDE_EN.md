@@ -119,10 +119,10 @@ flowchart TB
    be writable. A folder picker is an OS bridge, not unrestricted browser access.
 3. Enter a folder name. Check the full target path. Spaces/Unicode are supported;
    path separators, reserved device names, and unsafe names are rejected.
-4. Choose **Vite + React + TypeScript** and a local template: Blank, Business
-   Dashboard, Data Entry/Form, or Operations Console. Next.js creation is unavailable.
+4. Choose **Vite React** or **Next.js App Router**, then select Blank, Business
+   Dashboard, Data Entry/Form, or Operations Console.
 5. Choose plain CSS, CSS Modules, or Tailwind v4. The Tailwind starter includes its
-   Vite plugin/dependencies; no component library is silently downloaded.
+   setup and dependencies for the selected framework.
 6. Review files, dependencies, and commands. Choose **Create files only**.
 
 Creation does not run `npm install`, a lifecycle script, or a development command.
@@ -165,10 +165,12 @@ The preview uses Vite in memory and does not run target scripts/configuration. I
 not reproduce custom plugins, SSR, environment injection, or dynamic aliases.
 Selecting a discovered component opens it in a separate Design view; direct
 local context providers used by imported hooks are found when the relationship is
-clear. Nested/dynamic/router/auth provider setup is not guaranteed. Next App/Pages
-projects are statically inspected; there is no Next
-runtime preview. MUI/Ant Design and Storybook detection do not imply editable custom
-controls or executable story import. See [compatibility](../COMPATIBILITY_MATRIX.md).
+clear. Nested, dynamic, router, and authentication providers have limited coverage.
+For Next App/Pages, choose **Start Next.js runtime** after installing the project's
+dependencies. The loopback runtime reads saved source. Open a dynamic route by
+entering a concrete path such as `/products/DEMO-01`. **Show route source** reads
+its indexed file while the runtime keeps running. Visual source selection and draft
+overlays are available in the Vite editor. See [compatibility](../COMPATIBILITY_MATRIX.md).
 
 ![Read-only project analysis before preview execution](screenshots/analysis.png)
 
@@ -182,6 +184,17 @@ from the left tree. Selecting a component row switches the canvas from the app e
 to that component's isolated design, which lets menu-driven screens be inspected
 without logging in. Use **App preview** to return to the normal entry. Elements with
 unavailable mapping remain uneditable.
+
+In isolated Design, open **Component boards**, select a literal Storybook preset
+or enter props as JSON, then choose **Apply props**. You can name and save a board
+for reuse in the same browser tab, or transfer presets with **Import boards** and
+**Export boards**. Use **Declared props** for strings, numbers, booleans, and choices.
+**Use default** removes that value from the preset. Use **Preview provider** to choose up to four local exported providers
+with no required props besides children. Add them in order from outermost to innermost.
+To edit a global CSS custom property,
+open **Style → Global design token**, choose a unique top-level `:root` declaration,
+and review the diff before applying. **Open saved source in VS Code** in Code mode
+opens the underlying file at the shown line.
 
 Design intercepts application events; runtime interaction is limited to the controlled
 preview. Isolated component Design redirects fetch/XMLHttpRequest service calls to an
@@ -396,7 +409,7 @@ Think of Report Studio as a worktable: the **folder** stores your work, a **temp
 ### Start from Home or a project
 
 1. Choose **Report Studio** on Home.
-2. Choose **Choose report folder** and select a destination. If the picker cannot open, paste the full path as a fallback. Check the displayed folder before creating a file.
+2. Choose **Create new report**, then **Choose report folder** to change the destination. To open an existing report, choose **Open existing report** to launch the folder dialog. You can also enter the full path in **Report folder** and select **Use folder**.
 3. Choose a template and **Create report**, or select an existing report from the list. Use the back button to return to the project when you entered from it.
 
 Opening a project does not make every report format editable. `.report.json` is the native report source; an exported PDF is not automatically an editable design file.
@@ -423,13 +436,14 @@ To add a native object, click its palette button or drag it onto an eligible ban
 
 - **Save** stores the `.report.json` source. Apply or discard unapplied Code changes first. Read the Save / Discard / Cancel choice when switching reports.
 - **Preview** shows native renderer output with sample data. **Export** generates PDF, HTML, CSV, XLSX, or DOCX; read the warnings before using the result.
-- Formats differ: CSV contains table data; XLSX uses the first table; PDF does not draw charts/crosstabs yet. PDF uses limited fonts and can replace unsupported characters with `?`; a warning identifies replacement in rendered text. Check the PDF and totals yourself.
+- CSV contains table data. XLSX creates a worksheet for each table. PDF draws charts and crosstabs within their frames. PDF uses limited fonts and warns when unsupported characters become `?` or content may be clipped.
 - Export does not prove print parity across formats. Review the source and test the output with the intended data and application before using it for business decisions.
 
 ### Open an existing `.yrf`
 
 1. Choose **YRF (.yrf)** and select a folder, then choose a file from the list; manual path entry is a fallback.
-2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect properties; **Code** initially displays source read-only. Choose **Edit source** to edit a draft, then **Apply & save copy** to write a copy. Inspection does not execute vendor scripts.
+2. **Design (approximate)** shows the structure and approximate positions. Select an object to inspect its properties. In **Code**, choose **Edit source** to edit a draft and **Save** to validate and write it to the opened original. **Save copy** keeps the original and uses the same script
+and vendor object validation. Inspection leaves vendor scripts inactive.
 3. Edit supported values and choose **Save**. It updates the opened original in place with a hash conflict check and no backup; structural and source changes use the same path. Creating a new `.yrf` requires acknowledging that output is experimental.
 
 When objects are added or removed, **Preview change** compares the affected bands'
@@ -442,8 +456,8 @@ If the folder is missing, choose it again; if a file changed outside the app, re
 
 Use fictional data while learning. Button names follow the selected application language.
 
-1. On Home choose **Report Studio**, then **Choose report folder** and select a
-   practice folder. If the OS picker fails, enter the folder path at the bottom and
+1. On Home choose **Report Studio**, then **Create new report**. Use **Choose report
+   folder** to select a practice folder. If the OS picker fails, enter the path in **Report folder** and
    press **Use folder**. Check the displayed path.
 2. Choose the **Invoice / factur** template, a **Style family** such as Corporate
    Navy, and a **File name**, then press **Create report**. The native source is a
@@ -571,11 +585,11 @@ or query builder in this screen. Page size, orientation, and margins are in Page
 - Select a format and click **Export**. PDF is useful for page review, HTML for a
   browser, CSV for table data, XLSX for spreadsheets, and DOCX for documents. An
   exported file is output, not the `.report.json` design source.
-- Read warnings: PDF does not yet draw charts or crosstab cells; unsupported font
-  characters may become `?`. CSV drops layout; XLSX and DOCX export only the
-  first table, and DOCX drops charts/crosstabs. Check amounts, rows, appearance,
-  and printing yourself before business use. **Formats** shows capabilities by
-  extension; not every format can be edited.
+- Read warnings before downloading. PDF may clip content or replace unsupported
+  characters with `?`. CSV drops layout. XLSX writes a worksheet for each table
+  and DOCX writes the report title and tables. Check amounts, rows, appearance,
+  and printing yourself before business use. See the [compatibility matrix](../COMPATIBILITY_MATRIX.md)
+  for capabilities by format.
 
 ### Practice opening and changing a `.yrf`
 
@@ -591,8 +605,8 @@ the selected object's band, or drag a button onto a band on the page. Select an
 object to edit its text, position, size, binding, and existing string/number/boolean properties
 on the right. Use **Code** for structured values. Select **Save** when finished;
 new objects and their appearance still need verification in WaiReport.
-To delete an object, select it and click **Remove object**; the change is written
-when you save the report to a copy.
+To delete an object, select it and click **Remove object**. The change is written
+when you save the report.
 
 1. Click **YRF (.yrf)**, choose a folder, and select a file from the list; or enter
    its path and click **Open .yrf**. **Design (approximate)** shows estimated
@@ -600,17 +614,18 @@ when you save the report to a copy.
 2. Select an object in Structure or on the canvas. Supported objects can be dragged
    and resized with eight handles; **Caption** and `left`, `top`, `width`, `height`
    remain available for exact values. Geometry uses unverified raw vendor units, not
-   mm. Unsupported objects stay read-only.
-3. Click **Save**. The original
-   is not overwritten and later edits continue from the saved copy. **Code** shows the
-   source inertly; **Edit source** enables a validated draft and **Apply & save copy**
-   writes a new sibling copy. Unapplied drafts trigger Save / Discard / Cancel when
-   leaving or opening another file.
+   mm. Use **Design page** when the file contains more than one explicit page.
+   Known format-specific objects expose their supported fields in Properties. Explicit Code 128
+   and QR values update their symbols. A subreport pointing to a sibling `.yrf` has an
+   **Open linked YRF** button.
+3. Click **Save** to write the opened original after a hash check. In **Code**,
+   locate the selected object's JSON entry. Choose **Edit source** to stage text edits and **Save** to validate and write
+   them. Unsaved drafts trigger Save / Discard / Cancel when leaving or opening
+   another file.
 4. **+ New .yrf** creates an experimental file from a template after explicit
-   acknowledgement. Creation and geometry changes have not been validated with the
-   WaiReport renderer; open a copy in the vendor application and compare data and
-   printout before use. Native visual drag/resize and all native properties are not
-   automatically available for `.yrf`.
+   acknowledgement. The **Vehicle collateral form** is available as native and experimental
+   YRF. Generated YRF stores simple data field names and leaves vendor data sources out.
+   The local design uses raw geometry and does not reproduce vendor print pagination.
 
 ### When the result is unexpected
 
@@ -629,15 +644,16 @@ when you save the report to a copy.
 
 Open **Report Studio** from Home. Use **Report guide** in either the native or YRF workspace for a short walkthrough. Expand or collapse Structure bands with their arrows; selecting an object opens its band.
 
-1. Choose **Open existing report** to pick a report folder and scan it locally, or
-   **Create new report** to pick a folder and template. The project root is never used
-   implicitly; the chosen folder is shown in the workspace footer.
+1. Choose **Open existing report** to pick a report folder and scan it locally.
+   With **Create new report**, use **Choose report folder** to change the destination
+   before picking a template. The active location is shown in the editable **Report folder** field.
 2. The sidebar lists native `.report.json` and `.yrf` files with a small type badge and
    relative path. Search and Refresh are local; scanning never writes files.
 3. The workspace has **Design**, **Code** and **Preview**. Design supports move, eight
    resize handles, 1 mm snapping (toggle or hold Alt), palette drag/click for text, field,
    table, form, image, box and line, plus properties, parameters and repeat bands.
-4. **Code** edits the native JSON draft; invalid JSON never replaces the last valid draft.
+4. Open **Code** with an object selected to jump to its JSON entry. The native
+   editor preserves the last valid draft when JSON fails validation.
    Save is explicit and refuses while a Code draft is not applied.
 5. The inspector starts with a formatting bar: style presets (Body/Heading/List/Caption),
    bold, italic, underline, strikethrough, bullets/numbers, justify, line height, letter
@@ -664,8 +680,8 @@ Open **Report Studio** from Home. Use **Report guide** in either the native or Y
    validated. **Save** replaces the opened file for supported caption, data-field and
    geometry, structural and Code changes with no backup; unsupported vendor edits are refused.
    Creation stays experimental and labelled.
-7. **Formats** lists which actions each format supports; unsupported formats such as
-   JRXML, RDL and `.rpt` are never converted silently.
+7. Review any export warning before confirming a download. The
+   [compatibility matrix](../COMPATIBILITY_MATRIX.md) lists supported actions by format.
 
 In the React editor, the **Style** tab offers a **Formatting palette** for a style
 property such as font, color, border, underline, wrapping or rotation. Enter a CSS
@@ -699,12 +715,42 @@ In React, **Components** contains components and elements that can be added to a
 supported container. In Report Studio, palette and object lists are grouped; expand
 or collapse them to reduce scrolling. Select an object on the page or in the left
 structure to view its properties. **Remove object** removes it from the draft;
-**Exit** prompts when changes are unsaved. For `.yrf`, Design is approximate and
-Save copy creates a separate file; verify it in WaiReport before business use.
+**Exit** prompts when changes are unsaved. For `.yrf`, use **Undo** or **Redo** in
+Design to reverse draft actions such as a property edit or a drag. **Save** writes
+the opened original after a hash check. Verify the output in WaiReport before
+business use.
 
 ### YRF: image and static layouts
 
-In YRF Design, select a band and choose **Image**; select the image and use **Import image** (PNG, JPEG or WebP, up to 2 MiB). Resize on the canvas or in Geometry, then **Save copy**. **Table layout** and **Form layout** insert separate editable objects; they are static starting layouts, not automatic repeating tables. Verify the saved copy in WaiReport.
+In YRF Design, select a band and choose **Image**. Select the image and use
+**Import image** (PNG, JPEG or WebP, up to 2 MiB). Resize on the canvas or in
+Geometry, then choose **Save**. **Table layout** and **Form layout** insert
+separate editable objects as static starting layouts. Verify the result in WaiReport.
+
+### Review changes and export warnings
+
+In React Studio, choose a change in **Changes** to open its source. For an
+ambiguous canvas selection, use **Possible source locations** to see matching
+source. When closing a tab, **Save file draft** and **Discard file draft** apply
+to the source file shown in the dialog. Tabs backed by that file share its draft.
+**Close tab, keep draft** leaves it in **Changes**. The project-wide
+**Discard Draft** command also removes the recovery snapshot.
+During Save, the tool can rebase a draft over an external edit when the changed spans
+are separated by at least one line break. A conflict keeps the draft available.
+
+In Report Studio, choose a format and select **Export**. If the format changes
+the output, review its warnings before choosing **Download anyway** or
+**Change format**. Exports without warnings download immediately.
+
+In **Sample data**, enable **Review and map CSV or TSV columns** or choose **Import XLSX**.
+Choose a worksheet when available, check the preview, and map headers to field names.
+Set field types and required values in **Dataset field rules**. Validation errors
+preserve the previous sample. In **Insert sections**, import PDF pages as images or
+use experimental editable text import for left-to-right text, including rotation. **Linked subreports**
+reads the latest saved native report along a relative path in the original report
+folder. Use **Linked report parameters** to set literal values for that link.
+Choose **Add barcode** for Code 128 or QR Code. Select an object to lock its
+contents and style in Design or hide it from Preview and export.
 
 ### Native table columns and rows
 
@@ -736,7 +782,8 @@ Select a row to select the object, search by type or ID, or use the arrows to mo
 forward/backward or to the front/back. These changes remain a draft until **Save**;
 Undo/Redo also work. Ordering across different sections is not supported here.
 
-For a native image, choose **Image fit → cover** to fill its frame. Adjust **Image position horizontal (%)** and **Image position vertical (%)** from 0 to 100 to choose which part remains visible; 50 centers the image. The same position is used in Design, Preview and PDF. This is frame positioning, not a freeform crop rectangle.
+For a native image, choose **Image fit → cover** to fill its frame. Adjust **Image position horizontal (%)** and **Image position vertical (%)** from 0 to 100 to choose which part remains visible; 50 centers the image. The same position is used in Design, Preview and PDF. For an embedded asset, use **Crop image** to choose the rectangle to keep.
+**Apply crop** changes the draft asset and preserves the frame. Use **Undo** to restore it.
 
 ### Report parameters
 

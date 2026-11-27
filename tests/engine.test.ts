@@ -22,6 +22,7 @@ import {
   hashSource,
   SourceDraft,
 } from "../src/engine/index.js";
+import { createCssTokenPatch } from "../src/engine/patches.js";
 import type { PatchRequest, JsxElement } from "../src/engine/types.js";
 async function fixture(source: string, extra: Record<string, string> = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-engine-"));
@@ -58,6 +59,36 @@ function req(
   };
 }
 const SIMPLE = `import React, { useState } from 'react';\r\n// Keep my comment exactly.\r\nexport default function App() {\r\n  const [count, setCount] = useState(0);\r\n  const submit = () => setCount(count + 1);\r\n  return <main><button className="primary" onClick={submit}>Search</button><p>Result</p></main>;\r\n}\r\n`;
+test("a reviewed root token preserves comments, BOM and CRLF and cannot bypass stale or duplicate CSS", async () => {
+  const file = "src/theme.css";
+  const original = "\uFEFF/* --accent: red; keep this comment */\r\n:root { --accent: /* base */ #aabbcc  ; }\r\n";
+  const nextValue = "var(--main-color, #112233)";
+  const expected = original.replace("#aabbcc", nextValue);
+  const { root, cleanup } = await fixture(SIMPLE, { [file]: original });
+  try {
+    const patch = await createCssTokenPatch(root, file, "--accent", hashSource(original), nextValue);
+    assert.equal(patch.after, expected);
+    assert.equal(await readFile(path.join(root, file), "utf8"), original);
+    assert.match(patch.diff, /var\(--main-color, #112233\)/);
+    const repeated = path.join(root, "src/other.css");
+    await writeFile(repeated, '@media (prefers-color-scheme: dark) { :root { --accent: red; } }');
+    await assert.rejects(applyPatch(root, patch, true), /exactly one/);
+    await rm(repeated);
+    await writeFile(path.join(root, file), original + "/* external */\r\n");
+    await assert.rejects(applyPatch(root, patch, true), /Source conflict/);
+    await writeFile(path.join(root, file), original);
+    for (const bad of ["url(https://example.test)", "red; --other: blue", "var(--accent"]) {
+      await assert.rejects(createCssTokenPatch(root, file, "--accent", hashSource(original), bad), /supported value/);
+    }
+    const checkpoint = await applyPatch(root, patch, true);
+    assert.equal(await readFile(path.join(root, file), "utf8"), expected);
+    await undoPatch(root, checkpoint);
+    assert.equal(await readFile(path.join(root, file), "utf8"), original);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("source draft combines edits without writes, supports history and rejects external conflicts", async () => {
   const f = await fixture(SIMPLE);
   try {
@@ -73,20 +104,25 @@ test("source draft combines edits without writes, supports history and rejects e
     await draft.undo();
     assert.equal(draft.canRedo, true);
     await draft.redo();
-    await writeFile(file, SIMPLE + "// external\r\n");
+    const conflict = SIMPLE.replace(">Search<", ">External<");
+    await writeFile(file, conflict);
     await assert.rejects(draft.commit(true), /conflict/i);
     assert.equal(draft.count, 2);
-    assert.equal(await readFile(file, "utf8"), SIMPLE + "// external\r\n");
-    await writeFile(file, SIMPLE);
-    await draft.commit(true);
+    assert.equal(await readFile(file, "utf8"), conflict);
+    const external = "// external before\r\n" + SIMPLE;
+    await writeFile(file, external);
+    const [checkpoint] = await draft.commit(true);
     const saved = await readFile(file, "utf8");
     assert.match(saved, /First/);
     assert.match(saved, /marginLeft/);
     assert.match(saved, /onClick=\{submit\}/);
+    assert.ok(saved.startsWith("// external before\r\n"));
+    await undoPatch(f.root, checkpoint!);
+    assert.equal(await readFile(file, "utf8"), external);
   } finally { await f.cleanup(); }
 });
 test("multi-file draft checks all files before saving and preserves cross-file history", async () => {
-  const f = await fixture(SIMPLE, { "src/Other.tsx": "function Other(){return <section>Other</section>}" });
+  const f = await fixture(SIMPLE, { "src/Other.tsx": "function Other(){return <section>Other</section>}\n" });
   try {
     const appPath = path.join(f.root, "src/App.tsx");
     const otherPath = path.join(f.root, "src/Other.tsx");
@@ -98,15 +134,47 @@ test("multi-file draft checks all files before saving and preserves cross-file h
     assert.equal(await readFile(appPath, "utf8"), SIMPLE);
     await draft.undo();
     await draft.redo();
-    await writeFile(otherPath, originalOther + " // external");
+    await writeFile(otherPath, originalOther.replace(">Other<", ">External<"));
     await assert.rejects(draft.commit(true), /conflict/i);
     assert.equal(await readFile(appPath, "utf8"), SIMPLE);
-    await writeFile(otherPath, originalOther);
+    await writeFile(otherPath, originalOther + " // external");
     assert.equal((await draft.commit(true)).length, 2);
     assert.match(await readFile(appPath, "utf8"), /Changed/);
     assert.match(await readFile(otherPath, "utf8"), /Updated/);
+    assert.match(await readFile(otherPath, "utf8"), /\/\/ external/);
   } finally { await f.cleanup(); }
 });
+test("a failed second write restores the earlier file without overwriting a newer editor's bytes", async () => {
+  const other = "function Other(){return <section>Other</section>}\r\n";
+  const f = await fixture(SIMPLE, { "src/Other.tsx": other });
+  try {
+    const appPath = path.join(f.root, "src/App.tsx");
+    const otherPath = path.join(f.root, "src/Other.tsx");
+    const external = other.replace(">Other<", ">External<");
+    let reachedFirstWrite = false;
+    let failSecond = true;
+    const draft = new SourceDraft(f.root, async (root, patch, approved) => {
+      if (patch.file === "src/Other.tsx" && failSecond) {
+        assert.match(await readFile(appPath, "utf8"), /First draft/);
+        reachedFirstWrite = true;
+        await writeFile(otherPath, external);
+      }
+      return applyPatch(root, patch, approved);
+    });
+    let report = await draft.analysis();
+    report = (await draft.edit(req(report.elements.find(e => e.tag === "button")!, "text", "First draft"))).analysis;
+    await draft.edit(req(report.elements.find(e => e.tag === "section")!, "text", "Second draft"));
+    await assert.rejects(draft.commit(true), /^Error: Source conflict: external edits detected; no file was changed\.$/);
+    assert.ok(reachedFirstWrite);
+    assert.equal(await readFile(appPath, "utf8"), SIMPLE);
+    assert.equal(await readFile(otherPath, "utf8"), external);
+    assert.equal(draft.count, 2);
+    await writeFile(otherPath, other);
+    failSecond = false;
+    assert.equal((await draft.commit(true)).length, 2);
+  } finally { await f.cleanup(); }
+});
+
 test("analyzer is read-only and detects concrete evidence, handlers, aliases and dynamic editability", async () => {
   const f = await fixture(
     SIMPLE.replace(
@@ -214,9 +282,12 @@ test("reject traversal, secrets and symlink escapes at source boundary", async (
       path.join(outside, "secret.tsx"),
       'const token = "private"',
     );
+    const windows = process.platform === "win32";
+    const escapedFile = windows ? "src/linked/secret.tsx" : "src/escape.tsx";
     await symlink(
-      path.join(outside, "secret.tsx"),
-      path.join(f.root, "src/escape.tsx"),
+      windows ? outside : path.join(outside, "secret.tsx"),
+      path.join(f.root, windows ? "src/linked" : escapedFile),
+      windows ? "junction" : "file",
     );
     await writeFile(path.join(f.root, ".env"), "SECRET=true");
     await assert.rejects(readProjectFile(f.root, "../secret.tsx"), /Invalid/);
@@ -224,10 +295,10 @@ test("reject traversal, secrets and symlink escapes at source boundary", async (
       readProjectFile(f.root, path.join(outside, "secret.tsx")),
       /Invalid/,
     );
-    await assert.rejects(readProjectFile(f.root, "src/escape.tsx"), /Symlink/);
+    await assert.rejects(readProjectFile(f.root, escapedFile), /Symlink/);
     await assert.rejects(readProjectFile(f.root, ".env"), /Unsupported|Secret/);
     const report = await analyzeProject(f.root);
-    assert.ok(!report.files.some((f) => f.file.endsWith("escape.tsx")));
+    assert.ok(!report.files.some((f) => f.file === escapedFile));
   } finally {
     await f.cleanup();
     await rm(outside, { recursive: true, force: true });

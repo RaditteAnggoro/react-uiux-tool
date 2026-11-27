@@ -1,3 +1,5 @@
+import { parseUniqueJson } from "../formats/yrf/patch.js";
+import { barcodeValueValid } from "./barcode-value.js";
 import {
   BAND_KEYS,
   BAND_KINDS,
@@ -26,6 +28,7 @@ import type {
   ReportPage,
 } from "./types.js";
 import { createPage, printableArea } from "./geometry.js";
+import { MAX_LINKED_REPORTS, validLinkedReportArguments, validSubreportPath } from "./subreport.js";
 
 const DOCUMENT_KEY_SET = new Set(DOCUMENT_KEYS);
 const BAND_KEY_SET = new Set(BAND_KEYS);
@@ -282,6 +285,27 @@ function validateElement(
   }
   const box = validateBox(element.box, `${path}.box`, collector, page);
   const props = requireObject(element.props, `${path}.props`, collector) ?? {};
+  if (type === "barcode") {
+    if (props.barcodeKind !== "code128" && props.barcodeKind !== "qrcode") {
+      collector.error("INVALID_BARCODE", `${path}.props.barcodeKind`, "Choose Code 128 or QR Code");
+    } else {
+      const binding = isPlainObject(element.bindings) && element.bindings.path;
+      if (!(typeof binding === "string" && binding) && !barcodeValueValid(props.barcodeKind, props.barcodeValue)) {
+        collector.error("INVALID_BARCODE", `${path}.props.barcodeValue`, "Code 128 requires 1–80 printable ASCII characters. QR Code requires 1–256 UTF-8 bytes.");
+      }
+    }
+  }
+  if (props.layoutLocked !== undefined && typeof props.layoutLocked !== "boolean") {
+    collector.error("INVALID_BOOLEAN", `${path}.props.layoutLocked`, "Position lock must be true or false");
+  }
+  if (props.deleteLocked !== undefined && typeof props.deleteLocked !== "boolean") {
+    collector.error("INVALID_BOOLEAN", `${path}.props.deleteLocked`, "Deletion lock must be true or false");
+  }
+  for (const key of ["contentLocked", "outputHidden"] as const) {
+    if (props[key] !== undefined && typeof props[key] !== "boolean") {
+      collector.error("INVALID_BOOLEAN", `${path}.props.${key}`, "Expected a boolean");
+    }
+  }
   if (type === "table" && props.headerRows !== undefined && !tableHeaderMatrix(props.headerRows, Array.isArray(props.columns) ? props.columns.length : 0)) {
     collector.error("INVALID_TABLE_HEADER", `${path}.props.headerRows`, "Header spans must form a complete, non-overlapping grid matching the columns");
   }
@@ -373,6 +397,9 @@ function validateBand(
   if (band.pageBreakBefore !== undefined && typeof band.pageBreakBefore !== "boolean") {
     collector.error("INVALID_BOOLEAN", `${path}.pageBreakBefore`, "Expected a boolean");
   }
+  if (band.keepWithNext !== undefined && typeof band.keepWithNext !== "boolean") {
+    collector.error("INVALID_BOOLEAN", `${path}.keepWithNext`, "Expected a boolean");
+  }
   if (!Array.isArray(band.elements)) {
     collector.error(
       "INVALID_ARRAY",
@@ -410,6 +437,7 @@ function validateBand(
   if (typeof band.groupBy === "string") result.groupBy = band.groupBy;
   if (typeof band.label === "string" && band.label.trim()) result.label = band.label;
   if (band.pageBreakBefore === true) result.pageBreakBefore = true;
+  if (band.keepWithNext === true) result.keepWithNext = true;
   return result;
 }
 
@@ -682,6 +710,16 @@ export function validateReportDocument(
   const page = validatePage(input.page, "$.page", collector);
   requireObject(input.styleTokens, "$.styleTokens", collector);
   requireObject(input.exportProfiles, "$.exportProfiles", collector);
+  if (input.linkedReports !== undefined && (!Array.isArray(input.linkedReports) ||
+      input.linkedReports.length > MAX_LINKED_REPORTS || new Set(input.linkedReports).size !== input.linkedReports.length ||
+      input.linkedReports.some(link => typeof link !== "string" || !validSubreportPath(link)))) {
+    collector.error("INVALID_LINKED_REPORTS", "$.linkedReports", "Choose up to eight distinct relative .report.json paths.");
+  }
+  if (input.linkedReportArguments !== undefined && (!isPlainObject(input.linkedReportArguments) ||
+      Object.entries(input.linkedReportArguments).some(([link, values]) =>
+        !Array.isArray(input.linkedReports) || !input.linkedReports.includes(link) || !validLinkedReportArguments(values)))) {
+    collector.error("INVALID_LINKED_ARGUMENTS", "$.linkedReportArguments", "Use literal parameters for reports that are linked.");
+  }
   const datasets = validateDatasets(input.datasets, "$.datasets", collector, limits);
   const parameters = validateParameters(
     input.parameters,
@@ -831,7 +869,7 @@ export function parseReport(
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseUniqueJson(text);
   } catch (error) {
     return {
       ok: false,

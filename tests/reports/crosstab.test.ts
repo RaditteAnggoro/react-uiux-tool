@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createDefaultDocument,
+  exportReport,
   renderReportHtml,
   validateReportDocument,
 } from "../../src/reports/index.js";
@@ -69,4 +70,22 @@ test("crosstab supports count aggregation and escapes labels", () => {
   });
   assert.match(html, /2,00/);
   assert.ok(!html.includes("<b>Cabang</b>"));
+});
+
+test("HTML and PDF agree on repeated crosstab values and decimal totals", () => {
+  const document = matrixDocument();
+  const data = { matrix: [
+    { branch: "Bogor", month: "Jan", amount: "100.25" },
+    { branch: "Bogor", month: "Jan", amount: "10.75" },
+    { branch: "Depok", month: "Feb", amount: "9.05" },
+  ] };
+  const outputs = [
+    renderReportHtml(document, { data }),
+    Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1"),
+  ];
+  for (const output of outputs) {
+    assert.match(output, /Bogor/);
+    assert.match(output, /111,00/);
+    assert.match(output, /120,05/);
+  }
 });

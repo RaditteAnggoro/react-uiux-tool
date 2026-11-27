@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./studio-fixture.js";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,12 +8,6 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem("uiux-language", "en");
     localStorage.setItem("uiux-theme", "light");
   });
-});
-test.afterEach(async ({ request }) => {
-  const session = await (await request.get("/api/session")).json();
-  const headers = { "x-uiux-token": session.token, origin: new URL(test.info().project.use.baseURL as string).origin };
-  const status = await (await request.get("/api/status", { headers })).json();
-  if (status.projectRoot) await request.post("/api/draft/discard", { headers, data: { expectedProject: status.projectRoot } });
 });
 const fixtureRoots = new Set<string>();
 test.afterAll(async () => {
@@ -28,18 +22,12 @@ async function commitDraft(page: import("@playwright/test").Page) {
     .locator(".canvas-actions")
     .first()
     .getByRole("button", { name: "Save", exact: true });
-  try {
-    await expect(save).toBeVisible({ timeout: 4_000 });
-    await expect(save).toBeEnabled({ timeout: 15_000 });
-  } catch {
-    return;
-  }
-  await save.click({ force: true });
-  await expect(page.getByText(/Draft saved to source/))
-    .toBeVisible({ timeout: 15_000 })
-    .catch(async () => {
-      await expect(page.locator('.studio-header[data-draft-count="0"]')).toHaveCount(1);
-    });
+  await expect(save).toBeVisible({ timeout: 8_000 });
+  await expect(save).toBeEnabled({ timeout: 15_000 });
+  const committed = page.waitForResponse(response => response.url().endsWith("/api/draft/commit"));
+  await save.click();
+  expect((await committed).ok()).toBe(true);
+  await expect(page.locator('.studio-header[data-draft-count="0"]')).toHaveCount(1);
 }
 
 async function openFixtureProject(page: import("@playwright/test").Page) {
@@ -60,7 +48,7 @@ async function stopPreview(page: import("@playwright/test").Page) {
 }
 
 test("Pages search and reusable Components search remain independent", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await openFixtureProject(page);
   await page.getByLabel("Search source files…").fill("not-a-component-name");
   await page.locator(".icon-rail").getByRole("button", { name: "Components" }).click();
@@ -75,7 +63,7 @@ test("Pages search and reusable Components search remain independent", async ({ 
 });
 
 test("expanding a source file keeps the editor in Design mode", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await openFixtureProject(page);
   await page.getByLabel("Search source files…").fill("App.tsx");
   const file = page.locator(".source-explorer .file-row", { hasText: "App.tsx" });
@@ -124,7 +112,7 @@ test("palette warns without a selected container and copies a button without an 
 });
 
 test("copies a button into another selected section", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const root = await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).click();
@@ -139,7 +127,7 @@ test("copies a button into another selected section", async ({ page }) => {
 });
 
 test("basic button reuses a consistent existing project class", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
@@ -199,7 +187,7 @@ test("ambiguous repeated component labels do not delete a guessed instance", asy
   await cp(path.resolve("fixtures/demo"), root, { recursive: true });
   await writeFile(path.join(root, "src/SharedButton.jsx"), 'export default function SharedButton({label}){return <button>{label}</button>}');
   const sourcePath = path.join(root, "src/App.tsx");
-  const original = 'import SharedButton from "./SharedButton";export default function App(){return <main><SharedButton label="Same"/><SharedButton label="Same"/></main>}';
+  const original = 'import SharedButton from "./SharedButton";\nexport default function App(){return <main>\n<SharedButton label="Same"/>\n<SharedButton label="Same"/>\n</main>}';
   await writeFile(sourcePath, original);
   await page.goto("/");
   await page.getByRole("button", { name: /Open Existing Project/ }).click();
@@ -213,6 +201,10 @@ test("ambiguous repeated component labels do not delete a guessed instance", asy
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Same" }).first().click();
   await expect(page.getByRole("status").filter({ hasText: "could not be determined" })).toBeVisible();
+  const choices = page.getByRole("list", { name: "Possible source locations" }).getByRole("button");
+  await expect(choices).toHaveCount(2);
+  await choices.nth(1).press("Enter");
+  await expect(page.locator(".source-file-label")).toContainText("src/App.tsx · line 4");
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(await readFile(sourcePath, "utf8")).toBe(original);
   await explorer.locator(".explorer-name", { hasText: /^main$/ }).first().locator("..").click();
@@ -222,8 +214,7 @@ test("ambiguous repeated component labels do not delete a guessed instance", asy
 });
 
 test("basic paragraph starts with editable visible text", async ({ page }) => {
-  test.skip(!!process.env.CI, "Paragraph draft text sync is flaky under CI; tracked as a known limitation.");
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const root = await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
@@ -236,6 +227,7 @@ test("basic paragraph starts with editable visible text", async ({ page }) => {
   await frame.getByText("New paragraph").click();
   await page.getByLabel("Text content").fill("Edited paragraph");
   await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Text content" }) }).getByRole("button", { name: "Apply to draft" }).click();
+  await expect(page.locator('.studio-header[data-draft-count="1"]')).toHaveCount(1);
   await expect(frame.getByText("Edited paragraph")).toBeVisible();
   await commitDraft(page);
   expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toContain("Edited paragraph");
@@ -271,7 +263,7 @@ test("declared untyped JavaScript prop can be added and edited in the inspector"
   await stopPreview(page);
 });
 
-test.fixme("insert then edit props and event keeps the inserted element", async ({ page }) => {
+test("insert then edit props and event keeps the inserted element", async ({ page }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-sequential-ui-"));
   fixtureRoots.add(root);
   await cp(path.resolve("fixtures/demo"), root, { recursive: true });
@@ -298,11 +290,13 @@ test.fixme("insert then edit props and event keeps the inserted element", async 
   await page.getByLabel("Literal value").fill("Example");
   await expect(page.getByLabel("Property name")).toHaveValue("title");
   await page.locator(".inspector-section").filter({ has: page.getByRole("heading", { name: "Props" }) }).getByRole("button", { name: "Apply to draft" }).click();
+  await expect(page.locator('.studio-header[data-draft-count="2"]')).toHaveCount(1);
   expect(await readFile(sourcePath, "utf8")).toBe(original);
   await page.getByRole("tab", { name: "Events" }).click();
   await page.getByLabel("Event property").selectOption("onClick");
   await page.getByLabel("Existing function").fill("handleSearch");
   await page.getByRole("button", { name: "Add event to draft" }).click();
+  await expect(page.locator('.studio-header[data-draft-count="3"]')).toHaveCount(1);
   expect(await readFile(sourcePath, "utf8")).toBe(original);
   await page.locator(".canvas-actions").getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => readFile(sourcePath, "utf8")).toContain("onClick={handleSearch}");
@@ -313,8 +307,73 @@ test.fixme("insert then edit props and event keeps the inserted element", async 
   await stopPreview(page);
 });
 
+test("Build runs the project script and Save & Build writes the draft before building", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-build-journey-"));
+  fixtureRoots.add(root);
+  await cp(path.resolve("fixtures/demo"), root, { recursive: true });
+  const manifestPath = path.join(root, "package.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.scripts.build = "node build.cjs";
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await writeFile(path.join(root, "build.cjs"), "const fs = require('node:fs'); fs.copyFileSync('src/App.tsx', 'build-result.txt');");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  const toolbar = page.locator(".canvas-actions");
+  const more = toolbar.locator(".canvas-more > summary");
+  await more.press("Enter");
+  await expect(toolbar.locator(".canvas-more")).toHaveAttribute("open", "");
+  await page.keyboard.press("Escape");
+  await expect(toolbar.locator(".canvas-more")).not.toHaveAttribute("open");
+  await expect(more).toBeFocused();
+  await more.click();
+  await page.locator(".studio-header").click({ position: { x: 4, y: 4 } });
+  await expect(toolbar.locator(".canvas-more")).not.toHaveAttribute("open");
+  const runBuild = async (label: string) => {
+    const endpoint = label === "Build" ? "/api/build" : "/api/draft/commit";
+    const response = page.waitForResponse(response => response.url().endsWith(endpoint));
+    await toolbar.getByRole("button", { name: label, exact: true }).click();
+    expect((await response).request().method()).toBe("POST");
+    expect((await response).ok()).toBe(true);
+    await expect(toolbar.getByRole("status")).toContainText("Build succeeded");
+  };
+  await runBuild("Build");
+  const source = path.join(root, "src/App.tsx");
+  const output = path.join(root, "build-result.txt");
+  const original = await readFile(source, "utf8");
+  expect(await readFile(output, "utf8")).toBe(original);
+
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.getByLabel("Property name", { exact: true }).fill("title");
+  await page.getByLabel("Literal value").fill("Saved before build");
+  await page.locator(".inspector-section").filter({ has: page.getByLabel("Property name", { exact: true }) }).getByRole("button", { name: "Apply to draft" }).click();
+  expect(await readFile(source, "utf8")).toBe(original);
+  await writeFile(source, original + "\n// External note kept by rebase\n");
+  await runBuild("Save & Build");
+  expect(await readFile(output, "utf8")).toContain('title="Saved before build"');
+  expect(await readFile(output, "utf8")).toContain("// External note kept by rebase");
+  expect(await readFile(output, "utf8")).toBe(await readFile(source, "utf8"));
+
+  const built = await readFile(output, "utf8");
+  await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
+  await page.getByLabel("Property name", { exact: true }).fill("title");
+  await page.getByLabel("Literal value").fill("Blocked draft");
+  await page.locator(".inspector-section").filter({ has: page.getByLabel("Property name", { exact: true }) }).getByRole("button", { name: "Apply to draft" }).click();
+  await writeFile(source, built.replace("Saved before build", "External conflict"));
+  const rejected = page.waitForResponse(response => response.url().endsWith("/api/draft/commit"));
+  await toolbar.getByRole("button", { name: "Save & Build", exact: true }).click();
+  expect((await rejected).status()).toBe(409);
+  await expect(toolbar.getByRole("status")).toContainText("Build stopped because the draft could not be saved.");
+  expect(await readFile(output, "utf8")).toBe(built);
+  await expect(page.locator(".studio-header")).toHaveAttribute("data-draft-count", "1");
+  await stopPreview(page);
+});
+
 test("draft discard and conflict preserve the source and pending edit", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const root = await openFixtureProject(page);
   const sourcePath = path.join(root, "src/App.tsx");
   const original = await readFile(sourcePath, "utf8");
@@ -322,18 +381,22 @@ test("draft discard and conflict preserve the source and pending edit", async ({
   await frame.locator("section.welcome-section").click({ position: { x: 5, y: 5 } });
   await page.getByLabel("Property name", { exact: true }).fill("title");
   await page.getByLabel("Literal value").fill("Draft title");
+  const staged = page.waitForResponse(response => response.url().endsWith("/api/draft/edit"));
   await page.locator(".inspector-section").filter({ has: page.getByLabel("Property name", { exact: true }) }).getByRole("button", { name: "Apply to draft" }).click();
+  const { patch } = await (await staged).json();
   await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1, { timeout: 15_000 });
   expect(await readFile(sourcePath, "utf8")).toBe(original);
-  await writeFile(sourcePath, original + "\n// external edit\n");
+  expect(patch.after).toContain('title="Draft title"');
+  const external = patch.after.replace('title="Draft title"', 'title="External title"');
+  await writeFile(sourcePath, external);
   await page.locator(".canvas-actions").getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Source conflict/i).first()).toBeVisible();
-  expect(await readFile(sourcePath, "utf8")).toBe(original + "\n// external edit\n");
+  expect(await readFile(sourcePath, "utf8")).toBe(external);
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".canvas-more > summary").click();
   await page.locator(".canvas-more-menu").getByRole("button", { name: "Discard Draft" }).click();
   await expect(page.locator('.studio-header[data-draft-count="0"]')).toHaveCount(1);
-  expect(await readFile(sourcePath, "utf8")).toBe(original + "\n// external edit\n");
+  expect(await readFile(sourcePath, "utf8")).toBe(external);
   await stopPreview(page);
 });
 
@@ -443,6 +506,37 @@ test("non UTF-8 warnings are grouped with each skipped file still available", as
   await page.getByText(/Files skipped because they are not valid UTF-8/).click();
   await expect(page.locator("details").filter({ hasText: "Files skipped because they are not valid UTF-8" }).getByText(/src\/legacy.css.*not valid UTF-8/)).toBeVisible();
   expect(await readFile(file)).toEqual(bytes);
+});
+
+test("a global CSS token can be reviewed, saved and undone without rewriting its consumers", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const root = await openFixtureProject(page);
+  const css = path.join(root, "src/styles.css");
+  const original = await readFile(css, "utf8");
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  const target = frame.getByRole("button", { name: "Create project" });
+  await target.click();
+  const loadedAt = await target.evaluate(() => performance.timeOrigin);
+  const search = frame.getByRole("textbox", { name: "Search projects" });
+  await search.evaluate(input => { (input as HTMLInputElement).value = "Keep this input"; });
+  await page.getByRole("tab", { name: "Style" }).click();
+  await page.getByText("Global design token", { exact: true }).click();
+  await page.getByLabel("CSS token name").selectOption("--brand-color");
+  await page.getByLabel("New token value").fill("#123456");
+  await page.getByRole("button", { name: "Review token change" }).click();
+  const review = page.getByRole("dialog", { name: "Review Changes" });
+  await expect(review.locator(".diff-code")).toContainText("--brand-color: #123456");
+  expect(await readFile(css, "utf8")).toBe(original);
+  await review.getByRole("button", { name: "Apply Reviewed" }).click();
+  await expect.poll(() => readFile(css, "utf8")).toBe(original.replace("--brand-color: #635bff", "--brand-color: #123456"));
+  await expect(target).toHaveCSS("background-color", "rgb(18, 52, 86)");
+  expect(await target.evaluate(() => performance.timeOrigin)).toBe(loadedAt);
+  await page.locator(".canvas-actions").getByRole("button", { name: "Undo", exact: true }).click();
+  await expect.poll(() => readFile(css, "utf8")).toBe(original);
+  await expect(target).toHaveCSS("background-color", "rgb(99, 91, 255)");
+  expect(await target.evaluate(() => performance.timeOrigin)).toBe(loadedAt);
+  await expect(search).toHaveValue("Keep this input");
+  await stopPreview(page);
 });
 
 test("code search handles Ctrl+F and navigates source matches", async ({ page }) => {
@@ -859,10 +953,17 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
     frame.getByRole("button", { name: "Create workspace" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Undo last source edit" }).click();
+  const undo = page.locator(".canvas-actions").getByRole("button", { name: "Undo", exact: true });
+  const redo = page.locator(".canvas-actions").getByRole("button", { name: "Redo", exact: true });
+  await expect(page.locator(".canvas-actions").getByRole("button", { name: /^Undo/ })).toHaveCount(1);
+  await undo.click();
   await expect(
     frame.getByRole("button", { name: "Create project" }),
   ).toBeVisible();
+  await redo.press("Enter");
+  await expect(frame.getByRole("button", { name: "Create workspace" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(frame.getByRole("button", { name: "Create project" })).toBeVisible();
 
   await frame.getByText("Website redesign").click();
   await expect(page.getByText(/Repeated JSX shares one source/i)).toBeVisible();
@@ -873,6 +974,47 @@ test("fixture project supports direct mapped edit, undo and locked repeated JSX"
       .filter({ has: page.getByRole("heading", { name: "Text content" }) })
       .getByRole("button", { name: "Apply to draft" }),
   ).toBeDisabled();
+});
+
+test("React Design cancels a touch move and stages only a completed gesture", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const root = await openFixtureProject(page);
+  const file = path.join(root, "src", "App.tsx");
+  const before = await readFile(file, "utf8");
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  const target = frame.getByRole("button", { name: "Create project" });
+  await expect(target).toBeVisible();
+  const studio = page.locator(".studio-header");
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+    await target.scrollIntoViewIfNeeded();
+    const box = (await target.boundingBox())!;
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd" | "touchCancel", dx = 0) =>
+      client.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchStart" || type === "touchMove" ? [{ x: x + dx, y }] : [] });
+    await touch("touchStart");
+    await touch("touchEnd");
+    await expect(target).toHaveCSS("touch-action", "none");
+    const initial = await target.evaluate(element => (element as HTMLElement).style.transform);
+    await touch("touchStart");
+    await touch("touchMove", 32);
+    await expect.poll(() => target.evaluate(element => (element as HTMLElement).style.transform)).toContain("translate(");
+    await touch("touchCancel");
+    await expect.poll(() => target.evaluate(element => (element as HTMLElement).style.transform)).toBe(initial);
+    await expect(studio).toHaveAttribute("data-draft-count", "0");
+
+    await touch("touchStart");
+    await touch("touchMove", 45);
+    await touch("touchEnd");
+    await expect(studio).toHaveAttribute("data-draft-count", "1");
+    expect(await readFile(file, "utf8")).toBe(before);
+  } finally {
+    await client.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await client.detach();
+  }
+  await commitDraft(page);
+  expect(await readFile(file, "utf8")).not.toBe(before);
 });
 
 test("language, theme and creation plan are functional", async ({
@@ -1064,7 +1206,7 @@ test("selecting a menu component opens an isolated provider-backed design instea
   }
 });
 
-test("Next.js remains static-inspection only and does not offer runtime approval", async ({
+test("Next.js without installed dependencies offers static inspection", async ({
   page,
 }) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-next-static-"));
@@ -1089,7 +1231,7 @@ test("Next.js remains static-inspection only and does not offer runtime approval
       page
         .locator(".analysis-columns")
         .getByText(
-          "Next.js runtime preview is unavailable in this release. Static inspection remains available.",
+          "The project's local Next.js CLI is missing. Install its dependencies before starting the runtime.",
         ),
     ).toBeVisible();
     await expect(
@@ -1177,6 +1319,8 @@ test("React block selection selects every intersecting element", async ({ page }
             bubbles: true,
             cancelable: true,
             pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true,
             button: 0,
             buttons: type === "pointerup" ? 0 : 1,
             clientX: x,
@@ -1211,6 +1355,10 @@ test("a draft survives a page reload and can still be saved", async ({ page }) =
   await startPreview.click();
   await expect(page.locator(".studio-header")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1, { timeout: 30_000 });
+  await expect(frame.getByText("New paragraph", { exact: true })).toBeVisible();
+  await page.locator(".canvas-actions").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator('.studio-header[data-draft-count="0"]')).toHaveCount(1);
+  expect(await readFile(path.join(root, "src/App.tsx"), "utf8")).toMatch(/<p[^>]*>New paragraph<\/p>/);
   await stopPreview(page);
 });
 
@@ -1371,7 +1519,7 @@ test("group move applies to every selected generic object, not only form fields"
     path.join(root, "src/App.jsx"),
     'export default function App(){return <main><section><button>Alpha</button><button>Beta</button></section></main>}',
   );
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: /Open Existing Project/ }).click();
   await page.getByLabel("Project directory").fill(root);
   await page.getByRole("button", { name: "Analyze project" }).click();
@@ -1409,7 +1557,7 @@ test("group move applies to every selected generic object, not only form fields"
 });
 
 
-test("page tabs keep at most three routes and switch without duplicates", async ({ page }) => {
+test("page tabs keep at most three routes and closing one sharing a file keeps the draft", async ({ page }) => {
   test.setTimeout(120_000);
   const root = await mkdtemp(path.join(os.tmpdir(), "uiux-tabs-"));
   fixtureRoots.add(root);
@@ -1446,21 +1594,28 @@ test("page tabs keep at most three routes and switch without duplicates", async 
   await expect(page.locator(".page-tab.active .tab-dirty")).toBeVisible();
   await page.locator(".page-tab.active .tab-close").click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("button", { name: "Discard & close" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Discard & close" }).click();
+  await expect(dialog.getByRole("list", { name: "Affected source file" })).toContainText("src/App.tsx");
+  await dialog.getByRole("button", { name: "Close tab, keep draft" }).click();
   await expect(page.locator(".page-tab")).toHaveCount(2);
+  await expect(page.locator('.studio-header[data-draft-count="1"]')).toHaveCount(1);
   await stopPreview(page);
 });
 
 
 test("Code mode reveals the selected object source and console keeps errors", async ({ page }) => {
-  await page.goto("/");
+  await page.setViewportSize({ width: 1440, height: 650 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const root = await openFixtureProject(page);
   const frame = page.frameLocator('iframe[title="Live preview"]');
   await frame.getByRole("button", { name: "Create project" }).click();
   await page.getByRole("tab", { name: "Code" }).click();
   await expect(page.locator(".source-file-label")).toContainText("src/App.tsx");
-  await expect(page.locator(".source-file-label")).toContainText("line");
+  await expect(page.locator(".source-file-label")).toContainText("line 22");
+  const sourceAnchor = page.locator("[data-source-anchor]");
+  await expect(sourceAnchor).toContainText('title="Create project"');
+  await expect(sourceAnchor).toBeInViewport();
+  await expect(page.getByRole("link", { name: "Open saved source in VS Code" }))
+    .toHaveAttribute("href", /^vscode:\/\/file\/.*\/src\/App\.tsx:\d+:1$/);
   await page.getByRole("tab", { name: "Design" }).click();
   await page.getByLabel("Text content").fill("Conflict text");
   await page
@@ -1470,11 +1625,92 @@ test("Code mode reveals the selected object source and console keeps errors", as
     .click();
   await expect(page.locator('.studio-header:not([data-draft-count="0"])')).toHaveCount(1);
   const sourcePath = path.join(root, "src/App.tsx");
-  await writeFile(sourcePath, (await readFile(sourcePath, "utf8")) + "\n// external edit\n");
+  await writeFile(sourcePath, (await readFile(sourcePath, "utf8")).replace(">Create project</button>", ">External text</button>"));
   await page.locator(".canvas-actions").first().getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/Source conflict/i).first()).toBeVisible({ timeout: 10_000 });
   await page.locator(".bottom-toolbar").getByRole("tab", { name: /Console/ }).click();
   await expect(page.locator(".console-output")).toContainText("[error]");
+});
+
+test("component tabs synchronize preview and retain both files when a draft tab closes", async ({ page }) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "uiux-component-tabs-"));
+  fixtureRoots.add(root);
+  await mkdir(path.join(root, "src/views"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "component-tabs", scripts: { dev: "vite" }, dependencies: { react: "19", "react-dom": "19", vite: "8" } }));
+  await writeFile(path.join(root, "index.html"), '<div id="root"></div><script type="module" src="/src/App.jsx"></script>');
+  await writeFile(path.join(root, "src/App.jsx"), 'import React from "react"; import {createRoot} from "react-dom/client"; createRoot(document.getElementById("root")).render(<h1>Fixture Home</h1>);');
+  const files = ["Alpha", "Beta"].map(name => path.join(root, "src/views", `${name}.jsx`));
+  const originals = ["Alpha", "Beta"].map(name => `import React from "react"; export default function ${name}(){return <main><h1>Fixture ${name}</h1></main>}`);
+  for (const [index, file] of files.entries()) await writeFile(file, originals[index]!);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: /Open Existing Project/ }).click();
+  await page.getByLabel("Project directory").fill(root);
+  await page.getByRole("button", { name: "Analyze project" }).click();
+  await page.getByRole("button", { name: "Start local preview" }).click();
+  const frame = page.frameLocator('iframe[title="Live preview"]');
+  const tabs = page.locator(".page-tabs");
+  const view = (name: string) => frame.getByRole("heading", { name: `Fixture ${name}` });
+  await expect(view("Home")).toBeVisible();
+  const tree = page.locator(".source-explorer");
+  await tree.locator('[data-tree-key="dir:src"]').click();
+  await tree.locator('[data-tree-key="dir:src/views"]').click();
+  for (const name of ["Alpha", "Beta"]) {
+    await tree.locator(`[data-tree-key="file:src/views/${name}.jsx"]`).click();
+    await tree.locator(".component-row", { hasText: name }).click();
+    await expect(view(name)).toBeVisible();
+    await view(name).click();
+    const field = page.getByLabel("Property name", { exact: true });
+    await field.fill("title");
+    await page.getByLabel("Literal value").fill(`Draft ${name}`);
+    await page.locator(".inspector-section").filter({ has: field }).getByRole("button", { name: "Apply to draft" }).click();
+    await expect(tabs.getByRole("tab", { name: new RegExp(name) }).locator(".tab-dirty")).toBeVisible();
+  }
+  await tabs.getByRole("tab", { name: "Home" }).click();
+  await expect(view("Home")).toBeVisible();
+  await tabs.getByRole("tab", { name: /Alpha/ }).click();
+  await expect(view("Alpha")).toBeVisible();
+  await expect(page.locator(".selected-heading")).toContainText("h1");
+  let release = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let requestStarted = () => {};
+  const started = new Promise<void>(resolve => { requestStarted = resolve; });
+  await page.route("**/api/preview/design", async route => {
+    requestStarted();
+    await held;
+    await route.continue();
+  }, { times: 1 });
+  try {
+    await tabs.getByRole("tab", { name: /Beta/ }).click();
+    await started;
+    await tabs.getByRole("tab", { name: /Alpha/ }).click();
+  } finally {
+    release();
+  }
+  await expect(view("Alpha")).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: /Alpha/ })).toHaveAttribute("aria-selected", "true");
+  await tabs.getByRole("button", { name: "Close Alpha" }).click();
+  const dialog = page.getByRole("dialog");
+  const affected = dialog.getByRole("list", { name: "Affected source file" });
+  await expect(affected).toContainText("src/views/Alpha.jsx");
+  await expect(affected).not.toContainText("src/views/Beta.jsx");
+  await dialog.getByRole("button", { name: "Close tab, keep draft" }).click();
+  await expect(view("Beta")).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: /Alpha/ })).toHaveCount(0);
+  await expect(page.locator('.studio-header[data-draft-count="2"]')).toHaveCount(1);
+  expect(await Promise.all(files.map(file => readFile(file, "utf8")))).toEqual(originals);
+  await page.getByRole("tab", { name: /^Changes/ }).click();
+  const draftEntry = page.getByRole("list", { name: "Changes" }).getByRole("button", { name: /src\/views\/Alpha\.jsx/ });
+  await draftEntry.press("Enter");
+  await expect(page.locator(".canvas-source pre")).toContainText("Draft Alpha");
+  await tabs.getByRole("button", { name: "Close Beta" }).click();
+  await dialog.getByRole("button", { name: "Save file draft & close tab" }).click();
+  await expect(tabs.getByRole("tab", { name: /Beta/ })).toHaveCount(0);
+  await expect(page.locator('.studio-header[data-draft-count="1"]')).toHaveCount(1);
+  expect(await readFile(files[0]!, "utf8")).toBe(originals[0]);
+  expect(await readFile(files[1]!, "utf8")).toContain('title="Draft Beta"');
+  await page.getByRole("tab", { name: /^Changes/ }).click();
+  await expect(page.getByRole("list", { name: "Changes" })).toContainText("src/views/Alpha.jsx");
+  await stopPreview(page);
 });
 
 

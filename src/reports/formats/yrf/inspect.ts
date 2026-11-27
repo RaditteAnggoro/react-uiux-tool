@@ -2,6 +2,9 @@
  * Read-only WaiReport (.yrf) inspection. No vendor code, no script execution,
  * no conversion into the native report model.
  */
+import { yrfRichText, type YrfRichTextRun } from "./rich-text.js";
+import { hasYrfLocalLayout, hasYrfScriptField, isYrfLocalField, yrfBarcodeKind, yrfObjectCapability } from "./capabilities.js";
+
 export const YRF_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_OBJECTS = 5000;
 
@@ -15,11 +18,16 @@ export interface YrfObjectRef {
   textField: "caption" | "text" | null;
   dataField: string | null;
   imageData: string | null;
+  localPreviewText: string | null;
+  localRichText: YrfRichTextRun[] | null;
+  barcodeKind: ReturnType<typeof yrfBarcodeKind>;
+  localFields: Record<string, string>;
   editableCaption: boolean;
   editableGeometry: boolean;
   lineEndpoints: { x1: number; y1: number; x2: number; y2: number } | null;
   hasScript: boolean;
   supported: boolean;
+  capability: ReturnType<typeof yrfObjectCapability>;
 }
 
 export interface YrfBandRef {
@@ -49,22 +57,26 @@ export interface YrfInspection {
   sha256: string;
 }
 
+export function yrfPageLayout(inspection: YrfInspection, pageIndex: number) {
+  const bands = [
+    ...(pageIndex === 0 ? inspection.sideBands.filter(band => band.path === "layout.reportHeader") : []),
+    ...(inspection.pages[pageIndex]?.bands ?? []),
+    ...(pageIndex === Math.max(0, inspection.pages.length - 1) ? inspection.sideBands.filter(band => band.path === "layout.reportFooter") : []),
+  ];
+  let height = 0;
+  const placements = bands.map(band => {
+    const top = height;
+    height += Math.max(0, band.height);
+    return { band, top };
+  });
+  return { placements, overflow: inspection.paper.height > 0 && height > inspection.paper.height };
+}
+
 export interface YrfInspectResult {
   ok: boolean;
   inspection: YrfInspection | null;
   error?: string;
 }
-
-const SUPPORTED_KINDS = new Set(["label", "textbox", "line", "shape", "image"]);
-const KNOWN_SCRIPT_FIELDS = [
-  "script",
-  "vbScript",
-  "beforePrint",
-  "afterPrint",
-  "OnFormat",
-  "OnBeforePrint",
-  "OnAfterPrint",
-];
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -83,13 +95,14 @@ function stringValue(value: unknown): string | null {
 function inspectObject(
   value: unknown,
   path: string,
-  warnings: Set<string>,
   unknownKinds: Set<string>,
 ): YrfObjectRef | null {
   const object = record(value);
   if (!object) return null;
   const kind = stringValue(object.type) ?? "unknown";
-  if (!SUPPORTED_KINDS.has(kind)) unknownKinds.add(kind);
+  const capability = yrfObjectCapability(kind);
+  const hasScript = Object.keys(object).some(hasYrfScriptField);
+  if (capability !== "visual") unknownKinds.add(kind);
   const textField = (kind === "label" || kind === "textbox") && typeof object.caption === "string"
     ? "caption" : kind === "textbox" && typeof object.text === "string" ? "text" : null;
   const caption = textField ? stringValue(object[textField]) : null;
@@ -110,11 +123,20 @@ function inspectObject(
     textField,
     dataField: kind === "textbox" ? stringValue(object.dataField) : null,
     imageData: kind === "image" && typeof object.data === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(object.data) ? object.data : null,
+    localPreviewText: kind === "rtf" && isYrfLocalField(kind, "data", object.data) ? stringValue(object.data)
+      : kind === "subReport" ? stringValue(object.reportName) : null,
+    localRichText: kind === "rtf" && typeof object.data === "string" ? yrfRichText(object.data) : null,
+    barcodeKind: yrfBarcodeKind(kind, object.formatType),
+    localFields: Object.fromEntries(Object.entries(object).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string" && isYrfLocalField(kind, entry[0], entry[1], object.formatType))),
     editableCaption: textField !== null,
-    editableGeometry: !!lineEndpoints || ["left", "top", "width", "height"].every((key) => typeof object[key] === "number" && Number.isFinite(object[key])),
+    editableGeometry: !hasScript && (capability === "visual"
+      ? !!lineEndpoints || ["left", "top", "width", "height"].every((key) => typeof object[key] === "number" && Number.isFinite(object[key]))
+      : hasYrfLocalLayout(kind) && ["left", "top", "width", "height"].every((key) => isYrfLocalField(kind, key, object[key]))),
     lineEndpoints,
-    hasScript: Object.keys(object).some((key) => KNOWN_SCRIPT_FIELDS.includes(key)),
-    supported: SUPPORTED_KINDS.has(kind),
+    hasScript,
+    supported: capability === "visual" && !hasScript,
+    capability,
   };
 }
 
@@ -132,7 +154,7 @@ function inspectBand(
   list.forEach((entry, index) => {
     counter.count += 1;
     if (counter.count > MAX_OBJECTS) return;
-    const object = inspectObject(entry, `${path}.objects[${index}]`, warnings, unknownKinds);
+    const object = inspectObject(entry, `${path}.objects[${index}]`, unknownKinds);
     if (object) objects.push(object);
   });
   if (counter.count > MAX_OBJECTS) warnings.add(`Object limit (${MAX_OBJECTS}) reached; tree truncated.`);
@@ -155,7 +177,7 @@ function collectScriptFields(root: Record<string, unknown>): string[] {
     const object = record(value);
     if (!object) return;
     for (const [key, entry] of Object.entries(object)) {
-      if (KNOWN_SCRIPT_FIELDS.includes(key)) {
+      if (hasYrfScriptField(key)) {
         if (typeof entry === "string" && entry.trim() !== "") found.push(`${path}.${key}`);
         else if (record(entry)) {
           const nonEmpty = Object.values(entry as Record<string, unknown>).some(
@@ -177,7 +199,7 @@ export function parseYrfDocument(text: string): { ok: boolean; value?: unknown; 
   }
   if (text.includes("\u0000")) return { ok: false, error: "Binary content is not a .yrf JSON document" };
   try {
-    return { ok: true, value: JSON.parse(text) };
+    return { ok: true, value: JSON.parse(text.replace(/^\uFEFF/, "")) };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Invalid JSON" };
   }
@@ -241,9 +263,9 @@ export function inspectYrf(text: string, sha256 = ""): YrfInspectResult {
   warnings.add(
     "Geometry units are unverified: identical A4 paper types use different numeric extents.",
   );
-  warnings.add("Editing existing label captions, textbox text/data fields and supported geometry always saves a copy.");
+  warnings.add("Save updates the opened file after a hash check. Save copy keeps the original.");
   if (unknownKinds.size > 0) {
-    warnings.add(`Unknown object kinds are shown inertly: ${[...unknownKinds].join(", ")}.`);
+    warnings.add(`Format-specific objects use the local preview subset: ${[...unknownKinds].join(", ")}.`);
   }
   if ((stringValue(form.license) ?? "") === "") warnings.add("The vendor license field is empty.");
 

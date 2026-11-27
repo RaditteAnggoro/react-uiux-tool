@@ -7,9 +7,12 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { SourceDraft } from "../engine/draft.js";
+import { MAX_BOARD_PROVIDERS } from "../engine/board-providers.js";
+import { projectRoot as canonicalProjectRoot } from "../engine/safety.js";
 import { pickDirectory } from "./folder-picker.js";
 import { createReportApi } from "./report-routes.js";
 import { runProjectBuild } from "./build.js";
+import { NextPreview } from "./next-preview.js";
 import type { ViteDevServer } from "vite";
 import type {
   AnalysisReport,
@@ -38,6 +41,8 @@ export interface StudioOptions {
   initialPath?: string;
   dev?: boolean;
   recentDirectory?: string;
+  draftDirectory?: string;
+  defaultReportDirectory?: string;
 }
 
 function json(res: ServerResponse, status: number, data: unknown) {
@@ -76,6 +81,7 @@ function mime(file: string) {
       {
         ".html": "text/html; charset=utf-8",
         ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
         ".css": "text/css; charset=utf-8",
         ".svg": "image/svg+xml",
         ".png": "image/png",
@@ -109,29 +115,36 @@ export async function startStudio(options: StudioOptions = {}) {
 
   const draftSnapshotPath = () =>
     path.join(
-      os.tmpdir(),
+      options.draftDirectory ?? os.tmpdir(),
       `uiux-draft-${createHash("sha256").update(current().projectRoot).digest("hex").slice(0, 24)}.json`,
     );
-  const persistDraft = async () => {
-    if (!draft) return;
+  const persistDraft = async (next = draft, requireSnapshot = false) => {
+    if (!next) return;
+    const destination = draftSnapshotPath();
+    const temporary = `${destination}.${randomBytes(8).toString("hex")}.tmp`;
     try {
-      await fs.writeFile(draftSnapshotPath(), JSON.stringify(draft.toSnapshot()), { mode: 0o600 });
-    } catch {
-      // Snapshot persistence is best-effort; the in-memory draft remains authoritative.
+      await fs.writeFile(temporary, JSON.stringify(next.toSnapshot()), { mode: 0o600, flag: "wx" });
+      await fs.rename(temporary, destination);
+    } catch (error) {
+      await fs.unlink(temporary).catch(() => {});
+      if (requireSnapshot) throw new Error("Could not update the local draft snapshot. Try again before discarding changes.", { cause: error });
+      logs.push("Draft changes could not be written to the local recovery snapshot.");
     }
   };
   const clearDraftSnapshot = async () => {
     try {
       await fs.unlink(draftSnapshotPath());
-    } catch {
-      // No snapshot to clear.
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        throw new Error("Could not remove the local draft snapshot. Try again before discarding the draft.", { cause: error });
     }
   };
   const restoreDraft = async () => {
     if (draft) return;
     try {
       const raw = await fs.readFile(draftSnapshotPath(), "utf8");
-      draft = await SourceDraft.fromSnapshot(current().projectRoot, JSON.parse(raw));
+      const recovered = await SourceDraft.fromSnapshot(current().projectRoot, JSON.parse(raw));
+      if (recovered.count || recovered.canRedo) draft = recovered;
     } catch {
       // Missing or invalid snapshot: start without a draft.
     }
@@ -145,21 +158,30 @@ export async function startStudio(options: StudioOptions = {}) {
   let progress = { files: 0, file: "", running: false };
   let mutationBusy = false;
   let previewImpl: import("./preview.js").ProjectPreview | null = null;
+  let nextPreview: NextPreview | null = null;
   const preview = {
     get url() {
-      return previewImpl?.url ?? null;
+      return nextPreview?.url ?? previewImpl?.url ?? null;
     },
     async start(value: AnalysisReport, studioOrigin: string) {
+      await this.stop();
+      if (value.detected.framework === "nextjs") {
+        nextPreview = new NextPreview();
+        return nextPreview.start(value.projectRoot);
+      }
       previewImpl ??= new (await import("./preview.js")).ProjectPreview();
       return previewImpl.start(value, studioOrigin);
     },
     async overlay(patch: SourcePatch | null) {
       await previewImpl?.overlay(patch);
     },
-    async draftOverlay(sources: ReadonlyMap<string, string>) {
-      await previewImpl?.draftOverlay(sources);
+    async refreshStylesheet(file: string) {
+      return (await previewImpl?.refreshStylesheet(file)) ?? false;
     },
-    async design(target: { file: string; componentName: string } | null) {
+    async draftOverlay(sources: ReadonlyMap<string, string>, allowHot = false) {
+      return (await previewImpl?.draftOverlay(sources, allowHot)) ?? false;
+    },
+    async design(target: { file: string; componentName: string; providerIds?: readonly string[] } | null) {
       if (!previewImpl) throw new Error("Start the approved preview first");
       return previewImpl.design(
         target
@@ -172,8 +194,11 @@ export async function startStudio(options: StudioOptions = {}) {
     },
     async stop() {
       const running = previewImpl;
+      const runningNext = nextPreview;
       previewImpl = null;
+      nextPreview = null;
       await running?.stop();
+      await runningNext?.stop();
     },
   };
   const tempDirectories: string[] = [];
@@ -269,20 +294,34 @@ export async function startStudio(options: StudioOptions = {}) {
       logs.push("Recent projects could not be persisted.");
     }
   }
-  async function refreshAfterWrite() {
+  async function refreshAfterWrite(remaining?: SourceDraft | null, cssFile?: string) {
     let warning = false;
-    try { await preview.overlay(null); } catch { warning = true; }
+    let preservedPreview = false;
+    try {
+      if (remaining) {
+        if (preview.url) await preview.draftOverlay(remaining.sources);
+      } else {
+        preservedPreview = !!cssFile && await preview.refreshStylesheet(cssFile);
+        if (!preservedPreview) await preview.overlay(null);
+      }
+    } catch { warning = true; }
     let analysis = current();
-    try { analysis = await analyze(analysis.projectRoot); } catch { warning = true; }
+    try {
+      analysis = await analyze(analysis.projectRoot);
+      if (remaining) analysis = await remaining.analysis();
+    } catch { warning = true; }
     if (warning) {
       sourceChanged = true;
       logs.push("Source was changed, but the preview or analysis could not be refreshed. Re-analyze the project.");
     }
-    return { analysis, refreshFailed: warning };
+    return { analysis, refreshFailed: warning, preservedPreview };
   }
-  const reports = createReportApi({
+  const reports = await createReportApi({
     currentProjectRoot: () => report?.projectRoot ?? null,
     origin: () => origin,
+    settingsDirectory: recentDirectory,
+    defaultDirectory: options.defaultReportDirectory ?? path.join(os.homedir(), "Documents", "React UIUX Reports"),
+    reportSettingsError: () => logs.push("The report folder preference could not be saved."),
   });
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -361,12 +400,19 @@ export async function startStudio(options: StudioOptions = {}) {
           }
           if (url.pathname === "/api/source") {
             const file = string(url.searchParams.get("file"), "source path");
+            const project = current().projectRoot;
+            const expected = url.searchParams.get("expectedProject");
+            if (expected !== null && expected !== project) {
+              json(res, 409, { error: "The project changed. Reopen it to view source.", code: "PROJECT_CHANGED" });
+              return;
+            }
+            const sourceDraft = draft;
             const { readProjectFile, hashSource } = await import("../engine/index.js");
-            const source = draft ? await draft.source(file) : await readProjectFile(current().projectRoot, file);
+            const source = sourceDraft ? await sourceDraft.source(file) : await readProjectFile(project, file);
             json(res, 200, {
               source,
               hash: hashSource(source),
-              draft: !!draft,
+              draft: !!sourceDraft,
             });
             return;
           }
@@ -403,9 +449,9 @@ export async function startStudio(options: StudioOptions = {}) {
         }
         mutationBusy = true;
         locked = true;
-        if (["/api/analyze", "/api/patch", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard", "/api/draft/edit", "/api/draft/edit-group", "/api/draft/undo", "/api/draft/redo", "/api/draft/commit", "/api/draft/discard", "/api/draft/preview", "/api/draft/state"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
+        if (["/api/analyze", "/api/patch", "/api/patch/token", "/api/edit", "/api/edit-group", "/api/apply", "/api/undo", "/api/discard", "/api/draft/edit", "/api/draft/edit-group", "/api/draft/undo", "/api/draft/redo", "/api/draft/commit", "/api/draft/discard", "/api/draft/preview", "/api/draft/state"].includes(url.pathname) && data.expectedProject !== current().projectRoot)
           throw new Error("Project changed in another tab; reopen your project before editing.");
-        if (draft && ["/api/open", "/api/demo", "/api/create", "/api/analyze", "/api/edit", "/api/edit-group", "/api/patch", "/api/apply", "/api/undo"].includes(url.pathname)) {
+        if (draft && ["/api/open", "/api/demo", "/api/create", "/api/analyze", "/api/edit", "/api/edit-group", "/api/patch", "/api/patch/token", "/api/apply", "/api/undo"].includes(url.pathname)) {
           let reopeningSameProject = false;
           if (url.pathname === "/api/open" && typeof data.path === "string") {
             try {
@@ -469,10 +515,12 @@ export async function startStudio(options: StudioOptions = {}) {
           }
           case "/api/preview/start": {
             approved(data);
+            if (current().detected.framework === "nextjs" && data.expectedProject !== current().projectRoot)
+              throw new Error("Approve the Next.js runtime for the current project.");
             const result = await preview.start(current(), origin);
             if (staged) await preview.overlay(staged);
             logs.push(
-              "Started approved instrumented Vite preview on loopback.",
+              `Started approved ${result.kind === "next" ? "Next.js runtime" : "instrumented Vite preview"} on loopback.`,
             );
             json(res, 200, result);
             return;
@@ -484,6 +532,8 @@ export async function startStudio(options: StudioOptions = {}) {
           }
           case "/api/preview/design": {
             approved(data);
+            if (data.expectedProject !== undefined && data.expectedProject !== current().projectRoot)
+              throw new Error("Project changed before the selected Design preview could open.");
             if (data.clear === true) {
               json(res, 200, await preview.design(null));
               return;
@@ -493,7 +543,20 @@ export async function startStudio(options: StudioOptions = {}) {
               data.componentName,
               "design component name",
             );
-            json(res, 200, await preview.design({ file, componentName }));
+            if (data.providerIds !== undefined && (!Array.isArray(data.providerIds) || data.providerIds.length > MAX_BOARD_PROVIDERS))
+              throw new Error("Choose up to four distinct preview providers.");
+            const providerIds = Array.isArray(data.providerIds)
+              ? data.providerIds.map(id => string(id, "provider identifier"))
+              : data.providerId === undefined ? [] : [string(data.providerId, "provider identifier")];
+            json(res, 200, await preview.design({ file, componentName, providerIds }));
+            return;
+          }
+          case "/api/patch/token": {
+            if (staged) throw new Error("Review or discard the pending patch first.");
+            const { createCssTokenPatch } = await import("../engine/patches.js");
+            staged = await createCssTokenPatch(current().projectRoot, string(data.file, "CSS file"),
+              string(data.name, "CSS token"), string(data.expectedHash, "CSS hash"), string(data.value, "CSS value"));
+            json(res, 200, staged);
             return;
           }
           case "/api/patch": {
@@ -509,14 +572,18 @@ export async function startStudio(options: StudioOptions = {}) {
             return;
           }
           case "/api/build": {
-            if (!current().projectRoot) throw new Error("Open a project before building.");
+            const project = current().projectRoot;
+            if (data.approved !== true || data.expectedProject !== project) {
+              json(res, 403, { error: "Approve the build for the current project.", code: "FORBIDDEN" });
+              return;
+            }
             if (buildRunning) {
               json(res, 409, { error: "A build is already running.", code: "BUILD_RUNNING" });
               return;
             }
             buildRunning = true;
             try {
-              const result = await runProjectBuild(current().projectRoot);
+              const result = await runProjectBuild(project);
               json(res, 200, result);
             } finally {
               buildRunning = false;
@@ -535,6 +602,7 @@ export async function startStudio(options: StudioOptions = {}) {
               count: draft.count,
               canRedo: draft.canRedo,
               files: [...draft.sources.keys()],
+              history: draft.history(analysis),
               analysis,
             });
             return;
@@ -549,7 +617,7 @@ export async function startStudio(options: StudioOptions = {}) {
               : await next.editGroup(Array.isArray(data.items) ? data.items as any : []);
             draft = next;
             await persistDraft();
-            json(res, 200, { ...result, count: next.count, canRedo: next.canRedo });
+            json(res, 200, { ...result, count: next.count, canRedo: next.canRedo, files: [...next.sources.keys()] });
             return;
           }
           case "/api/draft/undo":
@@ -558,30 +626,52 @@ export async function startStudio(options: StudioOptions = {}) {
             const patch = url.pathname.endsWith("undo") ? draft.undoChange : draft.redoChange;
             const analysis = url.pathname.endsWith("undo") ? await draft.undo() : await draft.redo();
             await persistDraft();
-            json(res, 200, { analysis, patch, count: draft.count, canRedo: draft.canRedo });
+            json(res, 200, { analysis, patch, count: draft.count, canRedo: draft.canRedo, files: [...draft.sources.keys()] });
             return;
           }
           case "/api/draft/commit": {
             approved(data);
             if (!draft) throw new Error("No draft is open.");
-            const checkpoints = await draft.commit(true);
-            await clearDraftSnapshot();
+            const file = data.file === undefined ? undefined : string(data.file, "draft file");
+            if (data.build === true && file !== undefined) throw new Error("Save & Build requires committing the entire draft.");
+            const project = current().projectRoot;
+            const baselines = new Map(draft.toSnapshot().files.map(entry => [entry.file, entry.original]));
+            const checkpoints = await draft.commit(true, file);
+            const rebased = checkpoints.filter(entry => baselines.get(entry.file) !== entry.before).map(entry => entry.file);
+            const remaining = file === undefined ? null : draft.withoutFile(file);
+            draft = remaining && (remaining.count || remaining.canRedo) ? remaining : null;
+            if (draft) await persistDraft();
+            else await clearDraftSnapshot().catch(error => logs.push(String(error)));
             checkpoint = checkpoints.length === 1 ? checkpoints[0]! : null;
-            draft = null;
-            const refreshed = await refreshAfterWrite();
-            json(res, 200, { ...refreshed, checkpoints: checkpoints.map(({ id, file, appliedAt }) => ({ id, file, appliedAt })) });
+            const refreshed = await refreshAfterWrite(draft);
+            // Keep the mutation lock through build startup so another Studio tab cannot
+            // switch projects or alter the newly committed source in between.
+            const build = data.build === true ? await runProjectBuild(project).catch((error: unknown) => ({
+              ok: false, code: null, output: error instanceof Error ? error.message : String(error), durationMs: 0,
+            })) : undefined;
+            json(res, 200, { ...refreshed, count: draft?.count ?? 0, canRedo: draft?.canRedo ?? false,
+              files: [...(draft?.sources.keys() ?? [])], history: draft?.history(refreshed.analysis), rebased, build,
+              checkpoints: checkpoints.map(({ id, file, appliedAt }) => ({ id, file, appliedAt })) });
             return;
           }
           case "/api/draft/preview": {
             if (!draft) throw new Error("No draft is open.");
-            await preview.draftOverlay(draft.sources);
-            json(res, 200, { ok: true });
+            const hot = await preview.draftOverlay(draft.sources, true);
+            json(res, 200, { ok: true, hot });
             return;
           }
           case "/api/draft/discard": {
             if (!draft) throw new Error("No draft is open.");
-            draft = null;
-            json(res, 200, await refreshAfterWrite());
+            const file = data.file === undefined ? undefined : string(data.file, "draft file");
+            if (file !== undefined && !draft.sources.has(file)) throw new Error("This file has no draft changes to discard.");
+            const remaining = file === undefined ? null : draft.withoutFile(file);
+            const next = remaining && (remaining.count || remaining.canRedo) ? remaining : null;
+            if (next) await persistDraft(next, true);
+            else await clearDraftSnapshot();
+            draft = next;
+            const refreshed = await refreshAfterWrite(draft);
+            json(res, 200, { ...refreshed, count: draft?.count ?? 0, canRedo: draft?.canRedo ?? false,
+              files: [...(draft?.sources.keys() ?? [])], history: draft?.history(refreshed.analysis) });
             return;
           }
           case "/api/edit": {
@@ -642,9 +732,10 @@ export async function startStudio(options: StudioOptions = {}) {
             if (!staged || data.patchId !== staged.id)
               throw new Error("The reviewed patch is no longer available");
             const { applyPatch } = await import("../engine/index.js");
+            const cssFile = staged.scope === "token" ? staged.file : undefined;
             checkpoint = await applyPatch(current().projectRoot, staged, true);
             staged = null;
-            const refreshed = await refreshAfterWrite();
+            const refreshed = await refreshAfterWrite(null, cssFile);
             json(res, 200, {
               ...refreshed,
               checkpoint: {
@@ -668,9 +759,10 @@ export async function startStudio(options: StudioOptions = {}) {
             if (data.expectedCheckpoint !== checkpoint.id)
               throw new Error("Undo checkpoint changed in another tab; no file was changed.");
             const { undoPatch } = await import("../engine/index.js");
+            const { file } = checkpoint;
             await undoPatch(current().projectRoot, checkpoint);
             checkpoint = null;
-            json(res, 200, await refreshAfterWrite());
+            json(res, 200, await refreshAfterWrite(null, file.endsWith(".css") ? file : undefined));
             return;
           }
           case "/api/discard": {
@@ -680,7 +772,10 @@ export async function startStudio(options: StudioOptions = {}) {
             return;
           }
           case "/api/pick-directory": {
-            json(res, 200, await pickDirectory());
+            const startPath = typeof data.startPath === "string" && data.startPath.length <= 4096 && path.isAbsolute(data.startPath)
+              ? await canonicalProjectRoot(data.startPath).catch(() => undefined)
+              : undefined;
+            json(res, 200, await pickDirectory(undefined, undefined, startPath));
             return;
           }
           default:

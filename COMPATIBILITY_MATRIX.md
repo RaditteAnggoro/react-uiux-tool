@@ -2,7 +2,8 @@
 
 Evidence below concerns the tested fixture/pattern only. It is not a guarantee for
 all projects using the same framework or library. Development host: macOS, Node
-24.22.1. Tool versions: React/React DOM 19.3.1, Vite 8.3.5, TypeScript 5.9.3.
+24.22.1 for the earlier generator baseline. Windows Node 24.0.0 was exercised for
+ the November 26 follow-up. Tool versions: React/React DOM 19.3.1, Vite 8.3.5, TypeScript 5.9.3.
 
 | Target / pattern                                    | Status                     | Exercised evidence / boundary                                                                                                                           |
 | --------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -32,15 +33,17 @@ all projects using the same framework or library. Development host: macOS, Node
 | Vite/Webpack static aliases                         | Tested subset              | Object and array aliases; CommonJS `__dirname`, `import.meta.dirname`, and ESM `fileURLToPath(new URL(...))` forms; config is parsed but never executed |
 | Dynamic/computed aliases                            | Inspect/read-only          | Environment-derived, function-generated, regex, escaping, and other unproven aliases are ignored rather than guessed                                    |
 | Module path candidates                              | Tested subset              | Relative/aliased `.js/.jsx/.ts/.tsx/.mjs/.cjs/.mts/.cts` and matching `index.*` candidates                                                              |
-| Next.js App Router / Pages Router                   | Static only                | Framework/route analysis; runtime preview adapter and starter unavailable                                                                               |
+| Next.js App Router / Pages Router | Runtime and static inspection | Files-only App Router starter. An installed Next CLI can run on loopback after approval. The runtime loads saved source and accepts concrete dynamic paths. Show route source opens its indexed file alongside the running preview. Literal basePath, route groups and optional catch-all are covered by the follow-up fixture. |
 | MUI / Ant Design / other component libraries        | Detection only             | Recognition does not provide a full prop schema or safe adapter                                                                                         |
-| Existing Storybook                                  | Static evidence only       | No automatic execution/install; args/decorator import unavailable                                                                                       |
-| Demo Button Board                                   | Exercised fixture          | Default/Loading/Error local scenarios and running Chrome capture; arbitrary provider setup unavailable                                                  |
+| Existing Storybook CSF                              | Static literal subset      | Local exported component and literal args become isolated presets. Dynamic story execution remains open. |
+| Component Boards | Tested subset | JSON and declared string, number, boolean and literal-choice props update on the live isolated component. Saved presets use the current browser tab and can be transferred through a validated versioned JSON file. Up to four eligible local exports can wrap the isolated preview in the chosen order. Board props survive provider changes and a pending tab switch resumes. |
+| VS Code source handoff | Browser link | Code mode links to the saved project file and selected line. |
 | CSS provenance                                      | Partial                    | Grounded declarations/references; no full computed cascade resolver                                                                                     |
-| Global design-token rewrite                         | Unsupported                | Separate scope intent is shown; automatic source mutation blocked                                                                                       |
+| Global design-token rewrite | Tested subset | Style reviews an exact CSS diff for one unique top-level `:root` declaration. Apply and Undo preserve byte formatting and keep the preview document for self-accepting plain CSS. |
 | Visual regression                                   | NOT RUN / unavailable      | No integrated screenshot-difference engine                                                                                                              |
 | macOS Node 24                                       | Development host exercised | Build, generator checks, and local controller workflow run here                                                                                         |
-| Windows / Linux                                     | Unverified locally         | CI configuration is not equivalent to a successful platform run                                                                                         |
+| Windows Node 24 / Chrome | Local development host exercised | Follow-up native application tests, TypeScript checks and Chrome journeys on Windows. Cross-platform CI on the candidate remains open. |
+| Linux | Unverified locally | CI is configured for Linux. A candidate run is required. |
 | ChromeOS Linux                                      | Experimental               | No native ChromeOS filesystem integration tested                                                                                                        |
 
 Recorded generator commands are reproducible from exported `templateFiles` and
@@ -55,19 +58,25 @@ Review [known limitations](KNOWN_LIMITATIONS.md) before expanding a support clai
 | Target / format | Status | Exercised evidence / boundary |
 | --- | --- | --- |
 | Native `.report.json` create/open/edit/save | Tested subset | Schema validation, deterministic serialize/parse round trip, atomic save with SHA-256 conflict check; unit + API + Playwright coverage |
-| Professional templates (blank, invoice, grouped statement, receipt, pre-analysis, approval memo) | Tested | Sixteen catalog templates validate; pre-analysis and approval memo add two-level/matrix headers, merged cells, multiple row rules, flowing narrative, page break and signature areas; synthetic data renders with independently checked totals |
+| Professional templates (blank, invoice, grouped statement, receipt, pre-analysis, approval memo, vehicle collateral) | Tested | Fifteen catalog templates validate; pre-analysis and approval memo add two-level/matrix headers, merged cells, multiple row rules, flowing narrative, page break and signature areas; synthetic data renders with independently checked totals |
 | Print-oriented HTML rendering | Tested subset | Escapes text, blocks unsafe image URLs, deterministic output; HTML export is available |
-| PDF, HTML, CSV, XLSX, DOCX export | Tested subset | PDF follows paginated layout and supports JPEG and 8-bit non-interlaced PNG images with fit and transparency; unsupported images, charts and crosstabs produce warnings. XLSX/DOCX are OOXML zip containers and do not export images. |
-| PDF unsupported characters | Tested subset | Warnings count replacement characters in text actually rendered, including bound fields and table rows; PDF still uses limited fonts. |
-| Report browsing and entry | Tested subset | Home opens Report Studio; bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion; symlink/excluded paths are skipped. The project rail does not contain a report shortcut. |
+| PDF, HTML, CSV, XLSX, DOCX export | Tested subset | PDF follows paginated layout and rotates objects around their box center. It renders charts, crosstabs, JPEG and supported PNG images. Limits on fonts, images and content that exceeds the frame produce warnings. XLSX writes a worksheet per table. DOCX writes the report title and tables. |
+| Code 128 and QR Code | Tested subset | Native Design, HTML and PDF share local geometry checked against the previous encoder. The browser chunk dropped from 928.70 kB to 178.11 kB minified. Printer and scanner evidence remains open. |
+| Tabular mapping, PDF and subreports | Tested subset | Map CSV/TSV columns or an XLSX worksheet into sample data. Import PDF pages as images or extract editable left-to-right text, including rotation, experimentally. Copy editable sections or link compatible native reports from the same folder. Literal parameter overrides are isolated per link in preview and PDF. |
+| Sample data, grouping and pagination | Tested subset | Editable field and required rules, cross-section grouping, content/position locks, output visibility, image paste with Undo, Chromium touch drag and pen resize simulation, keep-with-next for fixed sections, and 80 mm / A4 landscape pagination. |
+| PDF unsupported characters | Tested subset | Warnings count replacement characters in text actually rendered, including bound fields and table rows; PDF supports WinAnsi, including curly quotes, em dash, Euro and ellipsis. |
+| Report browsing and entry | Tested subset | Home opens Report Studio. The last chosen folder is restored across server restarts, and `Documents/React UIUX Reports` is the default. Bounded browse lists `.report.json` and `.yrf` (depth 2) with `public/rpt` suggestion. Symlink and excluded paths are skipped. |
+| Windows folder selection | Tested browser/API subset | Launcher, cancellation/fallback simulation, saved folder and nested Unicode reports are exercised. The latest candidate still needs evidence for the interactive Explorer dialog, selection and focus return on the target machine. |
 | Native table editing and PDF cells | Tested subset | Configure columns, static rows or dataset binding, numeric format, header and border; PDF draws individual cells and warns on estimated text clipping. Complex merged cells and vendor parity are not covered. |
-| Native Code tab | Tested subset | JSON draft is validated through `/api/reports/validate`; invalid text is rejected without touching the draft |
-| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry can be edited; the palette adds objects and static table/form layouts. A single Save replaces the opened original for supported caption, data-field, geometry, style, structure and source changes with a content-hash conflict check and no backup; unsupported/scripted vendor edits are refused with the draft preserved. Creation and edits are **not vendor-validated** |
+| Native Code tab | Tested subset | Selection jumps to its object by ID and focuses the JSON editor. Validation preserves the last valid report. |
+| `.yrf` inspector + experimental writer | Tested subset | Existing scalar object values and supported geometry can be edited; the palette adds objects and static table/form layouts. Save replaces the opened original after a content-hash check. Code Save copy uses the same unique-key and protected-field checks. Design can select explicit pages and flag stacked sections beyond the paper height. Selected format fields are editable. Explicit Code 128/QR values, basic RTF and same-folder .yrf link navigation work in Design. Creation has fidelity warnings. Code reveals the selected object's path. Participating Studio processes coordinate with a sibling lock. Print parity with vendor output is unverified. |
+
+React Design has a Chromium touch regression for canceled and completed moves. Cancellation restores the canvas and only a completed move stages a draft.
 
 React Style includes a basic formatting property selector for supported inline JSX
 styles; report presets and automatic list creation are not shared with React or `.yrf`.
-Report multi-selection Align/Group requires the same band. PDF rich formatting emits
-an export warning when the currently detected unsupported properties are used.
+Native Report Studio supports cross-section groups. Align uses one section at a time.
+PDF rich formatting emits an export warning when detected properties exceed its support.
 
 Native A4 canvas has zoom, visual grid and rulers; the YRF canvas uses a separate raw-unit ruler and zoom. Design aids do not alter report output. Native rectangle fill/border rendering is exercised in HTML and PDF; YRF color output remains vendor-unverified.
 
@@ -75,12 +84,9 @@ Native tested subset: multi-page rows and repeated/optional headings, multi-leve
 
 Seamless UX Phase D slice (13 November 2026): drag gestures are measured—five pointer
 moves produce **zero** `/api/draft/edit*` requests and zero `/api/build` requests; pointer-up
-produces exactly one draft command and the preview refreshes once. The canvas still uses a
-cache-busted iframe reload for draft sync because a synthetic Vite `js-update` was not
-accepted reliably by the React adapter (attempted and reverted). The blocking preview
-"starting" overlay is no longer used for draft refresh; inline draft status remains.
-Not achieved: zero-reload editing, targeted HMR, incremental per-file analysis and
-p50/p95 frame/latency benchmarks. Tab switch still navigates the shared preview route.
+produces exactly one draft command and the preview refreshes once. That release used an iframe refresh for draft sync. The current Vite adapter uses React Fast
+Refresh for supported isolated JSX component modules. The fixture checks mounted state and the document
+identity during Apply and Undo. Other changes can refresh the iframe.
 
 Seamless UX Phase C (13 November 2026): route-based page tabs are capped at three,
 activate an existing route instead of duplicating, persist per-tab selection/inspector/zoom,
@@ -152,7 +158,7 @@ collapse to one source element, and vendor/OS coverage is unchanged.
 
 Advanced-table and pagination increment: the native inspector supports header matrices, body merges and multiple row rules; `pageBreakBefore` starts a new page, and sections can be renamed and reordered. HTML and PDF use page-relative merge coordinates and keep a merge together when it fits. PDF still simplifies some styling; PDF/XLSX/DOCX warn about advanced-table fidelity. Coverage is limited to synthetic fixtures; no WaiReport comparison exists.
 
-Native images support horizontal and vertical positioning within the frame for contain/cover in Design, HTML and PDF. A freeform crop rectangle is not supported; YRF image rendering remains unverified against WaiReport.
+Native images support contain/cover positioning and an editable crop rectangle for embedded assets. The crop replaces the draft image with a PNG and supports Undo/Redo. YRF image rendering remains an approximate local preview.
 
 Native Layers supports selecting, searching and changing object order within one
 section as an undoable draft. Synthetic HTML/PDF checks verify drawing in object order;

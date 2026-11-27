@@ -4,6 +4,20 @@ Date: 3 November 2026. Version: 0.1.0. Implementation coverage is listed here
 honestly. The source repository is prepared for public GitHub publication; the npm
 package has not been published.
 
+## Studio follow-up (25 November 2026)
+
+- Approved Save can rebase external changes on separate lines. Same-line or
+  overlapping changes preserve the draft and show a conflict.
+- The project wizard can generate a files-only Next.js App Router starter.
+  Installed App and Pages Router projects can start an approved loopback preview
+  of saved source. The instrumented source editor continues to use the Vite adapter.
+- Report Studio can map CSV, TSV and XLSX columns into sample data, insert PDF pages
+  as images, copy editable sections from a native report, and render Code 128 and QR Code.
+
+The sections below record earlier milestones. See
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for the current boundaries and the
+[active backlog](docs/IMPLEMENTATION_BACKLOG_AND_YRF_COMPARISON.md) for open issues.
+
 ## Implemented vertical slices
 
 - Local Node controller/CLI and bundled React/Vite Studio; session capability,

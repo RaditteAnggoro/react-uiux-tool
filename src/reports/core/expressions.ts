@@ -41,7 +41,7 @@ type Token =
 
 class ExpressionError extends Error {}
 
-function tokenize(source: string): Token[] {
+function tokenize(source: string, onIdentifier?: (value: string, offset: number) => void): Token[] {
   const tokens: Token[] = [];
   let index = 0;
   while (index < source.length) {
@@ -78,6 +78,7 @@ function tokenize(source: string): Token[] {
     const identifier = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/.exec(rest);
     if (identifier) {
       tokens.push({ type: "ident", value: identifier[0] });
+      onIdentifier?.(identifier[0], index);
       index += identifier[0].length;
       continue;
     }
@@ -91,6 +92,25 @@ function tokenize(source: string): Token[] {
   }
   tokens.push({ type: "eof" });
   return tokens;
+}
+
+/** Replace parameter references outside quoted text without reformatting the expression. */
+export function renameExpressionParameters(source: string, rename: (path: string) => string): string {
+  if (source.length > MAX_LENGTH) return source;
+  let output = "";
+  let cursor = 0;
+  try {
+    tokenize(source, (identifier, offset) => {
+      const next = rename(identifier);
+      if (next === identifier) return;
+      output += source.slice(cursor, offset) + next;
+      cursor = offset + identifier.length;
+    });
+  } catch {
+    // Leave invalid expressions intact for the renderer's existing error reporting.
+    return source;
+  }
+  return output + source.slice(cursor);
 }
 
 type Ast =

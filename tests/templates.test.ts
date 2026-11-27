@@ -36,16 +36,34 @@ test('creation rejects traversal, nonempty folders, files, unknown options, and 
     assert.equal(await readFile(path.join(parentDirectory, 'taken', 'keep.txt'), 'utf8'), 'do not change');
     await writeFile(path.join(parentDirectory, 'a-file'), 'keep');
     await assert.rejects(createProject({ parentDirectory, name: 'a-file' }), /real directory/);
-    try {
-      await symlink(outside, path.join(parentDirectory, 'linked'), 'dir');
-      await assert.rejects(createProject({ parentDirectory, name: 'linked' }), /real directory/);
-      assert.deepEqual(await readdir(outside), []);
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error; }
-    await assert.rejects(createProject({ parentDirectory, name: 'next-app', framework: 'next' }), /Vite React/);
+    await symlink(outside, path.join(parentDirectory, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(createProject({ parentDirectory, name: 'linked' }), /real directory/);
+    assert.deepEqual(await readdir(outside), []);
+    await assert.rejects(createProject({ parentDirectory, name: 'app', framework: 'invalid' as never }), /Unknown project framework/);
     await assert.rejects(createProject({ parentDirectory: '.', name: 'app' }), /absolute/);
     await assert.rejects(createProject({ parentDirectory: '//server/share', name: 'app' }), /UNC|network/);
     await assert.rejects(createProject({ parentDirectory, name: 'app', template: 'unknown' as never }), /Unknown/);
   } finally { await rm(parentDirectory, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test("Next wizard generates nested App Router files without installing dependencies", async () => {
+  const parentDirectory = await mkdtemp(path.join(os.tmpdir(), "uiux-next-template-"));
+  try {
+    const input = { parentDirectory, name: "Next local", framework: "next" as const, styling: "tailwind" as const };
+    const plan = await previewCreation(input);
+    assert.deepEqual(await readdir(parentDirectory), []);
+    assert.ok(plan.files.includes("src/app/page.tsx"));
+    assert.ok(plan.files.includes("postcss.config.mjs"));
+    const project = await createProject(input);
+    assert.match(await readFile(path.join(project.targetDirectory, "src/app/layout.tsx"), "utf8"), /<html lang=/);
+    assert.match(await readFile(path.join(project.targetDirectory, "src/App.tsx"), "utf8"), /^'use client'/);
+    assert.ok(!(await readdir(project.targetDirectory)).includes("node_modules"));
+    const manifest = JSON.parse(await readFile(path.join(project.targetDirectory, "package.json"), "utf8"));
+    assert.match(manifest.scripts.dev, /^next dev --hostname 127\.0\.0\.1$/);
+    assert.ok(manifest.dependencies.next);
+  } finally {
+    await rm(parentDirectory, { recursive: true, force: true });
+  }
 });
 
 test('all shipped template/style combinations parse as TSX and have actual styling configuration', () => {

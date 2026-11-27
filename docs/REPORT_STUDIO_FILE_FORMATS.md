@@ -1,8 +1,6 @@
 # Report Studio — file format capability matrix
 
-Status: P0 deliverable, 2026-11-06. This document records **decisions and labels**,
-not implemented behaviour. Every capability below is a product claim and must match
-code plus tests before it is advertised in the UI.
+The matrix describes the format operations available in Report Studio and their current limits.
 
 ## Legend
 
@@ -21,13 +19,13 @@ code plus tests before it is advertised in the UI.
 | Format | Create | Open / inspect | Edit | Export / render | Fidelity policy |
 | --- | --- | --- | --- | --- | --- |
 | `.report.json` (native RDM v1) | **P1 — implemented** | **P1 — implemented** | **P1 — implemented** | N/A (source) | Canonical lossless editable source; versioned schema. |
-| `.yrf` / `.YRF` (WaiReport) | Experimental (acknowledged, unverified) | **Read-only inspector shipped** | Editable Subset: caption + numeric geometry, saved as a sibling copy only | Blocked | Original never rewritten. Producer is inferred from three samples, not vendor-validated; licence still unresolved. |
-| `.csv` / `.tsv` | Export Only (P3) | Import as Data (P4) | Not a design file | Export Only (P3 — implemented) | Data rows only; no page geometry. Formula-injection escaping implemented. |
-| `.xlsx` | Export Only (P4) | Import as Data (P2) | Editable Subset (tables only, later) | Export Only (P4) | Tabular layout; spreadsheets are not page designers. |
-| `.pdf` | Export Only (P3 — implemented) | Preview Only (P3) | Unsupported | Export Only (P3 — implemented) | Dependency-free native PDF writer; existing PDF is never converted into an editable template. |
-| `.html` | Export Only (P3 — implemented) | — | — | Export Only (P3 — implemented) | Print-ready rendering of the native document. |
-| `.docx` | Export Only (P4) | — | Unsupported | Export Only (P4) | Word layout may differ from PDF; warnings are mandatory. |
-| `.png` / `.svg` | Export Only (P4, snapshot) | — | — | Export Only | Snapshot, not a template. |
+| `.yrf` / `.YRF` (WaiReport) | Experimental | Experimental | Editable subset with explicit in-place Save and hash check | Approximate design preview | Scripted objects are protected. Vendor rendering, units and compatibility require verification. |
+| `.csv` / `.tsv` | Unsupported | Import as Data | Unsupported | CSV export | Rows and columns only. CSV export guards formula-like cells. |
+| `.xlsx` | Unsupported | Import as Data | Unsupported | Export only | Choose and map one worksheet. Export writes a worksheet per table. |
+| `.pdf` | Unsupported | Import pages as images | Unsupported | Export only | Insert one to six pages. Export warns about unsupported text and frame limits. |
+| `.html` | Unsupported | Unsupported | Unsupported | Export only | Print-ready rendering of the native document. |
+| `.docx` | Unsupported | Unsupported | Unsupported | Export only | Includes the report title and tables. |
+| `.png` / `.svg` | Unsupported | Unsupported as a report | Unsupported | Unsupported | Report Studio can embed supported PNG images in native reports. |
 | `.jrxml` / `.rdl` / `.rpt` / `.repx` / `.frx` | Unsupported | Unsupported | Unsupported | Unsupported | Distinct grammars; no generic import claim. |
 | Vendor runtime folder (e.g. `waiReport/`) | — | Read-only inventory | — | Requires Licensed Renderer | Never bundled, copied, or executed by the default build. |
 
@@ -43,5 +41,5 @@ code plus tests before it is advertised in the UI.
 
 - Initially, only `.report.json` was editable and exports were deferred. Current
   implemented subsets are listed in the table above.
-- `.yrf` inspection and an experimental copy-only editor are available; creation
-  and geometry remain unverified by the vendor renderer and are not production-certified.
+- The YRF editor started with copy-only inspection and editing. Current saves update
+  the opened file after approval and a hash check. Vendor verification remains open.

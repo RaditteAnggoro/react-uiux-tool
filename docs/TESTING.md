@@ -13,8 +13,14 @@ process.
   **Preview draft** unless they are specifically testing that button.
 - **Selection:** multi-select uses Ctrl/Meta/Shift-click or marquee; selection may be
   remapped after commit, so re-select after Save when a journey needs it.
-- **Report Studio:** edits are draft changes until Save; `.yrf` edits default to
-  **Save copy**. Only the explicit **Save** / **Save original** actions write files.
+- **Report Studio:** choose **Open existing report** or **Create new report** in
+  the launcher before using the report folder. Native and YRF edits stay in a
+  draft until **Save**. YRF Save checks the original file hash and updates it in
+  place. Wait for the current save to finish before reading the file.
+- **Exports:** when the warning dialog opens, test that there is no download
+  until the user confirms. Test successful one-click export with a clean format.
+- **Test isolation:** every Playwright test starts a new loopback controller with
+  its own draft snapshot and recent-project directory.
 - **Assertions:** prefer user-visible outcomes (draft banner, status region, saved file
   contents after Save) over internal implementation strings.
 

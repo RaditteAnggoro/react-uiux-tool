@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import ReportDialog from "./ReportDialog";
 
 type Topic = { title: string; intro: string; steps: string[]; note?: string };
 
@@ -6,27 +7,9 @@ type Topic = { title: string; intro: string; steps: string[]; note?: string };
 export default function ReportHelp({ language, yrf = false }: { language: "en" | "id"; yrf?: boolean }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLElement>(null);
-  const close = useRef<HTMLButtonElement>(null);
   const id = language === "id";
   const title = id ? "Panduan report" : "Report guide";
-  const dismiss = () => { setOpen(false); trigger.current?.focus(); };
-  useEffect(() => {
-    if (!open) return;
-    close.current?.focus();
-    const keyboard = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); dismiss(); }
-      if (event.key === "Tab" && dialog.current) {
-        const controls = Array.from(dialog.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]'));
-        const first = controls[0], last = controls[controls.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-      }
-    };
-    window.addEventListener("keydown", keyboard);
-    return () => window.removeEventListener("keydown", keyboard);
-  }, [open]);
+  const dismiss = () => setOpen(false);
   const topics: Topic[] = id ? [
     { title: "Mulai", intro: "Dari folder sampai hasil akhir", steps: ["Pilih folder report, lalu buka report dari daftar atau buat report baru dari template.", "Gunakan Structure di kiri untuk memilih bagian atau objek. Klik tanda panah untuk membuka dan menutup kelompok.", "Canvas di tengah adalah tempat menyusun report. Gunakan Zoom, Grid, dan Penggaris untuk merapikan; panel kanan mengatur objek yang dipilih.", yrf ? "Untuk YRF, gunakan satu tombol Simpan. File asli yang dibuka diperbarui in-place dengan cek konflik hash; canvas tetap perkiraan." : "Isi Sample data bila diperlukan, lalu periksa Preview sebelum Save atau Export."] },
     { title: "Tambah dan atur objek", intro: "Susun isi report di canvas", steps: ["Pilih band atau bagian tujuan di Structure. Klik objek di palette atau tarik dan lepas ke band pada halaman.", "Klik objek pada halaman atau Structure untuk memilihnya. Tarik objek untuk memindahkan; tarik handle di sisi atau sudut untuk mengubah ukuran.", "Gunakan panel kanan untuk mengisi teks, posisi, ukuran, warna, font, dan properti lain yang tersedia.", "Gunakan Undo jika tersedia. Pada tabel native, isi grup judul yang sama pada kolom bersebelahan dan atur pengulangan header. Layout tabel YRF tetap statis."] },
@@ -44,18 +27,16 @@ export default function ReportHelp({ language, yrf = false }: { language: "en" |
   ];
   const topic = topics[active]!;
   return <>
-    <button ref={trigger} className="rs-help-button" type="button" onClick={() => { setActive(0); setOpen(true); }} aria-label={title}>
+    <button className="rs-help-button" type="button" onClick={() => { setActive(0); setOpen(true); }} aria-label={title}>
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.7 9.3a2.4 2.4 0 0 1 4.7.7c0 1.7-2.4 2-2.4 3.7M12 17h.01" strokeLinecap="round"/></svg>
       <span>{title}</span>
     </button>
-    {open && <div className="rs-help-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
-      <section ref={dialog} className="rs-help-dialog" role="dialog" aria-modal="true" aria-labelledby="rs-help-title">
+    {open && <ReportDialog className="rs-help-dialog" label={title} onCancel={dismiss} dismissOnBackdrop>
         <header className="rs-help-header"><div><span className="rs-help-eyebrow">REPORT STUDIO</span><h2 id="rs-help-title">{title}</h2><p>{id ? "Panduan praktis untuk membuat dan mengubah report" : "A practical guide to creating and editing reports"}</p></div>
-          <button ref={close} className="rs-help-close" type="button" onClick={dismiss} aria-label={id ? "Tutup" : "Close"}>×</button></header>
+          <button className="rs-help-close" type="button" onClick={dismiss} aria-label={id ? "Tutup" : "Close"}>×</button></header>
         <div className="rs-help-layout"><nav className="rs-help-nav" aria-label={id ? "Topik panduan" : "Guide topics"}>{topics.map((item, index) => <button key={item.title} type="button" className={active === index ? "active" : ""} aria-current={active === index ? "page" : undefined} onClick={() => setActive(index)}><span>{String(index + 1).padStart(2, "0")}</span>{item.title}</button>)}</nav>
           <article className="rs-help-content"><span className="rs-help-count">{id ? "TOPIK" : "TOPIC"} {active + 1} / {topics.length}</span><h3>{topic.title}</h3><p>{topic.intro}</p><ol>{topic.steps.map((step) => <li key={step}>{step}</li>)}</ol>{topic.note && <div className="rs-help-note">{topic.note}</div>}</article></div>
         <footer className="rs-help-footer"><span>{id ? "Panduan tersedia tanpa internet" : "Available offline"}</span><div><button type="button" disabled={active === 0} onClick={() => setActive(active - 1)}>{id ? "Sebelumnya" : "Previous"}</button><button className="rs-help-next" type="button" onClick={() => active === topics.length - 1 ? dismiss() : setActive(active + 1)}>{active === topics.length - 1 ? (id ? "Selesai" : "Done") : (id ? "Selanjutnya" : "Next")}</button></div></footer>
-      </section>
-    </div>}
+    </ReportDialog>}
   </>;
 }

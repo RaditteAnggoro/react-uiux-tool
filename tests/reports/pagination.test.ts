@@ -16,6 +16,69 @@ function rows(count: number) {
   }));
 }
 
+test("a fixed heading can keep the first row of its following table on the same page", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.find(band => band.id === "band-lines")!;
+  document.bands = [
+    { id: "prior", kind: "detail", height: contentHeight(document) - 13, elements: [] },
+    { id: "heading", kind: "detail", height: 8, keepWithNext: true, elements: [] },
+    table,
+  ];
+  const options = { data: { lines: rows(4) } };
+  let pages = paginateReport(document, options);
+  assert.deepEqual(pages[0]!.bands.map(place => place.band.id), ["prior"]);
+  assert.deepEqual(pages[1]!.bands.map(place => place.band.id), ["heading", table.id]);
+  table.pageBreakBefore = true;
+  pages = paginateReport(document, options);
+  assert.deepEqual(pages[0]!.bands.map(place => place.band.id), ["prior", "heading"]);
+});
+
+test("keep with next reserves the full initial table merge when it fits", () => {
+  const document = buildTemplate("invoice");
+  const table = document.bands.find(band => band.id === "band-lines")!;
+  table.elements.find(element => element.type === "table")!.props.merges = [{ row: 0, col: 0, rowSpan: 2 }];
+  document.bands = [
+    { id: "prior", kind: "detail", height: contentHeight(document) - 25, elements: [] },
+    { id: "heading", kind: "detail", height: 8, keepWithNext: true, elements: [] },
+    table,
+  ];
+  const data = rows(4);
+  const pages = paginateReport(document, { data: { lines: data } });
+  assert.deepEqual(pages[0]!.bands.map(place => place.band.id), ["prior"]);
+  assert.deepEqual(pages[1]!.bands.map(place => place.band.id), ["heading", table.id]);
+  assert.deepEqual(pages.flatMap(page => page.bands.flatMap(place => place.rows ?? [])), data);
+});
+
+test("A4 landscape and 80 mm receipt pages preserve all rows in HTML and PDF", async () => {
+  const { exportReport } = await import("../../src/reports/index.js");
+  const { createPage, mmToPt } = await import("../../src/reports/core/geometry.js");
+  for (const page of [
+    createPage({ orientation: "landscape" }),
+    createPage({ size: "custom", custom: { width: 80, height: 110 }, margins: { top: 5, right: 5, bottom: 5, left: 5 } }),
+  ]) {
+    const document = buildTemplate("invoice");
+    document.page = page;
+    const table = document.bands.find(band => band.id === "band-lines")!;
+    const element = table.elements[0]!;
+    element.box.width = Math.min(65, element.box.width);
+    element.props.columns = [{ key: "description", label: "Item", width: 65 }];
+    document.bands = [table];
+    const data = { lines: rows(55) };
+    const pages = paginateReport(document, { data });
+    assert.ok(pages.length > 1);
+    assert.deepEqual(pages.flatMap(page => page.bands.flatMap(entry => entry.rows ?? [])), data.lines);
+    assert.ok(pages.every(page => page.bands.some(entry => !!entry.rows?.length)));
+    const html = renderReportHtml(document, { data });
+    const pdf = Buffer.from(exportReport(document, "pdf", data).bytes).toString("latin1");
+    assert.equal((html.match(/Baris \d+/g) ?? []).length, 55);
+    assert.equal((pdf.match(/\(Baris \d+\)/g) ?? []).length, 55);
+    const media = [...pdf.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)];
+    assert.equal(media.length, pages.length);
+    assert.ok(media.every(match => Math.abs(Number(match[1]) - mmToPt(page.width)) < .02 &&
+      Math.abs(Number(match[2]) - mmToPt(page.height)) < .02));
+  }
+});
+
 test("a long table paginates deterministically and repeats the page header", () => {
   const document = buildTemplate("invoice");
   const data = {

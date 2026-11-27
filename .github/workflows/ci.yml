@@ -19,8 +19,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run docs:check
+      - run: npm run notices:check
       - run: npm run build
   browser:
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +41,21 @@ jobs:
         run: npx playwright install --with-deps chromium
       - if: runner.os != 'Linux'
         run: npx playwright install chromium
-      # Full Report Studio journeys are being migrated to the new single-Save/start-launcher
-      # flow. Keep the stable React Studio suite plus focused Report smoke coverage green.
-      - run: npx playwright test tests/e2e/studio.spec.ts tests/e2e/report-smoke.spec.ts
+      - run: node --import tsx scripts/prepare-next-fixture.ts
+      - name: Record browser environment
+        run: |
+          git rev-parse HEAD
+          node --version
+          npx playwright --version
+          node --input-type=module -e "import { chromium } from '@playwright/test'; const browser = await chromium.launch(); console.log(process.platform, browser.version()); await browser.close();"
+      - name: Run browser journeys
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser-report.json
+        run: node node_modules/@playwright/test/cli.js test --retries=1 --global-timeout=900000 "--reporter=line,json"
+      - name: Keep browser results and first-attempt traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-results-${{ matrix.os }}
+          path: test-results/
+          retention-days: 14

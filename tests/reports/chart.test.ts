@@ -46,4 +46,10 @@ test("pie and line charts produce valid SVG geometry", () => {
   });
   assert.match(line, /<polyline points=/);
   assert.match(line, /<circle /);
+  const signed = renderChartSvg({ type: "bar", labels: ["Gain", "Loss"],
+    series: [{ label: "Balance", values: [5, -5] }], width: 140, height: 70 });
+  assert.match(signed, />-5<\/text>/);
+  const bars = [...signed.matchAll(/<rect x="[^"]+" y="(\d+(?:\.\d+)?)" width="[^"]+" height="(\d+(?:\.\d+)?)" fill="#1D3557"/g)];
+  assert.ok(Number(bars[1]?.[1]) > Number(bars[0]?.[1]));
+  assert.equal(bars[1]?.[2], bars[0]?.[2]);
 });

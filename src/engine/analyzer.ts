@@ -4,6 +4,9 @@ import path from "node:path";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { cssTokenDeclarations } from "./css-tokens.js";
+import { findNextCli, nextRouteFromFile, readNextBasePath } from "./next.js";
+import { readStoryPresets } from "./story-presets.js";
 import {
   projectRoot,
   readProjectFile,
@@ -791,6 +794,7 @@ export async function analyzeProject(
   );
   if (paths.some((f) => /components\/ui\//.test(f)))
     libs.push("local-ui-components (unverified)");
+  const nextBasePath = framework === "nextjs" ? await readNextBasePath(root) : undefined;
   const report: AnalysisReport = {
     schemaVersion: 1,
     projectRoot: root,
@@ -798,6 +802,7 @@ export async function analyzeProject(
     analyzedAt: new Date().toISOString(),
     detected: {
       framework,
+      ...(nextBasePath ? { nextBasePath } : {}),
       router:
         framework === "nextjs"
           ? paths.some((f) => /^(src\/)?app\//.test(f))
@@ -885,6 +890,19 @@ export async function analyzeProject(
         imports,
         errors: [],
       });
+      if (file.endsWith(".css")) {
+        try {
+          for (const token of cssTokenDeclarations(text)) {
+            report.styleTokens.push({ name: token.name, value: token.value, selector: token.selector,
+              editable: token.editable, source: { file, start: token.start, end: token.end, line: token.line, column: token.column },
+              consumers: [] });
+          }
+          continue;
+        } catch {
+          // Fall back to inspection hints for styles outside the supported CSS grammar.
+          complete = false;
+        }
+      }
       for (const m of text.matchAll(/(--[\w-]+)\s*:\s*([^;{}]+)[;]/g)) {
         const offset = m.index ?? 0;
         const p = sf.getLineAndCharacterOfPosition(offset);
@@ -1188,18 +1206,16 @@ export async function analyzeProject(
       ts.forEachChild(n, (c) => findElements(c, nextParent));
     }
     findElements(sf, null);
-    if (framework === "nextjs" && /(^|\/)(?:page|index)\.[jt]sx?$/.test(file)) {
-      let route =
-        file
-          .replace(/^(src\/)?(?:app|pages)/, "")
-          .replace(/\/(?:page|index)\.[jt]sx?$/, "")
-          .replace(/\/\([^/]+\)/g, "") || "/";
+    const discoveredNextRoute = framework === "nextjs" ? nextRouteFromFile(file) : null;
+    const nextRoute = discoveredNextRoute && nextBasePath
+      ? nextBasePath + (discoveredNextRoute === "/" ? "" : discoveredNextRoute)
+      : discoveredNextRoute;
+    if (nextRoute !== null) {
       report.routes.push({
-        path: route,
+        path: nextRoute,
         file,
-        previewState: "UNSUPPORTED",
-        reason:
-          "Next.js runtime preview is unavailable in this release; static inspection remains available.",
+        previewState: "CONFIG_REQUIRED",
+        reason: "Approve Next.js loopback runtime to render this route.",
       });
     }
   }
@@ -1358,16 +1374,19 @@ export async function analyzeProject(
       reason: "Approve trusted local Vite preview to render this route.",
     });
   if (framework === "nextjs") {
+    const installed = !!await findNextCli(root);
+    const reason = installed
+      ? "Approve the installed Next.js runtime. It renders saved source and may run application code."
+      : "The project's local Next.js CLI is missing. Install its dependencies before starting the runtime.";
     report.readiness = {
       ...report.readiness,
-      previewCommand: null,
-      state: "UNSUPPORTED",
-      reason:
-        "Next.js runtime preview is unavailable in this release. Static inspection remains available.",
+      dependenciesInstalled: installed,
+      previewCommand: installed ? "dev" : null,
+      state: installed ? "CONFIG_REQUIRED" : "UNSUPPORTED",
+      reason,
     };
-    warnings.push(
-      "Next.js runtime preview is unavailable in this release. Static inspection remains available.",
-    );
+    if (!installed) warnings.push(reason);
+    if (!installed) for (const route of report.routes) { route.previewState = "UNSUPPORTED"; route.reason = reason; }
   }
   if (framework === "unknown") {
     warnings.push(
@@ -1379,10 +1398,18 @@ export async function analyzeProject(
     warnings.push(
       "Recognized UI libraries are inspectable; editing requires resolved prop contracts.",
     );
-  if (report.stories.length)
+  if (report.stories.length) {
+    report.storyPresets = [];
+    for (const file of report.files) {
+      if (report.storyPresets.length >= 200) break;
+      if (!/\.stories\.[jt]sx?$/.test(file.file) || file.errors.length) continue;
+      const source = sources.get(file.file);
+      if (source) report.storyPresets.push(...readStoryPresets(source, file, report.components).slice(0, 200 - report.storyPresets.length));
+    }
     warnings.push(
-      "Stories were discovered without execution. Dynamic args and decorators are not imported.",
+      "Story files are inspected as source. Literal args from supported stories are available as isolated component presets.",
     );
+  }
   warnings.push(
     "Static analysis cannot prove all runtime references, style cascade, or network effects.",
   );
